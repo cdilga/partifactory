@@ -1,0 +1,12 @@
+partifactory
+Copyright (c) 2026 Chris Dilger
+
+partifactory is inspired by shartifacts by Lane Birmingham (birmo),
+https://github.com/LaneBirmingham/shartifacts, released under the MIT License.
+Its design (MCP tool shapes, Claude artifact compatibility matrix, security
+checklist) served as the reference specification. Any code or text adapted
+from shartifacts retains its original copyright notice:
+
+  Copyright (c) 2026 Lane Birmingham
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software ... (MIT License, see the shartifacts LICENSE file)

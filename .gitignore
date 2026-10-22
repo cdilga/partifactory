@@ -1,0 +1,17 @@
+# local CLI caches and state (cf CLI writes .cloudflare/)
+.cloudflare/
+.wrangler/
+.env
+.env.*
+*.token
+*.pem
+*.key
+site.toml
+site/
+/data/
+target/
+.DS_Store
+# review scratch
+.review-prompt.md
+.ntm/
+REVIEW-*.md
