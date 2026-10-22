@@ -1,13 +1,16 @@
 # partifactory — plan
 
 > A home for the things the admin, his family and their agents make: pages, React tools,
-> docs, decks, diagrams. Each one is a **part**. Every part gets its own origin with a name that means something (`photofinder-part.example.com`),
-> every view of it is a capability, and every version is just a manifest of hashes. Serving it is built to be fast and measured
-> against nginx and HAProxy.
+> docs, decks, diagrams. Each one is a **part**, with its own origin and a name that means something (`photofinder-part.example.com`).
+> Every view of a part is a grant, every version is a manifest of hashes, and agents connect with their own OAuth tokens, separate from any person's.
+> Serving is built to be fast and measured against nginx and HAProxy.
 
 **Credit.** This project takes its idea from **[shartifacts](https://github.com/LaneBirmingham/shartifacts)
 by Lane Birmingham (birmo)**, MIT-licensed. It's a reimagining for a different setup, not a fork.
 Any code or text adapted from it keeps Lane's MIT notice in `NOTICE` and gets a credit in the README.
+
+**Site config is private.** Everything specific to one deployment (IdP inventory, flow and stage names, group names, account facts, deploy target)
+lives in a separate private repo (`partifactory-site`). Secrets live only in Gitea Actions secrets. This plan uses `example.com` hostnames, which are public DNS anyway, and nothing else site-specific.
 
 ---
 
@@ -19,80 +22,118 @@ I read the repo (Go server ~21k lines, plain JS UI, docs). The parts worth keepi
 | --- | --- |
 | Agents connect over **MCP**. `edits` use `{old_str,new_str}` with a `base_version` compare-and-set | Same shape as Claude's artifact tools, so agents already know how to use it |
 | **Immutable numbered versions**, restore = append | You never lose work, and you can say "what changed?" |
-| **Claude-artifact compatibility**: `window.storage`, `claude.use("db"/"user"/"comments")`, React/TSX + common libs | Anything Claude writes runs here unchanged |
+| **Claude-artifact compatibility**: `window.storage`, `claude.use("db"/"user"/"comments"/"artifact")`, React/TSX + common libs | Anything Claude writes runs here unchanged, including state that persists and pages that save themselves |
 | **Comments addressed to the agent** (`to_claude`) + `watch` | Lets you comment from your phone and have the agent fix it |
 | **Separate share surface** that only answers to tokens | A misconfigured edge can't expose the workspace |
+| **Per-agent revocable tokens**, removed before anything reaches app code | Each agent can be cut off on its own |
+| **Runtime errors reported back to the agent** (`runtime_errors`) | The agent finds out its page is broken without needing a browser |
 | `get_design_system` so agents make on-brand pages | Pages look consistent without extra prompting |
 
-The parts that don't fit the admin's setup:
+How shartifacts does agent auth, for reference: there's an optional owner password. With it on, each agent gets a static bearer token (`shx_…`)
+made in the UI or with `shartifacts auth token NAME`, sent as `Authorization: Bearer` on a stateless MCP endpoint. The token can do
+everything except manage the password and tokens. With the password off, network position is the only check. Tokens never expire, so you revoke them by hand.
+partifactory keeps "one token per agent, revocable" and replaces how the token is obtained and what it can do (§3b).
+
+What doesn't fit the admin's setup:
 
 | shartifacts assumes | the admin's reality | So partifactory… |
 | --- | --- | --- |
-| Trust comes from the **network** (LAN/tailnet IPs). Sign-in is optional | Everything comes in through a **Cloudflare Tunnel**, so every request comes from cloudflared and IP trust means nothing | Trust comes from **identity**: partifactory is an OIDC client of **Authentik** (swappable), with a per-part policy engine and in-app invites (§3a) |
-| One owner password, "Who are you?" is a name picker | Authentik already knows the household. The family hub already uses it | Real principals: `admin`, family members, `hermes`, `hub`, `claude-mac`, … |
-| Opaque-origin `sandbox` iframes + postMessage bridge + hub-managed localStorage + HMAC app sessions | Deep wildcard certs behind a tunnel are fragile or paid; `*.example.com` is free | **Each part gets its own real origin, one level deep: `<name>-part.example.com`**. Native storage, service workers (install to home screen), remembered permissions and same-origin `_rt` calls, with no bridge code |
-| JSON-file-per-artifact holding every revision, a hand-written search index, hard-linked app versions | — | **SQLite** (metadata, FTS5 search, comments, db docs, events) + a **content-addressed blob store**. One mechanism covers dedup, rollback, diffs, media and zips |
-| Full-stack apps with a Go runner sidecar + Landlock | That's the heaviest third of the codebase | **v1 has no backends.** The per-part `db` capability (a realtime doc store) covers most micro-apps. Backends are a later phase, and only if a real need shows up |
-| Offline, every library vendored | Internet-facing anyway | CSP allowlist for cdnjs/jsDelivr/unpkg in v1. Vendoring is optional later |
+| Trust comes from the **network** (LAN/tailnet IPs). Sign-in is optional | Everything comes in through a **Cloudflare Tunnel**, so every request comes from cloudflared and IP trust means nothing | Trust comes from **identity**: an OIDC client of **Authentik** (swappable), a per-part policy engine and in-app invites (§3a) |
+| One owner password, "Who are you?" is a name picker | The IdP already knows the household | Real principals: people from the IdP, agents as OAuth clients acting *on behalf of* a person (§3b) |
+| Static all-powerful agent tokens | Agents should get exactly what they need | **OAuth 2.1 per the MCP authorization spec**: consented, scoped, space-limited, expiring, audited as "Hermes on behalf of the admin" |
+| Opaque-origin `sandbox` iframes + postMessage bridge + hub-managed localStorage + HMAC app sessions | `*.example.com` is covered by the free cert | **Each part gets its own real origin: `<name>-part.example.com`**. Native storage, service workers, remembered permissions, same-origin `_rt` calls |
+| JSON-file-per-artifact holding every revision, a hand-written search index | — | **SQLite** (metadata, FTS5, comments, db docs, events, audit) + a **content-addressed blob store** |
+| Full-stack apps with a Go runner sidecar + Landlock | That's the heaviest third of the codebase | **v1 has no backends.** The per-part `db` covers most micro-apps. WASM backends later, only if a real need shows up |
+| Every library vendored, offline | We want both: no third-party runtime loads, and no hand-maintained vendor list | **Mirror-on-save**: CDN URLs in a part are fetched once at save time, pinned by hash and served from our own blob host (§2) |
 
-## 2. The core idea (the "elegant" part)
+## 2. The core idea
 
-Three concepts. Everything else is built from them.
+Four concepts. Everything else is built from them.
 
-1. **Blob**: bytes, named by `sha256`. Stored once, under `blobs/ab/cd/<hash>`.
-2. **Part version**: an immutable manifest: `{kind, entry, files: {path → hash}, meta, parent}`.
-   Its own hash is its version id, and a monotonically numbered `n` makes it readable.
-   A one-line edit to a 40-file part stores one new blob plus one tiny manifest. Diffs are a manifest compare.
-3. **Capability**: a signed, scoped, expiring grant `{part, version|live, principal, mode: read|interact|write, exp}`.
-   - Opening a part in the workspace → the workspace mints a short-lived capability and the iframe loads `https://<name>-part.example.com/?cap=…`.
-     The part host swaps it for a host-only `__Host-cap` cookie (`Secure; HttpOnly; SameSite=None; Partitioned`, so it works framed and standalone) and redirects to a clean URL.
-   - A **share link** is a durable, revocable capability (its row in SQLite can be revoked).
-   - A **Telegram preview** is a capability with a 24h TTL. It needs no login, so it opens inside Telegram's in-app browser.
+1. **Blob**: bytes, named by `sha256`, stored once (`blobs/ab/cd/<hash>`). There are two classes:
+   - **Shared blobs**: third-party libraries, fonts and the runtime shim. They aren't private to anyone, are edge-cached forever on `blobs-part.example.com/b/<hash>`, and are cached once across all parts.
+   - **Part blobs**: a part's own files and media. They're served **only from that part's host** under `/_b/<hash>`, behind the part's grant.
+     Browsers cache them with `private, immutable`, and **they are never edge-cached**, so revoking access really revokes it and nothing private sits in Cloudflare's cache.
+2. **Part version**: an immutable manifest `{kind, entry, files: {path → hash}, meta, parent, author, actor}`. Its hash is the version id, and `n` is a readable counter.
+   A one-line edit to a 40-file part stores one new blob plus one tiny manifest. Diffs compare manifests, then the changed files.
+3. **Grant**: who may do what to which part, from the policy engine (§3a). It covers people, groups, link holders and agents.
+4. **Capability**: a short-lived, signed, host-bound token that carries a decided grant to a part's host, so the content listener never needs the database to authorise a request.
 
-   Private view, share link and Telegram preview all use **one mechanism**.
+**Mirror-on-save, instead of a CDN allowlist.** When a part references `https://cdnjs.cloudflare.com/…` (or jsDelivr or unpkg), the save step fetches it once
+(an allowlist of CDN hosts, size-capped, SRI-verified when the source gives an `integrity`), stores it as a shared blob and rewrites the URL.
+At runtime parts load **nothing from third parties**, so the CSP can be `default-src 'self' https://blobs-part.example.com` with no exceptions,
+and Claude-written HTML with CDN `<script>` tags still works unchanged. Bundled common libraries (React, recharts, d3, three, …) are pre-seeded as shared blobs. **Bare imports** (`import { LineChart } from "recharts"`) in TSX are resolved
+by the bundler against that set at save time. HTML parts with `<script type="module">` get a server-emitted import map pointing at the same shared blobs, so there's one library set and one version per release.
 
-Each part's host answers only for that part, and its cookie is host-only, so a capability for part A can never read part B.
-The Claude runtime shim (`window.storage`, `claude.use`) calls **same-origin** `/_rt/*` on its own host, with no postMessage relay.
-Native `localStorage`/IndexedDB work too, as per-device caches. Anything that should sync goes through `window.storage`/`db`.
-A strict CSP (`connect-src 'self'` + the shared blob host, `form-action 'self'`, `frame-ancestors` = workspace + family hub) keeps parts from
-sending requests to other hosts. That limits what being same-site with the homelab can expose.
+**Grant hand-off, without tokens in URLs that stick around.**
+- A part host with no valid cookie redirects to `parts.example.com/grant?part=<name>&path=<path>`. Only the *path* is carried, and the host is derived from the part name, so this **can't act as an open redirect**.
+- The workspace authenticates the person if needed, asks the policy engine, and redirects back with a **one-time code** (`?g=…`: 30 s TTL, single use, bound to the part host).
+- The part host exchanges the code server-side, sets a **host-only** cookie `__Host-pf_cap` (`Secure; HttpOnly; SameSite=Lax`) holding a 10-minute capability that refreshes silently,
+  and 302s to the clean URL. `Referrer-Policy: no-referrer` on every response.
+- `SameSite=Lax` works framed *and* standalone because the workspace, the family hub and every part are **same-site** (`example.com`).
+  A same-site iframe is a first-party context, so third-party-cookie blocking and Safari's ITP don't apply, and `Partitioned`/`SameSite=None` aren't needed.
+- **The design doesn't *depend* on that cookie**, so it survives Safari quirks and a future move of parts to their own domain (§3):
+  - **Framed views** get their `src` minted server-side (workspace, family hub) with a one-time code. If the part host can't set its cookie (a cross-site frame),
+    it falls back to **path mode** (`/c/<cap>/…`): the capability is a path prefix, so relative URLs inherit it, with no cookies needed.
+  - **Runtime calls (`/_rt/*`) never use ambient credentials.** The shim gets its capability from a bootstrap response, keeps it in JS memory and sends
+    `X-PF-Cap` on every call. The server also requires `Sec-Fetch-Site: same-origin`. That rules out CSRF from other sites and from sibling parts, cookie or not.
+- **Revocation without DB reads**: an in-memory `grant_epoch` (persisted in SQLite) is bumped on any revoke, unshare or agent-token change. Capabilities embed the epoch they were
+  minted under, and verifying one is an HMAC check plus `epoch ≥ current-for-that-part`. Revocation applies on the next request, and the hot path stays DB-free.
+  Every capability also records `minted_by` (person, agent or link), so revoking an agent or a link cascades to everything it minted.
+- **Telegram and other unfurlers never see content**: preview and share links posted anywhere point at `parts.example.com/s/<token>`, which serves a static,
+  content-free card (title only if the part opts in) and a JS hop to the real URL. Link-preview fetchers get the card, and people get the part.
+- **Link shares** are the exception, by design: the URL carries a long-lived 128-bit token (`/l/<token>/`), because that's what a link share *is*.
+  The token is exchanged for the same cookie on first load and stripped from the address bar.
+
+**Each part's host answers only for that part.** Its cookie is host-only, so a grant for part A can never read part B.
+The runtime shim (`window.storage`, `claude.use`) calls same-origin `/_rt/*`, with no postMessage relay.
+Native `localStorage`/IndexedDB work as per-device caches. Anything that should sync or be shared uses `window.storage`/`db`.
 
 ## 3. Topology
 
 ```
-                Cloudflare edge
-   ┌──────────────────────────────────────────────────────────┐
-   │ parts.example.com        → workspace UI, /api, /mcp,      │
-   │   the ONE OIDC client of Authentik (auth.example.com);    │
-   │   the only host that logs people in and mints grants     │
-   │ *.example.com (wildcard) → partifactory answers           │
-   │   only names ending -part, 404s everything else          │
-   │   <name>-part.example.com  one origin per part            │
-   │   blobs-part.example.com   shared immutable /b/<sha256>,  │
-   │                           CACHED AT THE EDGE             │
-   └───────────────┬──────────────────────────────────────────┘
-                   │ Cloudflare Tunnel (existing homelab-tunnel or its own cloudflared)
+                Cloudflare edge  (own tunnel: `partifactory`)
+   ┌──────────────────────────────────────────────────────────────┐
+   │ parts.example.com        workspace UI, /api, /mcp, /oauth/*,   │
+   │                         /grant — the only host that logs     │
+   │                         people in and issues tokens           │
+   │ *.example.com (wildcard) → content listener; answers only     │
+   │                         names ending -part, else 404          │
+   │   <name>-part.example.com   one origin per part (not cached)   │
+   │   blobs-part.example.com    shared blobs only, edge-cached     │
+   │ WAF rate-limit rules on /grant, /oauth/*, /l/*, /mcp          │
+   └───────────────┬──────────────────────────────────────────────┘
+                   │ cloudflared (runs next to the app, QUIC)
                    ▼
-   TrueNAS custom app: partifactory  (one process, two listeners)
-     :8080 workspace  — OIDC session (people) or agent token (machines); policy engine decides
-     :8081 content    — requires a valid capability (or the part's policy is `public`); answers nothing else
-     /data: partifactory.db (SQLite, WAL) + blobs/   → snapshotted by the host
+   Any Docker host (TrueNAS by default): partifactory, one process
+     :8080 workspace  — person session or agent OAuth token; policy engine decides
+     :8081 content    — capability cookie or link token; nothing else
+     :9090 ops        — /metrics, /healthz, /readyz; never routed through the tunnel
+     /data: partifactory.db (SQLite, WAL) + blobs/ → Litestream + blob sync to R2
 ```
 
-**Hostnames: `parts.example.com` (workspace) + `<name>-part.example.com` (one per part)** (decided). Everything is one level under `example.com`,
-so the existing free universal cert (`example.com, *.example.com`) covers it, with no Worker custom-domain tricks and no ACM.
-DNS wildcards must be a whole label (`*-part` isn't valid), so routing is **one proxied `*.example.com` record + one tunnel ingress rule → partifactory**.
-Explicit records (`ha`, `git`, `hub`…) always take precedence over the wildcard, so existing services are unaffected. Names that exist nowhere land on partifactory and get a 404
-unless they end in `-part`. This means no DNS token at runtime and no per-part API calls, and a new part is live the instant it's saved.
-(Zone and certificate facts that informed this are recorded in the private site config.)
-Parts are same-site with the rest of `example.com`. That's accepted, because parts get `connect-src 'self'` / `form-action 'none'` and so can't send requests to other hosts,
-and the remaining exposure is cookie tossing in a viewer's own browser.
+**Hostnames** (decided): everything is one level under `example.com`, so the existing free universal cert covers it.
+DNS wildcards must be a whole label (`*-part` isn't valid), so routing is **one proxied `*.example.com` record + one tunnel ingress rule**.
+Explicit records (`ha`, `git`, `hub`…) always take precedence over the wildcard. Names that exist nowhere land on partifactory and get a 404 unless they end in `-part`.
+There's no DNS token at runtime, and a new part is live the instant it's saved.
+
+**Same-site risk, stated honestly.** Parts share a site with the rest of `example.com`, which allows two things:
+1. **Same-site requests.** CSP blocks fetches, submits and embeds elsewhere: `default-src 'none'; script-src 'self' <blob-host>; style-src 'self' 'unsafe-inline' <blob-host>;
+   img-src 'self' data: blob: <blob-host>; media-src/font-src likewise; connect-src 'self'; frame-src 'self'; worker-src 'self' blob:; form-action 'self';
+   base-uri 'none'; object-src 'none'; frame-ancestors <workspace> <hub>`. **CSP can't stop top-level navigation**, so a malicious part can still navigate its viewer
+   to a GET on another `example.com` service, or phish. That's inherent to running arbitrary JS, and it's why the domain decision below matters.
+2. **Cookie tossing.** A part's script can set `document.cookie` with `Domain=example.com`, which other services' cookies don't prevent unless they use `__Host-` names.
+   CSP can't stop it. Defences: the part's content is written by your own agents and people. Every part HTML response gets a tiny server-injected prelude that
+   makes `document.cookie` writes with a `Domain` attribute throw (defence in depth only, since it can be bypassed). And **the part suffix is site config**, so
+   moving parts to a separate registrable domain later (e.g. `*.example-parts.com`) is a config change plus 301s, not a redesign.
+   Revisit this if parts ever show untrusted third-party content, for example an agent that renders scraped web pages.
+
+**Open decision: give parts their own registrable domain?** The GLM review's #1 recommendation. A separate domain (e.g. `example-parts.com`, ~$10–30/yr,
+with its own free universal cert, so names become `photofinder.example-parts.com`) removes cookie tossing and same-site exposure of `auth`, `ha`, `git` and `hub` to agent-written JS completely.
+Every other mitigation above is a patch. The cost: framed views become cross-site, so they use path mode (above) instead of the cookie. The design already supports that, so it's a config change.
+**My recommendation: buy the domain before P1**, since the cookie tossing risk to the IdP's own session cookie is the one that matters. It's the admin's call.
 
 ## 3a. Identity and access: Authentik by default, swappable, managed in-app
-
-### Reusing the existing Authentik setup
-
-partifactory follows the existing pattern of per-audience groups, one enrollment flow per audience, working email stages and passwordless sign-in. It doesn't invent its own. The site-specific inventory (users, groups, flow and stage names) lives in the **private site config**, never in this repo.
 
 ### Three layers, so the provider can be swapped
 
@@ -100,343 +141,509 @@ partifactory follows the existing pattern of per-audience groups, one enrollment
  ┌────────────── partifactory core (provider-neutral) ──────────────┐
  │ Policy engine: grants on parts/spaces → allow/deny + role        │
  │ Subjects: user:<stable-id>, group:<name>, everyone-signed-in,     │
- │           link:<token>, public                                    │
+ │           link:<token>, agent:<client-id>@user:<id>               │
  └──────────────┬──────────────────┬──────────────────┬─────────────┘
           trait Authn        trait Directory     trait Provisioner (optional)
      (who is this person?) (users, groups,      (invite, add by email,
                             membership)          manage own groups)
                 ▼                  ▼                  ▼
           Authentik OIDC     Authentik API      Authentik API          ← default
-          any OIDC IdP       groups claim only  (not supported → UI    ← swap-in
-          dev: local user    static file         hides invite flows)   ← dev/tests
+          any OIDC IdP       groups claim only  (absent → UI hides     ← swap-in
+          dev: local user    static file         invite flows)         ← dev/tests
 ```
 
-Grants refer to provider-neutral subjects, so swapping Authentik for Pocket ID, Keycloak, Zitadel or plain OIDC
-changes three adapters and no policy data. A provider without a `Provisioner` still works, and invites just disappear from the UI.
+Grants refer to provider-neutral subjects, so swapping Authentik for Pocket ID, Keycloak, Zitadel or plain OIDC changes adapters, not policy data.
+Kept deliberately thin, because swappability was asked for, but there's no second production adapter until one is needed: v1 ships the Authentik adapter plus a test-only fake.
+partifactory reuses the site's existing Authentik pattern (per-audience groups, an enrollment flow per audience, passwordless sign-in, working email stages).
+The inventory is in site config.
 
-### How people sign in, on per-part origins
+### How people sign in
 
-- **`parts.example.com` is the only OIDC client** (Authentik OAuth2/OIDC provider, confidential client + PKCE, one redirect URI).
-  It's never registered per part, and there are no wildcard redirect URIs.
-- Opening `photofinder-part.example.com` without a grant → redirect to `parts.example.com/grant?part=photofinder&return=…`.
-  If needed, the workspace runs Authentik login, checks the **policy**, mints a short-lived capability and bounces back. The part host only ever sees capabilities.
-- The OIDC `groups` claim gives membership at login. An **Authentik notification webhook** (user/group changes) plus a 60 s
-  directory sync means removing someone from a group in Authentik takes effect within a minute. Capabilities are short-lived (10 min, refreshed silently), so revocation takes effect as quickly.
-- Cloudflare Access becomes **optional** defence in depth for `parts.example.com/admin` only. It's no longer the auth model, because guests, groups and
-  public links have to be decided per part, which Access can't do.
+- **`parts.example.com` is the only OIDC client** (confidential + PKCE, one redirect URI), with no per-part or wildcard redirect URIs. It uses implicit consent, so there's no consent screen for people.
+- Group membership comes from the OIDC `groups` claim at login plus a **60 s directory poll**, which is the single mechanism. A push webhook is only added if poll latency ever hurts.
+  When the poll sees a change, it bumps the grant epoch for affected parts, so removing someone takes effect within about a minute.
+- **Admin step-up and IdP login are separate**, so the IdP's `max_age`/`prompt=login` behaviour isn't load-bearing for security (§ Admin).
+- Workspace sessions: `__Host-pf_session`, `HttpOnly; Secure; SameSite=Lax`, stored hashed server-side, 30 days sliding, with "sign out everywhere" available.
 
 ### Who can see a part: the audience ladder
 
-Each part (and each space, as a default) has a list of **grants** `{subject, role}`. Roles: `view` < `comment` < `edit` < `manage`.
-The share dialog presents subjects as a ladder from safest to most exposed:
+Each part (and each space, as a default) has **grants** `{subject, role}`. Roles: `view` < `comment` < `edit` < `manage`.
 
 | Audience | Subject | Notes |
 | --- | --- | --- |
 | **Only me** (default) | `user:admin` | Every new part starts here unless its space says otherwise |
-| Specific people | `user:<id>`… | Picked from the directory, or invited (below) |
-| A group | `group:<household>`, `group:pf-photofinder`… | Any existing Authentik group can be *granted*; partifactory can only *create and edit* its own `pf-*` groups |
-| Everyone signed in | `everyone-signed-in` | Any active Authentik user. Shown with a count ("15 people") so it's never vague |
-| **Public, link only** | `link:<token>` | Anyone holding the URL, **no sign-in at all**. Unlisted, `noindex`, unguessable 128-bit token in the hostname path, revocable, optional expiry, `view` (or `comment`) only. Shown in amber as "the worst option". This is the *only* public mode in v1 |
-| ~~Listed public~~ | `public` | Not in v1. Nothing in partifactory is ever discoverable without a link |
+| Specific people | `user:<id>`… | Picked from the directory, or invited |
+| A group | `group:<household>`, `group:pf-photofinder`… | Any IdP group can be *granted*; partifactory can only *create/edit* its own `pf-*` groups |
+| Everyone signed in | `everyone-signed-in` | Shown with a live count ("15 people") so it's never vague |
+| **Public, link only** | `link:<token>` | No sign-in, unlisted, `noindex`, revocable, optional expiry. **`view` only by default**. `comment` needs an explicit admin opt-in (spam and prompt-injection risk, §3c). Shown in amber as "the worst option" |
 
-Effective access is the highest role across all grants that match. Every change is written to an `audit` table (who, what, before → after).
+There's no listed or indexable public mode. Effective access is the highest matching role. Every change goes to the `audit` table (who, actor, what, before → after).
 
-### Invitations: every flow ends in "it just works"
+### Invitations, all minted in partifactory
 
-All of these live in the **share dialog** and an **admin → People** page, and they all reuse the existing Authentik mechanics:
+1. **Passkey-only invite link** (share anywhere): an Authentik invitation bound to a dedicated **`partifactory-invite`** flow:
+   invitation → one field ("What should we call you?", username generated) → **passkey enrolment, required** → user write → login → land on the part, already granted.
+   There's no email and no password. 7-day default expiry, and `fixed_data` carries the `pf-*` groups. The dialog offers **"for one person"** (single use) or **"for a group chat: up to N people"**
+   (multi-use with an explicit count), because single-use links pasted into family chats lose a race and confuse everyone else.
+   **Lost passkey** → the admin clicks "Send a new passkey link" on that *existing* person. That's an IdP recovery link bound to the same user, so their history and grants stay put and no zombie account is created.
+   Invitees who never enrolled, and enrolled people inactive for 180 days, are listed for one-click cleanup.
+   (The invitation → `fixed_data` → user-write group-join plumbing is verified in the P1b spike, not assumed.)
+2. **Add by email**: creates the IdP user + `pf-*` groups, then triggers the IdP's "set up your account" email. Click → passkey → on the part.
+3. **Existing user**: pick and grant. They're notified by email or Telegram via Hermes.
+4. **New group**: "Make a group for this" creates `pf-<name>`, which can be managed from either side afterwards.
 
-1. **Mint an invite link: passkey only, nothing else** (Telegram, SMS, anywhere). It's minted in partifactory's share dialog, never in Authentik's UI.
-   partifactory creates an Authentik **invitation** bound to a dedicated `partifactory-invite` flow:
-   invitation stage → one field ("What should we call you?"; the username is generated) → **WebAuthn setup (passkey), required** → user write → login → redirect.
-   There's no email, no password and no email verification: holding the invite link plus enrolling a passkey on this device *is* the account.
-   A recovery path is added later from the person's own settings (add email / second passkey). Lost passkey + no email → the admin mints a new link.
-   (Email is optional here. The email path is #2.)
-   The invitation's `fixed_data` carries the groups to join (e.g. `pf-photofinder`), and it's single-use with an expiry by default.
-   After enrolment the person lands **directly on the part** they were invited to, already granted.
-2. **Add by email**: partifactory creates the Authentik user (`type: internal`, email, name, `pf-*` groups), then triggers Authentik's
-   **recovery/"set up your account" email** via the site's existing email-link stage (named in site config). The person clicks it, sets a passkey, and arrives at the part.
-3. **Invite an existing user**: pick from the directory and grant. A notification (email, or Telegram via Hermes) links to the part.
-4. **New group**: "Make a group for this" creates `pf-<name>` in Authentik, so the group can be managed afterwards from either partifactory or Authentik.
-
-Pending invites are listed with status (sent, opened, enrolled, expired) and one-click revoke. Revoking deletes the Authentik invitation.
+Pending invites show their status (sent, opened, enrolled, expired) and have one-click revoke.
 
 ### UX: click budgets, tested end to end
 
-The UX rule: **every flow has a click budget, and e2e tests (real browser + virtual authenticator) fail if a flow exceeds it.**
+Every flow has a budget in **real human interactions, including OS/browser prompts and the biometric**. The e2e suite (Chromium + virtual WebAuthn) enforces the page-level part,
+and a manual pass on a **real iPhone (Safari) and an Android phone** before each phase's sign-off covers what a virtual authenticator can't see.
 
 | Flow | Who | Budget |
 | --- | --- | --- |
-| Open a part I'm allowed to see, already signed in | anyone | **0 clicks**: the URL just loads (grant hand-off is silent redirects) |
-| Sign in when the session has expired | returning user | **1 tap**: passkey autofill on the identification field (WebAuthn conditional UI), no username typing, no "stay signed in?", no consent screen |
-| Make a part public-by-link | the admin | Share → "Anyone with the link" → **Copy** (3), plus a passkey tap if the admin re-auth window has lapsed |
-| Mint a passkey invite link | the admin | Share → "Invite someone" → **Copy link** (3). The groups and part grant are pre-filled from the part you're on |
-| Accept a passkey invite | new person | open link → type a name → **passkey tap** → they're on the part (1 field, 1 biometric) |
-| Add someone by email | the admin | Share → "Invite someone" → type email → **Send** |
-| Accept an email invite | new person | click email link → passkey tap → on the part |
-| Revoke anything (link, invite, person) | the admin | one click in the share dialog, plus an undo toast for 10 s rather than a confirmation dialog |
+| Open a part I may see, already signed in | anyone | **0**: silent redirects only |
+| Sign in after session expiry | returning user | **2 interactions**: pick the passkey from autofill + biometric. No "stay signed in?", no consent |
+| Make a part public-by-link | the admin | Share → "Anyone with the link" → **Copy** (+ 1 biometric if the 30-minute step-up window has lapsed. Step-up is in-page WebAuthn, not a redirect) |
+| Mint a passkey invite link | the admin | Share → "Invite someone" → **Copy link** |
+| Accept a passkey invite | new person | open → type a name → **passkey tap** → on the part |
+| Add someone by email | the admin | Share → "Invite someone" → email → **Send** |
+| Connect a new agent (OAuth) | the admin | agent opens browser → passkey tap (if signed out) → **Allow** on the consent sheet |
+| Revoke anything | the admin | one click, with a 10 s undo toast instead of a confirmation dialog |
 
-**Authentik click reduction** (the `deploy/authentik/` script applies these, idempotently, and records the before-state so each one can be undone):
-- **No "Stay signed in?" prompt**: the user-login stage gets one fixed long session (`remember_me_offset=0`), the outcome "yes" used to give (everyone gets the "yes" outcome, with no question asked). (Applied 2026-10-22, with the undo recorded in site config.)
-- **No consent screen**: partifactory's OIDC provider uses `default-provider-authorization-implicit-consent`.
-- **Passkey autofill**: the identification stage gets the WebAuthn stage attached, so browsers offer the passkey straight away.
-- **No logout confirmation**: partifactory's provider invalidation flow is a single-stage, no-prompt flow.
-- **Branding**: the Authentik pages partifactory sends people to use a partifactory-styled flow background and title, so the hop doesn't feel like a different site.
+**Authentik click reduction**. Shared flows belong to every service on the IdP, so partifactory **gets its own cloned authentication and authorization flows**,
+which it owns, provisions and tunes. Shared flows are touched only for changes the admin explicitly wants globally. Global so far: no "Stay signed in?" prompt (applied 2026-10-22 to the
+shared login stage at the admin's request, with the before-state in site config). partifactory-owned: implicit consent, passkey-first identification (conditional UI, if the
+deployed Authentik's identification stage supports `mediation: "conditional"`, verified in the P1 spike), a no-prompt invalidation flow, and partifactory branding.
 
-**Share dialog** (the heart of the UX): one sheet, with the audience ladder as a segmented control (safest at the top), a live sentence that says
-exactly who can see the part now ("Only you" / "You + one person" / "household (9 people)" / "**Anyone with the link**"), an expiry picker,
-pending invites with status, and copy buttons. The same sheet works on a phone. Agents' share requests appear at the top as approve/deny chips.
+**Share dialog**: one sheet, with the audience ladder as a segmented control, a live sentence saying exactly who can see the part now,
+an expiry picker, pending invites, agents' share requests as approve/deny chips, and copy buttons. It works on a phone.
 
-### Admin is the admin, and only the admin (the iykyk part)
+### Admin is the admin, and only the admin
 
-- **Admin is pinned to the admin's immutable Authentik user id (`sub`)** in partifactory's config file, not to a group.
-  Anyone added to any Authentik group, the IdP's own admin group included, still doesn't become a partifactory admin. Changing the admin means editing config on the host.
-- **Admin actions need fresh, strong auth**: changing permissions, inviting, adding users, creating groups, `public`/`link` grants and minting agent tokens
-  require an OIDC re-auth with `max_age` ≤ 10 min through the site's **passkey authentication flow** (a passkey, not just a session cookie).
-- **partifactory's own Authentik credential is least-privilege.** It's a dedicated service account `partifactory-provisioner` with Authentik RBAC
-  permissions to: read users/groups, create users, create/delete invitations, send recovery emails, and add/remove members of **`pf-*` groups only**.
-  It's **not** a superuser, so it can't touch the IdP admin group, other services' admin groups, or flows. Even a compromised partifactory
-  can't escalate anyone into the rest of the homelab. The core also rejects any provisioning call that names a non-`pf-*` group, so it's enforced twice.
-- **Agents never administer.** Agent tokens can create and edit parts in their scope and *request* a share ("Hermes wants to share
-  *meal-plan* with the household group"). That lands as a pending approval for the admin, in-app or via a Telegram button. Only the admin's re-authed session applies it.
-- **Guests can't escalate either**: `manage` on a part lets someone edit *that part's* grants among subjects they already have, never invite new people or
-  create link/public grants. Only the admin can do that.
+- **Pinned to the admin's immutable IdP `sub`** in config, not a group. Being added to any IdP group (including the IdP's own admins) grants nothing here.
+- **Step-up is native WebAuthn in partifactory**, not trust in IdP claims. the admin registers an admin passkey in partifactory itself (`webauthn-rs`).
+  Admin actions (grants, invites, users, groups, link shares, connecting agents, approving share requests) need a passkey assertion within 10 minutes.
+  This works the same whatever the IdP, and a stolen session cookie alone can't administer.
+- **The IdP credential is least-privilege, and that's verified, not assumed** (a P1b design gate). The intent: a service account `partifactory-provisioner` that can read users/groups,
+  create invitations, send recovery links, and change membership of `pf-*` groups **only** (Authentik object-level permissions on each `pf-*` group).
+  The gate tests, against the real IdP, that this account **cannot**: add anyone to a non-`pf-*` group, create a group with `is_superuser`, edit flows or stages,
+  or create users with elevated attributes. The core's own `pf-*` check is defence in depth only, because a compromised process would skip it.
+  **If the IdP can't scope it that finely**: `pf-*` groups are created by `provision` (bootstrap token, run by the admin), never at runtime. The runtime account drops to
+  invitations + recovery links + membership of pre-created groups. If even membership can't be object-scoped, add-by-email and new groups become "the admin approves, `provision` applies".
+  The plan's containment claim is only as strong as what this gate shows, and the gate's result is written into site config.
+- **Guests can't escalate**: in v1 `manage` means "edit content, comments and data, and see the audit log". **All grant changes go through the admin** (or his approval queue).
+  Delegated grant editing is deferred until someone other than the admin actually manages a part.
+- **Break-glass**: `partifactory admin break-glass`, run on the host console, prints a one-time admin login valid for 5 minutes. It needs local shell access, works when the IdP is down,
+  and is logged and alerted. The admin `sub` pin lives in site config, which is backed up off-host (§5c).
 
-### Machines (agents)
+## 3b. Agents: their own OAuth tokens, scoped to what they need
 
-| Principal | Path in | Auth |
+**Do we need MCP?** Yes. It's how Claude Code, Hermes (and Codex, Cursor and others) discover and call tools with no glue code. Underneath it is the **same HTTP API**
+the `part` CLI and the family hub use, with the same tokens and the same policy engine. MCP is one front end, not a separate system.
+
+**How agents authenticate: OAuth 2.1, per the MCP authorization spec.** partifactory is both the **resource server** (`/mcp`, `/api`) and a small
+**authorization server** that *federates* login to the IdP. This gives every agent a token distinct from your browser session:
+
+```
+claude mcp add --transport http partifactory https://parts.example.com/mcp
+  → POST /mcp  → 401  WWW-Authenticate: Bearer resource_metadata="…/.well-known/oauth-protected-resource"
+  → client reads Protected Resource Metadata (RFC 9728) → authorization server = parts.example.com
+  → client identifies itself: Client ID Metadata Document (preferred) or Dynamic Client Registration (RFC 7591)
+  → browser: /oauth/authorize (PKCE, resource=https://parts.example.com/mcp per RFC 8707)
+       → Authentik login if needed (1 passkey tap)
+       → partifactory consent sheet: "Claude Code on admin-mac wants to: read & edit parts in [admin ▾],
+          request shares, mint 24 h previews. Expires: [90 days ▾]"   → passkey step-up → Allow
+  → token: opaque, audience-bound to /mcp, sub=admin, act=client:<id>, scopes + spaces
+```
+
+- **Tokens**: opaque random strings, stored hashed, revocable instantly. Access tokens last 1 h, and refresh tokens rotate (detecting reuse) for up to the consented lifetime.
+  They're never JWTs, so there's no key distribution or clock skew to worry about, and revocation is a single row.
+- **Scopes**: `parts:read`, `parts:write`, `parts:delete` (soft delete only, restorable for 30 days), `data:read`, `data:write`, `comments:write`,
+  `share:request`, `preview:mint`. Plus **space limits** picked on the consent sheet. Agents can never get admin scopes: grants, invites, users, link shares.
+- **Delegation is explicit**: every write records `author=admin, actor=hermes`, which the UI shows as "Hermes for the admin". An agent can't see or do more than the person it acts for.
+- **Headless agents** (Hermes on its VM, the family hub server, CI): the **device authorization grant** (RFC 8628).
+  `part login` prints a code, the admin approves it on his phone (passkey tap + consent sheet), and the agent gets the same kind of scoped token.
+- **Fallback for clients with no OAuth support**: the admin can mint a static scoped token on the consent sheet (shown once). It's the same scopes, but marked "static" in the UI and short-lived by default.
+- **Abuse limits on the auth server**: client registration is rate-limited, and a registered client is inert until the admin consents. Unconsented registrations expire after 1 hour.
+- **Swappable**: an `AuthorizationServer` trait. If the IdP gains client-ID metadata/DCR + resource indicators, partifactory can switch to validating IdP-issued tokens as a pure resource server.
+  The facade exists because MCP clients expect DCR/CIMD, and Authentik support for them is unverified.
+- **Revocation cascades**: revoking an agent kills its refresh token family, its access tokens and every preview it minted (via `minted_by`).
+- **Agents and link previews**: `preview:mint` lets an agent create **view-only, single-part, single-version links lasting ≤ 24 h**. That's a deliberate, narrow exception to "agents never share",
+  so Hermes can drop a working link in Telegram. Each preview is logged, listed in the share dialog and revocable, and the scope can be withheld at consent.
+  Anything broader is a `share:request` that the admin approves.
+
+| Agent | Grant type | Typical scopes |
 | --- | --- | --- |
-| Claude Code (Mac, other envs) | `parts.example.com/mcp` | partifactory **agent token** (`pft_…`, shown once, stored hashed), minted by the admin in-app |
-| Hermes (VM) | same `/mcp` + `part` CLI | its own agent token |
-| family hub (`hub-api.example.com`) | server-to-server `/api` | its own agent token, scoped to the `family` space |
-| Telegram users | never directly | Hermes is the Telegram front door and hands out capability links |
+| Claude Code (Mac, other dev envs) | authorization code + PKCE | `parts:*`, `data:*`, `comments:write`, `share:request`, `preview:mint` in `admin` |
+| Hermes (VM, Telegram front door) | device code | the same, in `admin` + `family` |
+| family hub (`hub-api`) | device code (once, at setup) | `parts:read`, `parts:write`, `preview:mint` in `family` |
+| CI (provision/smoke tests) | device code → token in Gitea secrets | `parts:read` + a test space |
 
-Each token has **scopes** (spaces, `put`/`share-request`/`read`), an optional expiry and a last-used time, and is revocable in-app.
-Tokens are a separate `Authn` path from people, so they don't depend on the IdP.
+## 3c. Agents editing parts: discoverable, quick, in place
 
-### Spaces
+The common case is "change that thing from last week", so finding a part and making a small edit must be cheap for an agent.
 
-Spaces are **default audiences**: `admin` (only me, the default for the admin's agents) and `family` (the household group or a `pf-family` group,
-plus the family hub and Hermes's `hub-family` profile). A part inherits its space's grants and can add or override them. There's no nested hierarchy.
-Deploying for "just me" or "the whole household" is a one-line change to a space's default grant.
+- **Discoverable**:
+  - `part_find` (FTS5 over titles, descriptions, rendered text, file paths, tags, comments, agent notes) + `part_recent` (recently touched by *me*/*this agent*).
+  - **MCP resources**: `part://recent`, `part://<name>` (manifest, summary, outline), resource templates for files.
+  - Each part has **agent notes**: a short, versioned "what this is / how it's built / gotchas" field the agent keeps up to date, returned first by `part_get`.
+    The next agent starts from the notes, not from re-reading every file.
+- **Read only what's needed**: `part_get` returns the outline (files, sizes, symbols) by default. `file` + `range` fetch a slice.
+- **Quick edits**: `part_edit` takes `edits[]` of `{file?, old_str, new_str}` across files, atomically.
+  If `base_version` is stale but the edits still apply cleanly to the latest version, the edit is **rebased automatically**. Otherwise it fails with the conflicting hunks.
+  It returns the new version, compile warnings and a fresh preview link. Target p99 < 10 ms.
+- **Errors close the loop**: viewers' browsers report uncaught errors and blocked loads, which `part_get` returns as `runtime_errors` (latest 20 per part).
+- **In place, like Claude's artifacts**:
+  - The workspace has a source editor (CodeMirror 6) with live preview, where saving creates a version, and drafts survive reloads.
+  - **Persistent state**: `window.storage` (personal + shared) and `claude.use("db")` documents live on the server. They're the part's state across versions and devices, agents can read and write them (`part_data`), and they're backed up like everything else.
+  - **Self-editing parts**: `claude.use("artifact").publish(...)` lets a part save a new version of itself (a doc edited in place, a checklist that rewrites its own source),
+    using compare-and-set against the version it's running. Viewers with `edit` can do it, while link viewers never can.
+- **Prompt-injection hygiene**: tool results label content by provenance. Comments and data written by link viewers or other people are wrapped as
+  `untrusted_content` in MCP results, and the server instructions tell agents to treat them as data, not instructions.
+
+## 3d. Creation and concurrency: the contract
+
+**What the others do, for reference.**
+- *shartifacts*: optimistic concurrency. Every update sends `base_version`, and a stale one fails with "reload the latest version before saving". It holds an in-process lock per artifact,
+  has cooperative **leases** (`acquire` with holder + TTL) on its `db` documents, a "conflict" notice when a browser draft is overtaken by an agent save, and two-step deletes with a confirmation token.
+- *Claude's artifacts*: also optimistic, not locks. Edits are `{old_str, new_str}` pairs, where each `old_str` must occur exactly once and a batch applies all-or-none.
+  A publish that loses a race is refused and handed the newer version to merge onto. Per-file compare-and-set uses `ifMatch` sha256s. Coordination between viewers uses `db` `acquire` leases.
+  Claude Docs uses atomic operation batches with idempotency ids (`opId`) and `pending` placeholder blocks that are filled in later.
+- Nobody uses pessimistic locks on source text, and partifactory doesn't either. **Optimistic by default, leases when coordination is worth it.**
+
+**Creation contract: a link right away, robustly.**
+- `part_create {name?, title, kind?, space?, request_id}` returns `{id, name, url, version: 0}` **in < 10 ms**, before anything is built. The name is reserved by a unique constraint
+  in the same transaction, and the URL works immediately, showing a "being made…" placeholder that live-updates (SSE) when the first version lands.
+  The agent can hand you the link *first* and build second.
+- **Idempotent**: `request_id` (client-chosen) makes retries safe. A timed-out call that's retried returns the same part, never a duplicate.
+- **Durable when acknowledged**: a call returns only after the manifest commit is fsynced (SQLite WAL, `synchronous=FULL` for manifest commits) and its blobs are stored.
+  Off-host durability follows within seconds (§5c). "Acknowledged" means it survives a power cut.
+- **Saves never block on compiling**: the source version is committed first, then TSX/bundle/precompress runs and the compiled output is attached to *that* version.
+  `wait: true` (the default for agents) waits for compile warnings, up to 2 s. `wait: false` returns at once, and the warnings arrive as an event.
+  The live URL only switches to a version whose compile succeeded, so a broken save never replaces a working page. The agent sees the errors instead.
+
+**Concurrency contract: several agents (and people) on one part.**
+- **Linearisable writes**: one writer task serialises all commits, so every part has a strict version sequence `n, n+1, …` with no lost updates.
+- **Anchor-based edits compose**: `part_edit` edits find their target by content (`old_str`), not by line number. Two agents editing *different* parts of a file both succeed:
+  if `base_version` is stale, the server re-applies the edits to the latest version, and they apply as long as each anchor is still present exactly once.
+  An edit fails only when its anchor itself changed, and the error returns the *current* text around it so the agent can redo just that edit.
+- **Whole-file replacement** (`files: {path: content}`) is compare-and-set per file (`if_match: <sha256>`, as in Claude's `publish`). It's never a blind overwrite.
+- **Leases for longer jobs**: `part_claim {scope: part | file | block, ttl ≤ 10 min, holder}` is advisory, like Claude's `db.acquire`. Others' edits to a claimed scope get
+  `claimed_by: Hermes until 14:32`, and a person can always override. Leases auto-release on commit or expiry, and the UI shows them ("Hermes is editing *app.tsx*").
+  Use them for multi-step refactors and "you take section 2, I'll take section 3" splits.
+- **People and agents together**: the workspace editor keeps a local draft. When a new version lands mid-edit, the draft is rebased onto it the same anchor-based way
+  (non-overlapping changes merge silently). Overlaps show a side-by-side resolve. Nobody's work is silently discarded, and "force" exists only for the person, never for agents.
+- **Data** (`window.storage`/`db`) has per-document compare-and-set plus leases, exactly like Claude's `db`, and is separate from source versioning.
+
+**Long documents** (a research write-up, a spec, a report).
+- `markdown` and `slides` parts get **stable block ids**, kept in a sidecar map, not in the visible text. Agents edit by block: `replace_block`, `insert_after`, `append_to_section`.
+  Block edits are independent, so parallel agents on different sections never conflict, and each block edit is a tiny commit.
+- **Outline-first, fill-in-parallel**, like Claude Docs' `pending` blocks: an agent creates the outline with `pending` sections ("Methods: what we measured and how"),
+  shares the link at once, and one or more agents each claim a section and fill it in. The page renders pending sections as placeholders that fill in live.
+- `part_get` on a long doc returns the outline + block ids, so agents read the section they need rather than the whole document.
+
+**Do we need CRDTs?** Not for v1. CRDTs (Yjs/`yrs`, Automerge) are production-ready, not just research, but they solve *simultaneous keystroke-level typing by humans*.
+Agents don't type keystrokes. They submit whole edits, which versions, anchors, blocks and leases handle with far less machinery. If live human co-typing in the workspace editor
+is ever wanted, `yrs` (Rust Yjs) can run *inside one editing session*, with each session's result committed as an ordinary version. The storage model doesn't change.
 
 ## 4. Surfaces
 
-### MCP (the agents' API): a small set of verbs
+### MCP tools
 
 | Tool | Does |
 | --- | --- |
-| `part_put` | create or update. `name` (semantic, becomes `<name>-part.example.com`), `content` or `edits[]`, `files{path: str\|null}`, `base_version` CAS, `kind`, `title`, `space`, `tags`, `note`. Returns id, version, URL, **warnings** (compile errors, blocked URLs) |
-| `part_get` | source of a version (+ `history`, `diff_from`), plus recent `runtime_errors` reported by viewers' browsers |
-| `part_find` | FTS5 search + filters (`kind:`, `tag:`, `space:`, `has:comments`, `updated:`) |
-| `part_share` | mint/revoke a share or preview capability (`ttl`, `version` or live, `mode`) |
-| `part_comments` | list/add/resolve. Threads addressed `to_agent` are surfaced to the agent |
+| `part_create` | reserve a name and get a live link in < 10 ms, before building (§3d). Idempotent via `request_id` |
+| `part_claim` | advisory lease on a part, file or block (≤ 10 min) |
+| `part_put` | create a part, or replace it wholesale: `name`, `content`/`files`, `kind`, `title`, `space`, `tags`, `notes`, `description` |
+| `part_edit` | the fast path: anchor edits across files, per-file `if_match` replacements, block edits for long docs; `base_version` with auto-rebase (§3c, §3d) |
+| `part_get` | outline + notes by default; `file`/`range`, `version`, `history`, `diff_from`, `runtime_errors` |
+| `part_find` / `part_recent` | search + filters (`kind:`, `tag:`, `space:`, `has:comments`, `updated:`), recent by me/this agent |
+| `part_name` | check a semantic name and get ranked alternatives |
+| `part_preview` | mint a ≤ 24 h view-only link (`preview:mint`) |
+| `part_share_request` | ask the admin to grant an audience; returns a pending request id |
+| `part_comments` | list/add/resolve; `to_agent` threads; provenance-labelled |
 | `part_data` | the part's `db`/`storage` documents (Claude ArtifactData-shaped) |
-| `part_watch` | long-poll the event log since a cursor (new versions, comments, data changes) |
-| `design_system` | rules + starter, so new parts look like partifactory unless asked otherwise |
+| `part_watch` | long-poll the event log since a cursor |
+| `part_restore` | restore an older version, or undelete within 30 days |
+| `design_system` | rules + starter, so new parts look consistent |
 
-Plus **MCP server instructions** sent at init, so "make me a packing checklist in partifactory" is enough.
+MCP server instructions sent at init cover names, notes, quick edits and the design system, so "make me a packing checklist in partifactory" is enough.
 
-### Names: semantic, chosen by the agent, made easy
+### Names: semantic, chosen by the agent
 
-A part's name *is* its hostname (`<name>-part.example.com`), so names are first-class and permanent-ish.
+A part's name *is* its hostname (`<name>-part.example.com`).
 
-- **`part_put` takes an optional `name`** (`photofinder`). If it's omitted, the server derives one from the title
-  ("Max's sleep chart" → `max-sleep-chart`): lowercased, ASCII-folded, stopwords dropped, max 4 words.
-- **`part_name` tool** (and `part name` CLI): `{want?: "photofinder", title?, description?}` → is `want` available? If not,
-  **ranked semantic alternatives** (`photo-finder`, `photofinder-family`, `family-photos`, `photofinder-2026`), all valid and free right now.
-  An agent can check before it builds, and never ends up with a random slug.
-- **Taken names fail helpfully**: a clash in `part_put` returns `name_taken` *with* the suggestions, so the agent picks one and retries in one step.
-- **Rules (checked once, in one place)**: `[a-z0-9-]`, 1–58 chars (so `<name>-part` fits the 63-char DNS label), no leading/trailing/double hyphen.
-  Reserved: `blobs`, `www`, `api`, `admin`, `auth`, `login`, `mcp`, and any name that mirrors an existing `example.com` service (`ha`, `git`, `hub`…),
-  so no `ha-part` lookalikes.
-- **Renames redirect**: the old hostname 301s to the new one for good, so shared links keep working. Native browser storage stays with the old origin, so
-  a rename warns about that, and `window.storage`/`db` data, which lives on the server, is unaffected.
-- **Same names for every surface**: Telegram previews, share links, the family hub embed and the workspace URL (`parts.example.com/photofinder`) all use the name.
+- `part_put` takes an optional `name`. Without one, it's derived from the title ("Max's sleep chart" → `max-sleep-chart`).
+- `part_name {want?, title?, description?}` → available? If not, ranked semantic alternatives that are valid and free right now.
+- A clash returns `name_taken` **with** suggestions, so the agent retries in one step.
+- Rules: `[a-z0-9-]`, 1–58 chars, no leading/trailing/double hyphens. Reserved: infrastructure words and names that mirror existing services (the list is in site config).
+- **Renames are rare and admin-confirmed**: the old hostname 301s (query string stripped) for good, and **a name that was ever used stays reserved**, so a future part can't collide with an old redirect.
+  The confirmation says plainly that installed home-screen apps and device-local storage on the old name stop working, while server-side state is unaffected.
 
-### `part` CLI (one binary): for shells, scripts, Hermes, CI
+### `part` CLI
 
-`part put page.html --title "…"` · `part put ./dir` (multi-file) · `part share <id> --ttl 1d` · `part get <id> > x.html` · `part watch` · `part open <id>`.
-It speaks the same HTTP API as MCP, with service-token creds in `~/.config/partifactory/`.
+`part login` (device code) · `part put ./dir --name …` · `part edit <name> --replace 'old' 'new'` · `part get <name> [--file f]` · `part find …` · `part preview <name>` · `part watch` · `part open <name>`.
+It's the same HTTP API and tokens as MCP. Credentials live in the OS keychain where available, otherwise in `~/.config/partifactory/` (mode 600).
 
 ### Events out
 
-An append-only `events` table drives SSE for the UI, `part_watch` for agents, and **outbound webhooks**
-(e.g. to Hermes: "A family member commented on *sleep chart*: '…'" → Hermes posts to Telegram, or picks the job up itself).
+An append-only `events` table drives SSE (UI, with a 25 s heartbeat so Cloudflare never idles the stream out), `part_watch` (agents, ≤ 50 s long-poll) and **outbound webhooks** to admin-configured URLs only (Hermes → Telegram),
+signed with HMAC and retried with backoff. Webhook targets are site config, never set by agents (that rules out SSRF).
 
 ### Workspace UI (`parts.example.com`)
 
-Library (search-first, `/` to focus), part view (Preview / Split / Source, version scrubber, diff), comments rail,
-Share dialog, phone-first layout. Small and fast. It's the thing the family actually opens, so it gets real design attention.
+Library (search-first, `/` to focus), part view (Preview / Split / Source with in-place editing, version scrubber, diff), comments rail, share dialog,
+connected agents (scopes, last used, revoke), and an admin area (people, invites, audit, health). Phone-first.
 
-### Telegram, through Hermes (no separate bot)
+### Telegram (through Hermes) and the family hub
 
-Hermes already owns Telegram. Give Hermes the MCP connection + a `partifactory` skill:
-- "make me a chart of …" → Hermes `part_put` → replies with a **preview capability link** that opens inside Telegram, no login.
-- A comment webhook → Hermes → Telegram message, with a "fix it" path.
-
-### The family hub
-
-- The family hub embeds family parts via a capability iframe (minted server-to-server by the `hub` principal).
-- Hermes's `hub-family` profile can create parts in the `family` space while answering in family hub ("make this a chart").
-- "Keep this in family hub" stays the family hub's job. partifactory only provides the embed and a stable link.
-  Git stays the family hub's source of truth, and partifactory doesn't try to be a knowledge base.
+Hermes owns Telegram. It uses MCP + a `partifactory` skill, sends preview links back to chat, and relays comment webhooks with a "fix it" path.
+The family hub embeds family parts (same-site iframe, no cookie tricks needed) and its Hermes profile can create parts in `family`. The family hub's knowledge base stays separate from partifactory.
 
 ## 5. Stack: Rust, all the way down
 
-One Cargo workspace builds **one static binary** (`partifactory`, with a `part` CLI subcommand/alias) that has every asset embedded. No Node at runtime.
+One Cargo workspace builds **one static binary** (`partifactory`, with `part` as a CLI alias) that has every asset embedded.
 
 | Concern | Choice |
 | --- | --- |
-| HTTP / async | `axum` + `tokio`, `tower` middleware for the two listeners |
-| Storage | SQLite via `rusqlite` (bundled, FTS5, WAL), behind a `Store` trait. **Stretch:** a `frankensqlite` backend behind the same trait once the conformance tests pass against both |
-| Blobs | a `BlobStore` trait. v1 is a local directory (`blobs/ab/cd/<sha256>`). An R2/S3 impl later costs nothing to add |
-| TSX/JSX → JS | **`oxc`** (transformer + minifier) to compile each file, **`rolldown`** to bundle multi-file parts. Both are pure Rust and in-process, with output cached by manifest hash |
-| Markdown / code | `comrak` (GFM) + `syntect` (highlighting) server-side. Mermaid and KaTeX render client-side |
-| MCP | `rmcp` (the official Rust SDK), Streamable HTTP, stateless |
-| Edge auth | `jsonwebtoken` + a cached JWKS from `https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`. Capabilities are compact HMAC-signed tokens (`ring`) |
-| Workspace UI | **Leptos** (SSR + hydration, Rust → WASM), so the UI shares types with the server |
-| In-part runtime shim | the only hand-written JS/TS: a few KB (`window.storage`, `claude.use`, error reporting), built at compile time and embedded |
-| Tests | `cargo nextest`, golden tests for manifests and diffs, a property test for capability scoping (cap A never reads B), and an end-to-end test that drives a real browser against `*.localhost` origins |
+| HTTP | `axum` + `tokio` + `tower` (three listeners: workspace, content, ops) |
+| Storage | SQLite via `rusqlite` (bundled, FTS5, WAL). No storage-backend abstraction until there's a second backend |
+| Blobs | `BlobStore` trait: local dir in v1, R2/S3 as an implementation |
+| TSX/JSX → JS | `oxc` (transform + minify) + `rolldown` (bundle), in-process, cached by manifest hash. Versions pinned, with a **golden compile corpus** (shartifacts' compat-matrix artifacts + Claude-written samples) run on every upgrade |
+| Markdown / code | `comrak` + `syntect` server-side; Mermaid and KaTeX client-side |
+| MCP | `rmcp` (official Rust SDK), Streamable HTTP, stateless |
+| People auth | `openidconnect` (OIDC client), `webauthn-rs` (admin step-up) |
+| Agent auth | OAuth 2.1 AS/RS: authorization code + PKCE, device code, CIMD/DCR, RFC 9728 metadata, RFC 8707 resource binding. Small and hand-written over well-tested primitives, with a conformance test suite |
+| Capabilities | compact HMAC-signed tokens (`ring`), versioned keys (`kid`) |
+| Workspace UI | Leptos (SSR + hydration), CodeMirror 6 for the source editor (the one JS dependency, vendored as a shared blob) |
+| Observability | `tracing` (JSON logs), `metrics` + Prometheus exporter, optional OTLP |
+| Tests | `cargo nextest`, golden tests (manifests, diffs), property tests (grant A never reads B), OAuth conformance, browser e2e with virtual WebAuthn against `*.localhost` |
 
-**Bend 2?** I think Bend isn't the right fit for the server, though I'd confirm against the bend2 skill before ruling it out completely.
-Bend's strength is automatically parallelising *pure computation* across cores and GPUs, and this service is almost entirely I/O:
-HTTP, SQLite, filesystem, crypto. Bend also lacks the ecosystem a server needs (TLS, HTTP, SQLite, JWT). If a part ever needs heavy
-parallel compute, that's where Bend could fit. Rust is the ambitious choice that will actually ship.
+Maturity check before P0: `rolldown` as a library, `rmcp` Streamable HTTP and Leptos SSR each get a one-day spike, and esbuild-as-subprocess is the fallback for the bundler.
+**Bend 2** was considered and set aside: this service is I/O-bound, and Bend's strength is parallel pure computation.
 
-## 5a. Performance: a design goal with numbers, tested in CI
+## 5a. Performance: numbers, measured honestly
 
-Honest framing: a hand-built proxy won't beat HAProxy or nginx at *general* proxying, and at this load any of them would be idle.
-But partifactory only has to handle a **reduced subset** of HTTP: a fixed route table compiled into the binary, a handful of headers that matter,
-and responses whose bytes are fixed (immutable, precompressed, ETag = hash). It does no config interpretation, regex routing, module chain or generic
-header processing. It also needs no upstream hop: nginx would have to proxy to an app server, while here the app *is* the server.
-Doing less work per request is how it can beat them on *this* workload. On raw static blobs, nginx's `sendfile` path is already near the syscall floor,
-so expect parity there and wins on the dynamic paths.
-The ambitious part is the design, which means **most requests never reach the NAS, and the ones that do stay off the slow paths.**
+partifactory handles a **reduced subset** of HTTP: a fixed route table, fixed responses (immutable, precompressed, ETag = hash) and no upstream hop.
+Doing less work per request is how it can beat general-purpose proxies on *this* workload. On raw static files nginx's `sendfile` is near the syscall floor, so the target there is parity.
+**Most requests never reach the NAS**: shared libraries come from Cloudflare's edge.
 
-1. **Let the edge do the work.** Every blob is named by its sha256, so its bytes can never change. The content host serves blobs at `/b/<sha256>` with
-   `Cache-Control: public, max-age=31536000, immutable` and a Cloudflare cache rule for that path. Pages, scripts, libraries and media
-   are then served from Cloudflare's edge after the first view. Only the small per-view HTML entry (which carries the capability) and `_rt` data calls travel the tunnel.
-   Blobs live on one shared host, `blobs-part.example.com/b/<sha256>` (CORS `*`, they're public-by-hash and unguessable), so React, libraries and
-   media are cached **once** across every part, not once per hostname.
-   The current zone-wide "bypass cache for self-hosted" rule needs a single exception for `blobs-part.example.com/b/*`.
-2. **Do the work at save time, not view time.** On `part_put`, compile TSX (oxc/rolldown), render Markdown, minify, and precompress each output
-   blob with **brotli-11 and zstd-19**, stored next to the raw bytes. Serving is then content negotiation plus a file send. No compression happens on the request path.
-3. **A lean hot path.** Blob responses are `pread`/`sendfile` of a precompressed file, so the bytes never pass through userspace buffers.
-   Small hot blobs live in a memory-mapped LRU, ETag = the hash, and `304` is answered without touching disk.
-   Capability check = one HMAC verify (no DB read). Session check = one keyed lookup in an in-memory session cache.
-4. **SQLite tuned for reads.** WAL, `mmap_size`, a pool of read connections + one writer task, prepared statements cached,
-   FTS5 with `bm25` ranking. Events go to SSE subscribers from an in-memory broadcast, with no polling.
-5. **A runtime that can be swapped.** Start on tokio/hyper (HTTP/1.1 + h2c from cloudflared). The serving core sits behind a small trait, so a
-   thread-per-core **io_uring** runtime (`monoio`/`compio`) can be benchmarked as an alternative on Linux. It only replaces tokio if it wins in the benchmark.
-   Pingora stays an option if we ever proxy to app backends.
-6. **Cut the tunnel's cost too.** cloudflared runs with `--protocol quic`, has multiple connections, and sits on the same host as the binary.
+- **Work at save time**: compile, render, minify and precompress (**brotli only**: every browser supports it, and zstd isn't worth doubling the blob store) when saving, so serving is negotiation + a file read.
+- **Lean hot path**: capability check = one HMAC verify (no DB), 304s answered from the ETag alone, hot small blobs in an mmap'd LRU.
+- **SQLite for reads**: WAL, mmap, a read pool + a single writer task, cached statements, in-memory SSE broadcast.
+- **One runtime: tokio.** A thread-per-core io_uring runtime is parked as an idea, to be revisited only if a profile shows the runtime is the bottleneck, which at this load it won't be.
+- **Honest about zero-copy**: hyper's default body path copies through userspace. v1 uses mmap'd LRU + `pread`, which is plenty. Real `sendfile(2)` plumbing is optional work, and it only helps the loopback hop.
+- **Serving a part is two steps**: an in-memory `part → live version` cache (invalidated from the events stream) resolves the entry without a DB read.
 
-**Targets (failing them blocks a release):**
+**How it's gated, so the numbers mean something**: absolute targets are *tracked*. Release gates compare against the previous release **on the same machine**
+(the deploy host's bench job runs off-hours), failing on a >10 % regression. Shared CI runners are too noisy to gate on microseconds.
 
-| Metric | Target |
+| Metric | Target (tracked) |
 | --- | --- |
-| Blob served from origin, p99 server time (warm) | < 200 µs |
-| Per-view HTML entry incl. capability check, p99 | < 1 ms |
+| Part blob from origin, p99 server time (warm) | < 200 µs |
+| Grant hand-off round trip (code exchange), p99 server time | < 1 ms |
 | `part_find` over 10k parts, p99 | < 5 ms |
-| `part_put` small edit (no TSX), p99 | < 10 ms |
-| Repeat open of a part from a phone, end to end | < 150 ms, mostly edge-cached |
-| Static-blob throughput on the NAS vs **nginx** and **HAProxy** serving the same precompressed files | ≥ parity, tracked over time |
+| `part_edit` small edit, no compile, p99 | < 10 ms |
+| `part_edit` TSX part incl. compile + bundle + brotli, p50 / p99 | < 150 ms / < 1 s |
+| Repeat open of a part from a phone, end to end (entry HTML always crosses the tunnel; shared libs from the edge) | < 150 ms on a good uplink, measured from real devices and reported, not gated |
+| Static-file throughput vs nginx and HAProxy on the same box and files | ≥ parity |
 
-`partifactory bench` drives these with `oha`/`wrk2` and keeps the results in `bench/history.jsonl`. The nginx/HAProxy comparison runs as a docker
-compose fixture serving the identical blob directory, which keeps the comparison honest.
+## 5b. Builds and deploys
 
-## 5b. Builds and deploys: where Docker belongs
+- **Parts need no build infrastructure.** TSX/CSS/Markdown compile in-process at save time, CDN references are mirrored on save, and a part that needs real npm packages
+  is built by the agent locally (`vite build`) and uploaded as files. Nothing to install, and no containers per part.
+- **partifactory itself is a Docker image**, built by Gitea Actions: `cargo-chef` layer caching → static musl binary → `FROM scratch` image (~20 MB),
+  amd64 (+ arm64 for other hosts), with an SBOM, signed with `cosign`, pushed to the Gitea registry and **deployed by digest**, never `:latest`.
+- **Deploy = pull + start + health-gate**: the deploy job (protected runner, Gitea secrets) runs `partifactory provision` (reconcile Cloudflare/Authentik),
+  then starts the new container next to the old one, waits for `/readyz`, switches, and **rolls back automatically** if health fails within 2 minutes. Schema migrations run before the switch and must be forward-compatible with the previous binary.
+- **Day to day**: `cargo run`/`bacon` against `*.localhost`. `part` CLI binaries ship through GitHub Releases (the mirror) + `cargo binstall`.
+- **If backends ever happen**: WASM components on `wasmtime` first, a container per app only as a fallback.
 
-- **Building parts: no Docker, no build chain.** shartifacts runs esbuild in-process for pages, and Go builds in a runner container for app backends.
-  partifactory compiles TSX/JSX, CSS and Markdown **in-process** with oxc + rolldown at save time. That takes milliseconds, versus seconds to start a container,
-  and the result is cached by manifest hash. Agents just send source, and there's nothing to install.
-  For the rare part that needs real npm packages, the agent builds locally (`vite build`) and puts the `dist/` folder as a multi-file part.
-- **Deploying partifactory: yes, Docker, because TrueNAS custom apps *are* Docker.** The image is `FROM scratch` (or distroless/static)
-  with one static musl binary (~15–25 MB), one volume (`/data`) and env vars. It starts in milliseconds. cloudflared runs alongside it in the same compose file.
-- **Day to day, without Docker:** `cargo run` (or `bacon` for watch mode) locally against `*.localhost`. `part` CLI binaries for macOS/Linux
-  ship via GitHub Releases + `cargo binstall`, so the Mac and the Hermes VM get a single file, no container.
-- **If backends ever happen (P5): WASM before Docker.** Per-part backends as **WebAssembly components on `wasmtime`**, in-process, with
-  capability-scoped imports (its own KV/SQLite and an HTTP allowlist). Cold start is microseconds and memory per backend is tiny,
-  and the sandbox comes from the runtime, not Landlock + a sidecar. Docker-per-app stays the fallback for anything that can't target WASM.
+## 5c. Disaster recovery and self-provisioning
 
-## 5c. Disaster recovery and self-provisioning (design goal)
+**From nothing to running with one credential set**: a Cloudflare API token, an IdP bootstrap token, and a Docker host it can reach.
 
-**From nothing to running with one credential set:** a Cloudflare API token, an IdP bootstrap token, and a Docker host that partifactory can reach.
+- **`partifactory provision`** is an idempotent **create-if-missing / update-if-owned** script driven by `site.toml` (private site config). It's honest about being a script rather than Terraform:
+  it only manages resources it owns (named `partifactory-*`), so reapplying is safe, and it never "reconciles" shared IdP flows. A diff/plan mode comes later, if it's ever needed.
+  - Cloudflare: its own tunnel + ingress, the `parts` record and the `*` wildcard (created only after `/readyz` passes), cache rules (shared blobs only), WAF rate-limit rules.
+  - IdP: the OIDC provider/app, the `partifactory-invite` flow, login-stage tweaks, the `partifactory-provisioner` account + RBAC role.
+    It uses Authentik blueprints if they can be applied over the API, otherwise direct API calls. Which one is to be confirmed in P1.
+  - `--dry-run` shows a diff, every before-state is recorded, and it only ever deletes resources named `partifactory-*` that it created.
+- **Backups, continuous and off-host**: Litestream streams SQLite to R2 with **client-side encryption** (age), and blobs sync to R2 append-only (encrypted, content-addressed).
+  **Ordering**: a blob is written locally *and* acknowledged by R2 before any manifest referencing it commits, so a point-in-time restore never points at missing blobs. Restore verifies hashes.
+  RPO is seconds.
+- **Restore is lazy, so RTO is real**: `partifactory restore --from r2://…` restores the DB first and starts serving, pre-fetches blobs for the newest parts,
+  and fetches the rest from R2 on first miss. RTO < 15 min regardless of how much history exists.
+- **Identity is part of DR**: partifactory's grants point at IdP users. **The IdP's database (Authentik's Postgres) is in the site's off-host backup set** (site ops, documented in site config),
+  so a full-loss restore brings back the same users, passkeys and `sub`s. Degraded mode, if the IdP can't be restored: `partifactory export-grants` (keyed by email/username, kept with backups)
+  plus a re-invite runbook that rebinds grants as people re-enrol.
+- **Drills run from a laptop**, not CI, because Gitea (and its secrets) may be on the host that died. The monthly drill uses a released binary + the three credentials + site config from the offline copy,
+  restores into a throwaway container and runs the e2e suite. A CI drill also runs, but the laptop drill is the one that counts.
+- **Host cutover rotates the tunnel connector token**, so a zombie connector on the old host can't take traffic. The wildcard DNS record is created only after `/readyz` passes
+  through the tunnel (probed via the tunnel's `cfargotunnel.com` name).
+- **Any Docker host**: deploy targets are adapters (`docker` over an SSH Docker context, `truenas` via its middleware). Moving = change `deploy.target`, then `restore` + `provision`.
+  The hostnames never change.
+- **Secrets, only in Gitea Actions**: `PF_CF_API_TOKEN`, `PF_TUNNEL_TOKEN`, `PF_IDP_BOOTSTRAP_TOKEN`, `PF_IDP_PROVISIONER_TOKEN`, `PF_SESSION_KEY`,
+  `PF_CAP_HMAC_KEY`, `PF_BACKUP_AGE_KEY`, `PF_R2_*`, `PF_DEPLOY_SSH_KEY`. **The backup age key also has an offline copy** (password manager), or encrypted backups are unrecoverable after losing Gitea.
+  The GitHub mirror is passive: no Actions, no secrets.
+- **Rotation**: rotate in Gitea and re-run the pipeline. Capabilities are short-lived (≤ 10 min, previews ≤ 24 h), so a rotated HMAC key is kept for 25 h, then dropped.
+  Link shares are random tokens looked up in the DB, not HMAC-signed, so rotation never affects them.
+- **Site config itself** (`site.toml`, the admin pin, the backup age key) has an offline copy in the password manager. Without it, nothing else is recoverable.
 
-- **`partifactory provision` is a declarative, idempotent reconciler.** It isn't a list of steps, and running it twice changes nothing. From `site.toml` (private site config) it ensures:
-  - **Cloudflare**: its own tunnel + ingress, the `parts` record and the `*` wildcard record (only after the service answers health checks), the blob cache rule.
-  - **Authentik** via **blueprints** (Authentik's own declarative YAML, applied through the API): the OIDC provider/app, the `partifactory-invite` flow,
-    the login-stage settings, and the `partifactory-provisioner` service account + least-privilege RBAC role. Its token is minted and stored as a secret.
-  - It prints a plan/diff first (`--dry-run`), records every before-state, and refuses to delete anything it didn't create (resources are tagged/named `partifactory-*`).
-- **Data is continuously backed up off-host, so recovery is restore + reconcile:**
-  - SQLite is streamed with **Litestream** to an R2 bucket (point-in-time, seconds of RPO).
-  - Blobs are content-addressed, so the backup is an append-only sync of new hashes to R2. It never rewrites, and verification is just comparing hashes.
-  - `partifactory restore --from r2://…` on a fresh host rebuilds `/data`, then `provision` re-points the tunnel. Target RTO: under 15 minutes.
-  - A **monthly restore drill** in CI restores into a throwaway container and runs the e2e suite against it. A backup only counts once it has been restored.
-- **Any Docker host, not just TrueNAS.** Deploy targets are a small adapter: `docker` (any host via a Docker context over SSH: a VPS, the Hermes VM,
-  a Mac), with `truenas` as one adapter (middleware custom app). Moving hosts = change `deploy.target` in site config, run `restore` + `provision`, done.
-  The cloudflared connector runs next to the app wherever it lives, so the hostnames never change.
-- **CI/CD on Gitea Actions, with secrets only in Gitea:** push → build/test/bench → signed image to the Gitea registry → protected deploy job
-  (`partifactory provision && deploy`) to the configured target. Secret names: `PF_CF_API_TOKEN`, `PF_TUNNEL_TOKEN`, `PF_IDP_BOOTSTRAP_TOKEN`, `PF_IDP_PROVISIONER_TOKEN`,
-  `PF_SESSION_KEY`, `PF_CAP_HMAC_KEY`, `PF_R2_*`, `PF_DEPLOY_SSH_KEY`. The GitHub mirror is passive: no Actions, no secrets.
-- **Key rotation is a reconcile too:** rotate a secret in Gitea and re-run the pipeline. Capability keys are versioned (`kid`), so rotating doesn't break links that were minted under the old key.
+## 5d. Operations: logs, metrics, analytics, abuse, maintenance, scale
 
-**Infrastructure stays outside the app.** partifactory doesn't know about TrueNAS or ZFS. It's an OCI image that needs one
-writable data directory and a few env vars. Running it as a TrueNAS custom app, snapshotting the dataset and wiring cloudflared
-are deployment concerns, and they live in `deploy/`, not the code. The Cloudflare side (tunnel ingress, wildcard record, cache rule) and the Authentik side (OIDC provider, `partifactory-enrollment` flow, `partifactory-provisioner` RBAC role)
-is a script against the Cloudflare API, so it can be reproduced without clicking through the dashboard.
+**Logs**: structured JSON to stdout (`tracing`), with one line per request carrying the `cf-ray` id, route, status, latency, principal/actor (never tokens, cookies or part content).
+Secrets are redacted by type at the logging layer, not by convention. Log levels change at runtime from the admin area.
+
+**Metrics** (`:9090/metrics`, not routed through the tunnel). These include **hits on non-`-part` hostnames** caught by the wildcard, because a future service whose DNS record is missing shows up here first: request rate, errors and latency per route class, grant decisions, OAuth events, compile times,
+blob store size, cache hit ratio (via Cloudflare's analytics API, polled), SQLite WAL size, backup lag (Litestream), last restore-drill result.
+
+**Health and alerting**: `/healthz` (process up), `/readyz` (DB writable, blob store OK, backup lag < 5 min, IdP reachable).
+An admin **Health** page shows the same, plus disk headroom and version. Alerts (backup lag, disk > 80 %, error-rate spike, failed restore drill, IdP unreachable)
+go through a `Notifier` trait: a webhook to Hermes → Telegram by default, `ntfy` as an option. A Cloudflare health check on `/healthz` catches "the whole box is down".
+When the origin is down, a tiny static Cloudflare Worker fallback page says "partifactory is down for maintenance" instead of a raw 1033.
+
+**Analytics, first-party and privacy-respecting**: views per part per day, unique viewers (signed-in = principal; link viewers = a daily-salted hash of IP + UA, never stored raw),
+referrer host for link shares, and last viewed. They're shown on each part's details and in an admin overview ("what's actually used"), and agents can read them via `part_get`.
+There are no third-party scripts and no cross-part tracking. Raw view events are kept for 90 days, then rolled up.
+
+**Abuse prevention**:
+- **Rate limits** per IP and per principal (`governor`) on `/grant`, `/oauth/*`, `/l/*`, `/mcp`, `_rt` writes, invite acceptance and comments, mirrored by Cloudflare WAF rules at the edge.
+- **Body and size caps**: 2 MiB per source file, 25 MiB per media blob, 8 MiB per version, 256 KiB per db document, and request bodies are capped before auth on unauthenticated routes.
+- **Quotas** per space and per agent token: parts, versions/day, storage. An agent that loops hits a quota, and the event is surfaced as an alert, not discovered when the disk fills.
+- **Invites**: single use, expiring, a cap on outstanding invites, and enrolment is rate-limited per invite and per IP.
+- **Link shares**: view-only by default, per-link request caps, a kill switch ("revoke all link shares") in the admin area, and `noindex` + `X-Robots-Tag` everywhere.
+- **Mirror-on-save fetches**: CDN allowlist only, size and time caps, no redirects off-allowlist, so saving can't be used to make requests to internal addresses.
+
+**Maintenance**:
+- **Blob GC**: mark-and-sweep from all manifests (every version of live and soft-deleted parts) plus db/storage references. Unreferenced blobs are deleted after a 7-day grace period,
+  and R2 copies follow 30 days later.
+- **Retention**: every version manifest is kept forever (they're tiny). An optional per-space policy can drop old versions' unique blobs beyond N versions or X days, and a version is never dropped while a link pins it.
+- **Migrations**: forward-only, embedded, run at start inside a transaction, tested by the restore drill against a production-shaped backup.
+- **Dependencies**: Renovate on Gitea, plus `cargo audit` + `cargo deny` (licences, advisories) in CI, base image pinned by digest.
+- **`partifactory doctor`**: checks config, DNS, tunnel, IdP reachability, provisioner permissions (expects 403 on a forbidden group op), backup freshness and disk.
+
+**Scale, honestly**: one node by design. Expected load is a few people and agents, about 10k parts and ~100 GB of blobs over years, which is far inside
+SQLite (a single writer handles thousands of small writes/s) and one disk. The shapes that would force a change are many concurrent writers or more than one host,
+and neither is a goal. Blobs moving to R2 as primary storage is the first lever if the disk is ever the limit.
 
 ## 6. Phases
 
-Each phase ends with something usable.
+Each phase ends with something usable, and has its own "Done when".
 
-**P0 Core (local only).** Repo, SQLite schema, blob store, version manifests, `part` CLI against localhost, HTML + Markdown + SVG + code kinds,
-content server with capabilities, precompressed blobs, `partifactory bench` with the nginx/HAProxy fixture.
-*Done when:* `part put x.html --name packing` → opens at `packing-part.localhost:8081` (browsers resolve `*.localhost` to loopback), and the blob targets in §5a are measured.
+**P0 Core (local).** Repo, schema + migrations, blob store, manifests, `part` CLI, HTML/Markdown/SVG/code kinds, content listener with capabilities,
+mirror-on-save, precompression, logs + metrics, `bench` with the nginx/HAProxy fixture. One-day spikes on rolldown, rmcp and Leptos. P1 spike on Authentik: conditional UI, blueprint-over-API, OIDC `groups` claim.
+*Done when:* `part put x.html --name packing` opens at `packing-part.localhost:8081`, and the bench numbers are recorded.
 
-**P1 Edge + identity.** Tunnel ingress + `*.example.com` wildcard, Authentik OIDC login on `parts.example.com`, grant hand-off to part hosts,
-policy engine + audience ladder, admin pinned to the admin + passkey re-auth, agent tokens, share/preview links. Minimal workspace UI (library, view, versions, share dialog).
-**P1b Invites.** `partifactory-provisioner` service account + RBAC, `partifactory-enrollment` flow, invite links, add-by-email, `pf-*` groups,
-Authentik webhook sync, pending-invite list. *Done when:* the admin invites a new email address from the share dialog, they enrol with a passkey and land on the part, and removing them from the group in Authentik locks them out within a minute.
-*Done when:* the admin opens a part on his phone via SSO, and a share link works from mobile data with no login. The security checklist (§7) passes from outside.
+**P1 Edge + identity.** Own tunnel + wildcard via `provision`, OIDC login, grant hand-off (one-time codes), policy engine + audience ladder,
+admin pin + native passkey step-up, link shares, minimal workspace UI (library, view, versions, share dialog), rate limits, health page, backups + first restore drill, CI deploy.
+*Done when:* the admin opens a part on his phone via SSO, a link share works from mobile data with no login, and the security checklist (§7) passes from outside.
 
-**P2 Agents.** MCP server + instructions + design system, Claude Code connected (Mac), Hermes connected (MCP + CLI + skill),
-comments with `to_agent`, events/SSE/`part_watch`, webhook → Hermes → Telegram.
-*Done when:* "Hermes, make me a meal-plan page" in Telegram → link in Telegram → comment on it → Hermes fixes it.
+**P1b Invites.** **First, the provisioner permission gate** (§3a), which decides how much of the following ships. Then the `partifactory-invite` flow, passkey invite links (single and multi-use), add-by-email,
+"new passkey link" for existing people, `pf-*` groups, pending-invite cleanup.
+*Done when:* the admin invites a new email address from the share dialog, they enrol with a passkey and land on the part, and removing them in the IdP locks them out within a minute.
 
-**P3 Claude compatibility.** React/TSX kind with the common library set + shadcn/Tailwind, `window.storage`, `claude.use` for `db`/`user`/`comments`/`artifact`,
-runtime error reporting back to `part_get`. Borrow shartifacts' compat matrix as the spec (with credit).
-*Done when:* a page copied from a claude.ai artifact runs unchanged.
+**P2 Agents.** OAuth AS (auth code + PKCE, device code, CIMD/DCR, consent sheet), MCP tools + resources + instructions, agent notes, `part_edit` with rebase,
+comments with provenance, events/SSE/webhooks, Hermes skill.
+*Done when:* Claude Code connects with one passkey tap + Allow and edits a week-old part in one call, and "Hermes, make me a meal-plan page" in Telegram → preview link → comment → Hermes fixes it.
 
-**P4 Family + family hub.** `family` space, family onboarding, family hub embed, Hermes `hub-family` creating family parts, slides + mermaid kinds.
+**P3 Claude compatibility.** React/TSX with the common libraries + shadcn/Tailwind, `window.storage`, `claude.use` (`db`, `user`, `comments`, `artifact` incl. self-publish), runtime error reporting.
+The spec is shartifacts' compatibility matrix (credited).
+*Done when:* a page copied from a claude.ai artifact runs unchanged, including state persistence and self-editing.
 
-**P5 (only if needed) backends.** If a real part needs a server: run it as an isolated container per app on TrueNAS (or a Worker),
-reached through the same capability model. Not designed further until there's a concrete use.
+**P4 Family + family hub.** The `family` space, family onboarding, family hub embed, Hermes `hub-family` profile, slides + mermaid, analytics overview.
 
-## 7. Security checklist (run from outside the network)
+**P5 (only if needed) backends.** WASM components, through the same grant model.
 
-- `parts.example.com` without a session → Authentik login. A part host without a capability → redirect to `/grant`, never content.
-- Only the admin's `sub` reaches admin; a user added to the IdP admin group still gets 403 on admin routes. Admin routes without a fresh passkey auth → re-auth.
-- The provisioner credential cannot add anyone to a non-`pf-*` group (test it against Authentik, expecting 403), and the core refuses before even trying.
-- Agent tokens can't change grants or invite; share requests queue for approval.
-- The origin is unreachable except through the tunnel (no published ports on TrueNAS beyond the docker network).
-- The content listener answers **only** capability-bearing requests: `/`, `/api`, `/mcp` → 404 there.
-- A capability for part A reads nothing of part B. A revoked share → 404 within seconds. A preview cap expires on time.
-- Parts get a strict CSP: `connect-src 'self'`, script/style from self + the CDN allowlist, `frame-ancestors` = workspace + family hub only.
-- Service tokens are one per agent, scoped, revocable. No tokens end up in part source, logs or webhook bodies.
+## 7. Security checklist (run from outside the network, in CI against staging)
+
+- No session → IdP login. A part host without a grant → `/grant`, never content. `/grant` can't redirect off the part's own host.
+- Grant codes are single-use and expire in 30 s. Capabilities are host-bound (a cookie for A is ignored on B). Revoked link → 404 within seconds.
+- Private part blobs are never in Cloudflare's cache (`cf-cache-status` ≠ HIT), and the shared blob host serves only shared-class blobs.
+- Only the admin's `sub` reaches admin. An IdP-admin user still gets 403. Admin without a fresh partifactory passkey assertion → step-up.
+- The provisioner gets 403 from the IdP on a non-`pf-*` group, and the core refuses before calling.
+- Agent tokens: audience-bound (a token for `/mcp` is rejected elsewhere), scope- and space-limited, no admin scopes obtainable, refresh reuse → the whole token family is revoked.
+- Unconsented OAuth clients can do nothing. Registration is rate-limited.
+- CSP on every part response: `default-src 'self' https://blobs-part.example.com; form-action 'self'; frame-ancestors https://parts.example.com https://hub.example.com`. There are no third-party origins.
+- The origin is reachable only through the tunnel. `:9090` is never routed.
+- No tokens, cookies or part content in logs (tested with canary values).
+- Rate limits trip at the configured thresholds, and quotas stop a looping agent.
+- `/_rt/*` rejects requests without `X-PF-Cap` or with `Sec-Fetch-Site` ≠ `same-origin`. A sibling part's page can't write another part's data.
+- Revocation via grant epoch: a revoked person, link or agent fails on their very next request, with no DB read on the hot path.
+- Telegram/Slack unfurlers fetching a share link get the content-free card only.
+- Provisioner gate (P1b) results are recorded: no non-`pf-*` membership, no `is_superuser` groups, no flow or stage edits.
+- Real-device pass (iPhone Safari, Android Chrome) for: standalone open, family hub embed, invite acceptance, sign-in.
 
 ## 8. Decisions (2026-10-22)
 
-1. **Hostnames**: `parts.example.com` (workspace) + `<name>-part.example.com` per part via a `*.example.com` wildcard → tunnel, with agent-chosen semantic names.
-   No separate proxy process: the edge layer is built into the binary and benchmarked against nginx/HAProxy.
-5. **Docker for deploying partifactory, not for building parts** (§5b).
-2. **Stack**: Rust (section 5). Bend 2 considered and set aside for the server.
-3. **Host**: TrueNAS, but the app stays infrastructure-agnostic (plain OCI image + data dir).
-4. **Code reuse**: written fresh, with shartifacts as the reference spec, credited.
-
-**Tunnel**: partifactory gets its own Cloudflare tunnel named `partifactory` (decided 2026-10-22), so it can be revoked independently. Its ingress: `parts.example.com` → `http://partifactory:8080`, `*.example.com` → `http://partifactory:8081`, everything else → 404. DNS records are created only once the service is up, so the wildcard never routes to a dead tunnel.
+1. **Hostnames**: `parts.example.com` + `<name>-part.example.com` via a `*.example.com` wildcard, with semantic names. The part suffix is configurable.
+2. **Stack**: Rust. Bend 2 considered and set aside.
+3. **Host**: any Docker host, TrueNAS by default. The app knows nothing about TrueNAS/ZFS.
+4. **Code reuse**: fresh, with shartifacts as the reference spec, credited.
+5. **Docker**: for deploying partifactory only. Parts need no builds.
+6. **Tunnel**: its own Cloudflare tunnel `partifactory` (created 2026-10-22, routes configured, no DNS records yet).
+7. **Identity**: Authentik via OIDC, swappable. In-app grants and invites. Admin pinned to the admin with native passkey step-up.
+8. **Agents**: OAuth 2.1 per the MCP spec, with partifactory as a federating authorization server. Per-agent consented, scoped, audience-bound tokens.
+9. **Source of truth**: private Gitea repo + passive public GitHub mirror. Site config in a separate private repo. Secrets in Gitea Actions only.
 
 ## 9. Non-goals (v1)
 
-Multi-tenant SaaS. Per-part backends. Offline mode. Replacing the family hub's knowledge base.
+Multi-tenant SaaS. Multi-node. Per-part backends. Offline mode. Listed or indexable public parts. Replacing the family hub's knowledge base.
 Public sign-up. A dedicated Telegram bot (Hermes is the bot).
+
+## 10. Changes from the fresh-eyes review (2026-10-22)
+
+- **Grant hand-off**: one-time 30 s codes replace `?cap=` tokens in URLs. `SameSite=Lax` replaces `SameSite=None; Partitioned`, which wasn't needed because everything is same-site. `/grant` carries a path only, which closes the open redirect.
+- **Blob privacy**: split shared and part blobs. Private parts' files are no longer on an edge-cached, CORS-`*`, URL-is-the-key host, where revocation couldn't reach them.
+- **Third-party code**: mirror-on-save replaces the CDN allowlist, so CSP has no third-party origins and §1 and §2 no longer contradict each other.
+- **Agent auth**: static admin-minted tokens → OAuth 2.1 per the MCP spec, with consent, scopes, spaces, delegation (`act`), device flow for headless agents, and DCR abuse limits.
+- **Agent sharing contradiction**: resolved with a narrow `preview:mint` scope (≤ 24 h, view-only, one version). Everything else is `share:request`.
+- **Admin step-up**: native WebAuthn in partifactory instead of trusting IdP `max_age`/`amr` claims.
+- **Link shares**: view-only by default. Comments from link viewers are opt-in and labelled as untrusted for agents (prompt injection).
+- **New**: agent discoverability (notes, outlines, resources, `part_recent`), `part_edit` with auto-rebase, in-place editing, self-publishing parts.
+- **New**: operations (logs, metrics, health, alerts, analytics, abuse limits, quotas, blob GC, retention, migrations, dependency hygiene, doctor, scale envelope).
+- **Fixed**: stale Cloudflare Access references, inconsistent `form-action`, duplicated P1 "Done when" lines, `partifactory-enrollment` vs `partifactory-invite`,
+  CI perf gating on noisy runners, unencrypted backups, and the missing offline copy of the backup key.
+
+**Merged from the GLM 5.3 adversarial review** (`docs/reviews/2026-10-22-glm-5.3.md`, run via ntm/omp on 2026-10-22, against the earlier draft):
+
+| GLM finding | Outcome |
+| --- | --- |
+| S1 partitioned cookies / Safari / `/grant` in iframes (critical) | Already fixed in the rewrite (same-site `SameSite=Lax`). **Also adopted**: path-mode fallback + header-only `_rt`, so nothing depends on cookies |
+| S2 caps in URLs | Already fixed (one-time 30 s codes, `no-referrer`). Rename 301s strip the query |
+| S3 same-site cookie tossing | **Adopted as an open decision** with a recommendation: buy a separate domain for parts before P1. Honest CSP wording on navigation |
+| S4 invite races / zombie accounts | **Adopted**: multi-use invites with a count, "new passkey link" for existing users, cleanup list |
+| S5 provisioner RBAC granularity / `is_superuser` | **Adopted as a P1b design gate** with explicit fallbacks. The containment claim now matches what's verified |
+| S6 no break-glass; pin is a DR liability | **Adopted**: console break-glass, pin + site config backed up off-host |
+| S7 agent sharing contradiction, no cascade | Already fixed (`preview:mint` vs `share:request`). **Adopted**: `minted_by` cascade revocation |
+| S8 CSRF on `_rt` | **Adopted**: `X-PF-Cap` header + `Sec-Fetch-Site` check |
+| S9 CDN allowlist ≈ `*`; CSP gaps | Already fixed (mirror-on-save). **Adopted**: full directive list (`default-src 'none'`, `base-uri`, `object-src`…) |
+| S10 open redirect via `/grant` | Already fixed (path-only, host derived from the part name) |
+| S11 blob host = unrevocable | Already fixed (shared vs part blobs; part blobs never edge-cached) |
+| S12 revocation claims inconsistent | **Adopted**: in-memory grant epoch |
+| C2 Telegram webview / unfurlers | **Adopted**: content-free card at `/s/<token>`. Telegram stays preview-only |
+| C3 conditional UI / `max_age` assumptions | Admin step-up is now native WebAuthn. Conditional UI is a P1 spike. Budgets count real interactions |
+| C4 h2c, SSE timeouts | h2c claim dropped. SSE heartbeat 25 s, long-poll ≤ 50 s |
+| C5 wildcard captures future names | **Adopted**: a metric on non-`-part` hits |
+| C6 editing shared login flows | **Adopted**: partifactory gets its own cloned flows. Global changes only when explicitly wanted (the "stay signed in" removal was) |
+| C7 oxc/rolldown risk, import maps | **Adopted**: pinned versions, golden compile corpus, import-map story. The `vite build` escape hatch stays prominent |
+| C8 rename collisions | **Adopted**: used names stay reserved, renames are admin-confirmed |
+| C9 hidden DB read on entry | **Adopted**: in-memory live-version cache |
+| O1 IdP traits are YAGNI | **Partly rejected**: the admin asked for swappability. Kept thin, with one real adapter + a test fake |
+| O2 io_uring + frankensqlite | **Adopted**: both cut (parked as ideas) |
+| O3 webhook + poll | **Adopted**: poll only |
+| O4 reconciler/adapter matrix too heavy | **Partly adopted**: an honest idempotent script, owned resources only, no plan mode in v1. Multi-host stays (the admin wants DR and portability) |
+| O5 `manage` grant editing | **Adopted**: grants are admin-only in v1 |
+| M1–M3 GC, quotas, rate limits, monitoring | Already in the rewrite (§5d) |
+| P1 µs gates on shared runners | Already fixed (same-machine regression gates) |
+| P2 sendfile claim | **Adopted**: claim softened, mmap + pread in v1 |
+| P3 content-free cacheable HTML shells | **Rejected**: it would break non-JS parts and Claude compatibility. The 150 ms target is now reported honestly, not gated |
+| P4 brotli + zstd | **Adopted**: brotli only |
+| P5 targets exclude the TSX path | **Adopted**: a TSX edit target added |
+| D1 IdP not in DR (critical) | **Adopted**: Authentik's DB in the site backup set + `export-grants` degraded mode |
+| D2 blob/DB ordering | **Adopted**: blob acknowledged by R2 before the manifest commits |
+| D3 RTO vs full blob download | **Adopted**: lazy restore |
+| D4 two connectors after cutover | **Adopted**: rotate the connector token, probe via `cfargotunnel.com` |
+| D5 circular DR dependencies | **Adopted**: laptop-driven drill, offline copy of site config |
+| D6 key retention | **Adopted**: keys kept 25 h. Links are DB tokens, unaffected |
+| U1–U6 click budgets | **Adopted**: real-interaction budgets, real-device passes, multi-use invites, admin-confirmed renames, Telegram preview-only |
