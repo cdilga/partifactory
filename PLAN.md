@@ -41,7 +41,7 @@ Adding anything to it takes a decision from the admin. Work that straddled the l
 | --- | --- |
 | Core store, versions, the bin | blob store, manifests, versions, names, personal spaces, create (incl. fork and scratch parts), history, diff, restore, the 30-day bin, idempotent writes |
 | Builds | the build child process; kinds `html`, `markdown`, `text`, plus prebuilt `files`; mirror-on-build (in the parent process); the shared blob host. `tsx` comes right after Slice 1, and its compiler spike stays in |
-| Sandboxed part host | path caps, the content listener with the canonical CSP and the serve-time entry document, the prelude and `/_rt`, the trusted wrapper with its chrome API, the content-free card (two static PNGs) |
+| Sandboxed part host | path caps, the content listener with the canonical CSP and the serve-time entry document, the prelude and `/_rt`, the trusted wrapper with its chrome API, the content-free card (two static PNGs), gallery thumbnails from the latest render |
 | Shared data, live | `window.storage` (personal and shared) over `/_rt`, `data.changed` on `/_rt/events`, `shared_data_writers`, `part_data` for agents (incl. snapshot list, restore and reset) |
 | Sign-in | generic OIDC (Authentik is the example deployment's provider, used as plain OIDC) and the e2e harness (Dex, Caddy, a TLS test domain), the claims re-read directory, the policy engine and role × runtime matrix, `/grant`, the admin pin with passkey step-up |
 | Agent connections | the token service, device code, personal agent tokens, Connected agents |
@@ -64,7 +64,9 @@ Adding anything to it takes a decision from the admin. Work that straddled the l
   The clients that do need it are claude.ai and ChatGPT custom connectors, which accept only OAuth. They arrive with authorization code, which also brings "Claude Code connects with one passkey tap" (a line of P2's "Done when"). The cost in the slice is one pasted token for Claude Code.
   The slice's token service is built as the OAuth AS's token side, so authorization code adds an endpoint, not a redesign.
 - **Personal spaces only.** `family` and `system` are created by `provision`, after Slice 1. A part in Slice 1 lives in its owner's personal space.
-- **Every card is content-free.** A part with a public link unfurls with the content-free card in its public-link audience ("Anyone with the link", no title, name or thumbnail). The titled public card comes after Slice 1, and screenshot cards and gallery thumbnails come in P4.
+- **Unfurls are content-free in Slice 1, and previews come right after it** (decision 53). In Slice 1 a part with a public link unfurls with the content-free card in its public-link audience ("Anyone with the link", no title, name or thumbnail).
+  Right after Slice 1, a public link's card shows what the part is: the titled card and an automatic screenshot poster (`og:image`), plus a short muted **`og:video`** clip when the agent chose to make one, on by default for every public link (the admin, 2026-10-23). The gallery shows the same previews to people who can open the part. A private part's unfurl stays content-free, because an unfurler can't open it.
+- **Gallery thumbnails in Slice 1 are the latest render** (decision 53): a gallery card shows the screenshot of the newest passing `part_check` (or `after_check` gate) of the live version, kept as a part blob, and the "being made…" frame when there's none. Agent thumbnails, SVG thumbs and clips come right after Slice 1.
 - **No search.** Agents address parts by name (the name is in the link they posted). FTS5 search and `part_find` come after Slice 1.
 - **Ingress through the contract only.** The example deployment's Cloudflare tunnel runs as a plain proxy that meets the ingress contract (§3), configured by hand, and its two DNS records are made by hand. The Cloudflare adapter and `provision` come after.
 - **`window.storage` is the part's data API.** `claude.use("db")` and the `/_rt` `db.*` ops come in P3, with the rest of `claude.use`.
@@ -83,7 +85,7 @@ Adding anything to it takes a decision from the admin. Work that straddled the l
 - **Agent extras**: OAuth authorization code, comments, inward sharing by agents, leases, block ids, notes, `render: "text"` and `part_find`, `part_watch` and event SSE, the other `part_link_for` actions, Jig and `design_system`, the Hermes skill.
 - **Workspace extras**: the versions rail and the bin view, search, diff, preview of old versions, comments rail, agent activity, inward sharing rungs, Move to Family, Ask for access, install as app; the source editor; live reload; renames.
 - **Notifications**: the ops-alert webhook and signed event webhooks for agents.
-- **Previews beyond the content-free card**: the card pipeline and the titled public card, screenshot thumbnails and screenshot cards.
+- **Previews** (right after Slice 1, pulled forward from P4 by decision 53): the card pipeline and the titled public card; automatic screenshot posters, and optional agent-chosen `og:video` clips, for public links (on by default) and the gallery; the `preview` fields and `part_check {record}`.
 - **More kinds**: `tsx` (first after the slice), `svg` and `code`, `slides` and Mermaid.
 - **Shipping extras**: nginx and Traefik example configs, arm64, SBOM, `cosign`, example CI workflows.
 - **Updates and advisories** (§3h): advisory matching against the OSV data, the chrome badge and the counts, `part_edit {update}` and the Update libraries button, auto-update; backend SBOMs come with P2a.
@@ -1004,13 +1006,13 @@ The table below is the full v1 surface; the Slice 1 subset and its exact fields 
 
 | Op | Does |
 | --- | --- |
-| `part_create` | reserve a name and get the part's link in < 10 ms, before building (§3d). `check_only: true` tests a name and returns ranked alternatives. Optional `files`/`content`, `kind`, `title`, `space`, `tags`, `notes`, `description`, `from` (fork), `expires_in`, `request_id` |
+| `part_create` | reserve a name and get the part's link in < 10 ms, before building (§3d). `check_only: true` tests a name and returns ranked alternatives. Optional `files`/`content`, `kind`, `title`, `space`, `tags`, `notes`, `description`, `from` (fork), `expires_in`, `preview` (§4c), `request_id` |
 | `part_edit` | **the one write op**: ordered anchor edits, per-file `write`/`delete`/`rename` with `if_match`, block ops, `meta`, `restore: n`, `delete`/`undelete`, `rebuild` (with `update: "patch" \| "minor" \| "latest"` to re-resolve libraries and base images, §3h), `claim`, `backend: {lifecycle, secrets}` (write-only, `backends:deploy`); `base_version` with auto-rebase; `wait` for the build; `check: true` runs `part_check` after the build; `live: "after_check"` holds `live` until that check passes (§3d, §3f) |
-| `part_get` | full content when the part is ≤ 32 KiB, else outline + notes; `file`/`range`, `version` (default `head`), `history`, `diff_from`/`diff_to`, always the latest 20 `runtime_errors`, `render: "text"`, `build: <id>` (with its log), `backend: true` (state, health, recent logs; never secret values); always the open `advisories` (§3h) |
+| `part_get` | full content when the part is ≤ 32 KiB, else outline + notes; `file`/`range`, `version` (default `head`), `history`, `diff_from`/`diff_to`, always the latest 20 `runtime_errors`, `render: "text"`, `build: <id>` (with its log), `backend: true` (state, health, recent logs; never secret values); always the open `advisories` (§3h) and the `preview` state (§4c) |
 | `part_find` | search + filters (`kind:`, `tag:`, `space:`, `by:`, `has:data`, `has:comments`, `updated:`); no query = recent by me / this agent (§3e) |
 | `part_share` | `list` who can see it (the live sentence + grants); `grant`/`revoke` inward (people and groups with accounts, `share:household`); `move` to a space. Always returns the link to post (the part's host) |
 | `part_link_for` | `{name?, action}` → a deep link that opens the sheet for a **people-only** action, pre-filled: `public_link` (`https://<name>-part.<domain>/#share=public`), `contribute`, `invite`, `group`, `everyone`, `lan` (`https://parts.<domain>/admin/backends/<part>#lan`), `admin`. Read-only; the link grants nothing by itself. Slice 1 has `public_link` and `contribute`; `group`, `everyone` and `admin` come after it, `invite` with native invites (P2b) and `lan` with backends (P2a) |
-| `part_check` | render a version (`head`, `live` or `n`) in the sandboxed renderer against a read-only view of the real shared data, optionally run up to 20 `actions` (click, type, wait, read back state), and return a screenshot (an image block in MCP) + `blank` + errors, console and failed loads (§4c) |
+| `part_check` | render a version (`head`, `live` or `n`) in the sandboxed renderer against a read-only view of the real shared data, optionally run up to 20 `actions` (click, type, wait, read back state), and return a screenshot (an image block in MCP) + `blank` + errors, console and failed loads; `record: true` also returns the preview clip it would make (§4c) |
 | `part_comments` | list/add/resolve; `to_agent` threads; anchors; `provenance` per comment |
 | `part_data` | the part's `db`/`storage` documents and `_assets` (Claude ArtifactData-shaped), with `rev` compare-and-set (`if_rev`) and leases (P3); data snapshots: `snapshot_list`, `snapshot_restore`, `reset` (with `parts:write`) |
 | `part_watch` | long-poll the event log since a cursor, `wait` default 25 s, max 50 s (§4, Events) |
@@ -1038,7 +1040,8 @@ The `check` folded into `part_create`/`part_edit` is `{version, passed, blank, h
 An action is one of `{do: "click", selector}` or `{do: "click", x, y}`, `{do: "type", selector, text}` (≤ 1,000 characters), `{do: "wait_ms", ms}` (≤ 2,000) and `{do: "eval_return", expr}` (a JS expression, a promise awaited; its JSON value, ≤ 4 KiB, comes back as `value`).
 In `part_check` output every `url` is a path within the part with the cap removed, and `timing.ready_ms` is `null` when the page never called `partifactory.ready()`. Times in every output are ISO 8601 UTC strings.
 A `part_data` doc is `{collection, doc_id, data, rev, updated_at, updated_by, provenance}`, and a snapshot `{id, taken_at, reason, docs, bytes}` (`reason` is `scheduled`, `contribute`, `before_restore` or `before_reset`); `policy` is `{mode, keep}`. The snapshot ops act on shared data only and need `parts:write` and the `edit` role. `who` in `part_link_for` is `"admin"` for both Slice 1 actions.
-`update` on `part_edit` and `advisories` on `part_get` arrive after Slice 1 with §3h; `docs/agent-contract.md` gains both sections in the same change that ships them (§4b). An `advisories` item is `{ecosystem, package, version, osv_id, severity, context, fixed_in, state, attribution}`.
+`update` on `part_edit` and `advisories` on `part_get` arrive after Slice 1 with §3h; `docs/agent-contract.md` gains both sections in the same change that ships them (§4b).
+The same goes for previews (§4c), right after Slice 1: a `preview` input on `part_create` and in `part_edit {meta}` is `{video?: path | "record" | "off" ["off"], poster?: path, actions? (≤ 20), seconds? (2–10) [6]}`, `part_check` gains `record` [false], `part_get` gains `preview`, and `preview_invalid` joins the error catalogue. An `advisories` item is `{ecosystem, package, version, osv_id, severity, context, fixed_in, state, attribution}`.
 
 ### Names: semantic, chosen by the agent
 
@@ -1289,7 +1292,7 @@ Keyboard: `/` search, `g p` parts. There's no `n`: agents make parts. "Paste HTM
   live state on the thumbnail (a blue "Hermes editing" pill while a lease is held, "being made…" on version 0, an expiry badge on scratch parts).
 - Sections: "Pinned", then "Recent" grouped by day (`TODAY`, `YESTERDAY`, `THIS WEEK`, `EARLIER`) with caps column heads.
 - List view: 56 px rows with a 72×45 thumbnail, title + name, bin code, audience chip, rev and time. The whole row is the hit target.
-- **Thumbnails**, in order of preference: a screenshot from the render sidecar (if it's on, §4c); the agent's own (`meta.thumbnail`, PNG/WebP ≤ 256 KB); a server-drawn SVG spec-sheet thumb (title, first heading, kind, first lines, a colour strip from the part's CSS).
+- **Thumbnails.** In Slice 1 the thumbnail is the newest passing render screenshot of the live version, or the "being made…" frame (decision 53). After Slice 1 a part with a preview clip plays it muted while its card is on screen (§4c). In order of preference: a screenshot from the render sidecar (if it's on, §4c); the agent's own (`meta.thumbnail`, PNG/WebP ≤ 256 KB); a server-drawn SVG spec-sheet thumb (title, first heading, kind, first lines, a colour strip from the part's CSS).
   So the grid never has holes. Each card links straight to its part host. Thumbnails are served by the workspace at `/api/v1/thumbs/<part>?v=<n>`, session- and grant-checked, `private, immutable`, never edge-cached.
 - A **Bin** view lists deleted parts with days left and Restore.
 
@@ -1327,7 +1330,7 @@ The wrapper is a small standalone bundle of the same Stockroom components (a sha
 3. **The live sentence**, in `t-heading`: "**You and 3 people** can see this. **A family member** can also edit." It updates before anything is saved.
 4. **Move to Family**: one button when the part is in a personal space.
 5. Rung detail: *People* (directory type-ahead with per-person role); *A group* (picker with live member counts; "Make a group for this" for the admin); *Everyone signed in* (count and role);
-   *Anyone with the link* (the admin): mode **`Can view` (default) · `Can contribute`**, with "Anyone with the link can use it. Only you and people you add can change it." under Can contribute, and **Roll back data**, **Reset data** and **Freeze** while it's on (comments need the separate opt-in); **expiry picker `Never` (default) · 1 day · 7 days · 30 days**, the URL with **Copy**, **opened 14 times · last 2 h ago**, "Use a screenshot as the preview" (if the sidecar is on), and **Revoke link**.
+   *Anyone with the link* (the admin): mode **`Can view` (default) · `Can contribute`**, with "Anyone with the link can use it. Only you and people you add can change it." under Can contribute, and **Roll back data**, **Reset data** and **Freeze** while it's on (comments need the separate opt-in); **expiry picker `Never` (default) · 1 day · 7 days · 30 days**, the URL with **Copy**, **opened 14 times · last 2 h ago**, **Preview: Video · Image · Card only** (Video by default when a clip exists, with the poster shown; §4c), and **Revoke link**.
 6. **Data: view only** switch (`shared_data_writers: "editors"`; off by default, so viewers can write), and the `unsandboxed` flag (the admin, danger red).
 7. **Agent-made grants**: "Hermes shared this with the Family group · Undo".
 8. **Access asks**: "A family member asked for access" with **Add** and **Dismiss**. Nothing from agents appears here.
@@ -1639,7 +1642,7 @@ Two tiers. Tier (a) always runs. Tier (b) is an optional sidecar whose headline 
 | **Public link** (after Slice 1; in Slice 1 a public link gets the private card's content-free layout with the audience line "Anyone with the link") | `https://<name>-part.<domain>/l/<token>`, and the part host root while the part has an active public link | title, kind bin code, `REV n`, a 2–3 line description, the thumbnail in a framed window, "Anyone with the link · view only" | comments, data, who else has access, agent notes |
 | **Invite** | `/i/<id>` | "You're invited to a part on partifactory" (+ the inviter's display name only if they opt in) | the part title, until the invitee has enrolled |
 
-Every card page carries `noindex`, `X-Robots-Tag: noindex, nofollow`, `og:title`/`og:description` that match the card exactly (so text tags never leak what the image hides), `twitter:card=summary_large_image`, and an absolute https `og:image`.
+Every card page carries `noindex`, `X-Robots-Tag: noindex, nofollow`, `og:title`/`og:description` that match the card exactly (so text tags never leak what the image hides), `twitter:card=summary_large_image`, and an absolute https `og:image`. A public link with a video preview adds the `og:video` tags (below).
 Private and invite cards are generic, so `/og/*` is cacheable by any shared cache (`public, immutable`). Cards are served from the workspace host, and part-host pages reference them by absolute URL. **The audience decides the card, never the User-Agent** (§2).
 
 ### Tier (b): the render sidecar (optional)
@@ -1654,9 +1657,32 @@ Private and invite cards are generic, so `/og/*` is cacheable by any shared cach
 - **Driving it**: CDP over the internal network (`chromiumoxide`). Each job gets a **fresh browser context**, a viewport (`mobile` 390×844 @2x or `desktop` 1280×800), and waits for `partifactory.ready()`, network idle for 500 ms, or 8 s, whichever is first. Then it runs the job's `actions` in order (click, type, `wait_ms`, `eval_return`; ≤ 20 steps; the first failing step stops the list) and takes the screenshot after the last one. Hard timeout 15 s, then the context is destroyed.
 - **Collects**: uncaught exceptions, `console.error`/`warn` (first 50, truncated), failed and CSP-blocked requests, document height, timing, and a **blank flag** (body text empty *and* the screenshot ≥ 98 % one colour).
 - **Queue**: `render_jobs`, **concurrency 1**, coalesced per part (a 5 s debounce after a live change, newest only), one retry, a circuit breaker. Chrome starts on demand and stops after 5 minutes idle, so it costs no RAM most of the day. **The renderer is never on the save path.**
-- **Outputs**: `part_check` results; runtime errors tagged `source: render`, so a broken page is known before any person opens it; private gallery thumbnails (600×375 WebP part blobs, P4); and screenshot og:images **only for public links that opt in** (per link, off by default, because unfurlers store images on their servers).
-- **If it's disabled or down**: `part_check` returns `renderer_unavailable` with a hint, thumbnails fall back to the agent's own or the SVG thumb, and nothing else degrades.
+- **Outputs**: `part_check` results; runtime errors tagged `source: render`, so a broken page is known before any person opens it; private gallery thumbnails (600×375 WebP part blobs, P4); and **previews**: an automatic poster per part, and a short `og:video` clip when the agent asks for one, used by public links (on by default, switchable per link) and the gallery (below).
+- **If it's disabled or down**: `part_check` returns `renderer_unavailable` with a hint, thumbnails fall back to the agent's own or the SVG thumb, previews to the agent's own clip or the image card, and nothing else degrades.
 
+### Previews: posters always, `og:video` when the agent wants one (right after Slice 1, decision 53)
+
+A public link should show what the part is before anyone taps it. So its unfurl always carries a poster (a screenshot `og:image`), and it carries a short, muted clip (`og:video`) when the part has one. The gallery shows the same previews to people who can open the part. A private part's unfurl stays content-free: the unfurler can't open it, so it learns nothing.
+
+- **Posters are automatic.** Whenever a part gets a new live version and the sidecar is on, a low-priority `preview` job (after every `check` and `gate` job, coalesced per part, newest only) screenshots the live version at 1200 × 630 in the read-only, discarded-overlay context `part_check` uses, after `preview.actions` if there are any. The result is a JPEG poster, a part blob.
+  The agent's own `preview.poster` (PNG or JPEG, 1200 × 630) wins when it's set. With the sidecar off and no agent poster, the poster is the titled card. Nothing waits on a preview, and it's never on the save path.
+- **A clip is the agent's choice.** Agents don't have to make one. The guide asks them to consider it for anything animated or interactive, where a still undersells it. Either:
+  1. **the agent's own**: `preview.video` names an MP4 in the part's files: H.264, `yuv420p`, no audio track, ≤ 10 s, ≤ 1280 × 720, ≤ 8 MiB, `moov` first. The build child probes the container and codec headers (no network, no decoding) and fails the build with `preview_invalid`, naming what's wrong: codec, audio, duration, size or poster; or
+  2. **recorded for it**: `preview.video: "record"` makes the same `preview` job also record `preview.seconds` (2–10, default 6) of CDP screencast frames at 1280 × 720 while it runs `preview.actions` (the `part_check` grammar, ≤ 20 steps), or, without actions, while it scrolls slowly through the page. `ffmpeg` in the render image (pinned by digest) encodes them to the same MP4 profile.
+  The default is `"off"`. A failed or blank recording keeps the last good clip and records why. With the sidecar down, `"record"` waits for it and the poster is used meanwhile.
+- **On by default for public links, off per link** (the admin, 2026-10-23). Every public link uses the part's clip when there is one, and the poster always. The share sheet's public rung shows the poster with **Preview: Video · Image · Card only** and says "Apps that unfurl the link keep their own copy." An agent can't change a link's preview: that's on the people-only list, like the link itself.
+- **Served from the part's own host, never the workspace**: `https://<name>-part.<domain>/og/<sha256>.mp4` and `.jpg`. They're cookie-free, with the `Content-Type` fixed from the probe, `X-Content-Type-Options: nosniff`, `Accept-Ranges` with `206` (iMessage and Safari fetch ranges) and `Cache-Control: public, max-age=3600`.
+  They answer **only while the part has an active public link whose preview allows them** (`video` for the clip; `video` or `image` for the poster), and otherwise return a 404 byte-identical to an unknown path. Revoking the link or switching its preview off stops them at the origin at once. Unfurler caches keep what they already fetched, and the sheet says so.
+- **Tags**, on the root and `/l/` while that holds: `og:image` set to the poster, and, with a clip, `og:video`, `og:video:secure_url`, `og:video:type` (`video/mp4`), `og:video:width` and `og:video:height`.
+  `twitter:card` stays `summary_large_image`, because X's `player` card needs an embeddable player page. Bots and browsers still get byte-identical HTML (§2).
+- **In the workspace.** The poster is the gallery thumbnail. A card for a part with a clip plays it muted and looped while the card is on screen: on hover on desktop, in view on phones, and never under `prefers-reduced-motion`.
+  It's served from `/api/v1/thumbs/<part>?v=<n>&media=video`, session- and grant-checked and `private, immutable`, like thumbnails. A viewer who can't open the part never gets it.
+- **For agents.** `docs/agent-contract.md` gains these in the change that ships them:
+  - `preview` on `part_create`, and inside `meta` on `part_edit`.
+  - `part_check {record: true}` makes the recording the server would make, and stores nothing. Over HTTP it returns `video: {url, expires_at, width, height, seconds, bytes}`; in MCP it returns the poster as an image block plus a link to the clip.
+  - `part_get` returns `preview: {source, state, video?, poster?, error?, public}`.
+  - `/skill.md` tells agents that a poster is made for them. For anything animated or interactive, they should consider a clip: set `preview.video: "record"` with `preview.actions` that show it working (for the pixel board, a few taps that paint), watch it with `part_check {record: true}`, and mention that the link will unfurl with it.
+- **Capped like every store** (§5h): previews are part blobs, only the newest poster and clip per part are referenced, and the store has a cap (2 GiB by default). While the store is full, recording stops, and the last poster or the titled card is used.
 ### `part_check`
 
 `part_check {name, version?: head | live | n, viewport?: mobile | desktop, wait_ms? ≤ 8000, actions? (≤ 20), include_base64?}` (defaults `head`, `mobile`, 8000, none, false) returns `{screenshot, blank, errors[], console[], failed_requests[], actions[], timing}` plus `{name, url, version, head, live, build, height}`.
@@ -1683,7 +1709,7 @@ One Cargo workspace builds **one static binary** (`partifactory`, with `part` as
 | Agent auth | OAuth 2.1 AS/RS: auth code + PKCE, device grant, CIMD/DCR/manual clients, RFC 9728/8414/8707/9207. Hand-written over well-tested primitives (rmcp's OAuth support is client-side only), with a conformance suite |
 | Capabilities | compact HMAC-signed tokens (`ring`), versioned keys (`kid`), CBOR payloads |
 | Cards | `resvg` + `usvg` + `fontdb` (bundled fonts) + `rustybuzz` for wrapping (with the titled card; Slice 1 embeds two static PNGs) |
-| Render checks (optional sidecar) | `chrome-headless-shell` by digest, driven over CDP with `chromiumoxide` |
+| Render checks (optional sidecar) | `chrome-headless-shell` by digest, driven over CDP with `chromiumoxide`; `ffmpeg` (by digest, in the same image) encodes preview clips (§4c) |
 | Export | `tar` + `zstd`, `age` (encrypt to a recipient public key) |
 | Workspace UI | Leptos 0.8 (SSR + hydration), or `askama`/`maud` templates + small vanilla-JS islands if the spike says so (below). CodeMirror 6 for the source editor (the one JS dependency, vendored as a shared blob) |
 | Backends | the runner sidecar: `bollard` (Docker Engine API client; Docker or Podman), rootless BuildKit (`buildkitd`) for image builds, nftables/iptables rules it applies itself, optional gVisor (`runsc`) |
@@ -2031,6 +2057,7 @@ CREATE TABLE parts (
   link_comments    INTEGER NOT NULL DEFAULT 0,       -- opt-in: public-link viewers may comment
   isolation        TEXT NOT NULL DEFAULT 'sandbox' CHECK (isolation IN ('sandbox','unsandboxed')),  -- admin-only flag
   shared_data_cap  INTEGER NOT NULL DEFAULT 5242880,  -- bytes of shared data_docs; guests get quota_exceeded past it
+  preview          TEXT CHECK (preview IS NULL OR json_valid(preview)),  -- {video, poster, actions, seconds} (§4c); NULL = automatic poster, no clip
   backend_lifecycle TEXT NOT NULL DEFAULT 'none' CHECK (backend_lifecycle IN ('none','scale_to_zero','always_on')),
   api_prefix       TEXT NOT NULL DEFAULT '/api/' CHECK (api_prefix GLOB '/*/'),  -- backend route under /c/<cap>/
   forked_from      TEXT REFERENCES versions(id),     -- part_create {from}
@@ -2225,7 +2252,7 @@ CREATE TABLE public_links (
   role          INTEGER NOT NULL DEFAULT 0 CHECK (role IN (0,1)),  -- view; comment only with parts.link_comments
   mode          TEXT NOT NULL DEFAULT 'view' CHECK (mode IN ('view','contribute')),  -- contribute: guests write shared data
   frozen_at     INTEGER,                             -- last Freeze (contribute -> view); bumps minter:link:<id>
-  screenshot_og INTEGER NOT NULL DEFAULT 0,          -- opt-in: screenshot as the link preview
+  preview       TEXT NOT NULL DEFAULT 'video' CHECK (preview IN ('video','image','card')),  -- the unfurl preview (§4c); video falls back to image, then card
   created_by    TEXT NOT NULL REFERENCES users(id),  -- always the admin
   created_at    INTEGER NOT NULL,
   expires_at    INTEGER,                             -- NULL = never (the default)
@@ -2608,15 +2635,30 @@ CREATE TABLE render_jobs (                           -- tier (b) sidecar queue; 
   part_id     TEXT NOT NULL REFERENCES parts(id) ON DELETE CASCADE,
   version_id  TEXT NOT NULL,
   viewport    TEXT NOT NULL CHECK (viewport IN ('mobile','desktop')),
-  purpose     TEXT NOT NULL CHECK (purpose IN ('check','gate','thumbnail','og')),  -- gate: the live = after_check check
+  purpose     TEXT NOT NULL CHECK (purpose IN ('check','gate','thumbnail','og','preview')),  -- gate: the live = after_check check; preview: the og:video recording (§4c)
   requested_by TEXT,                                 -- conn:<id> for part_check
-  request     TEXT CHECK (request IS NULL OR json_valid(request)),  -- {wait_ms, actions}
+  request     TEXT CHECK (request IS NULL OR json_valid(request)),  -- {wait_ms, actions, record, seconds}
   status      TEXT NOT NULL CHECK (status IN ('queued','running','ok','failed','superseded')),
-  result      TEXT CHECK (result IS NULL OR json_valid(result)),  -- {screenshot_hash, blank, errors, console, failed_requests, actions, timing}; GET /api/v1/screenshots/<id>
+  result      TEXT CHECK (result IS NULL OR json_valid(result)),  -- {screenshot_hash, video_hash?, poster_hash?, blank, errors, console, failed_requests, actions, timing}; GET /api/v1/screenshots/<id>
   queued_at   INTEGER NOT NULL,
   finished_at INTEGER
 ) STRICT;
 CREATE INDEX render_jobs_queue ON render_jobs(status, queued_at) WHERE status IN ('queued','running');
+
+CREATE TABLE part_previews (                         -- §4c: the newest preview per part; replaced rows leave their blobs to GC
+  part_id     TEXT PRIMARY KEY REFERENCES parts(id) ON DELETE CASCADE,
+  version_id  TEXT NOT NULL REFERENCES versions(id),
+  source      TEXT NOT NULL CHECK (source IN ('render','agent','recorded')),  -- render: Slice 1's latest check screenshot, poster only
+  poster_hash TEXT,                                  -- part blob; also the gallery thumbnail
+  video_hash  TEXT,                                  -- part blob, MP4 (§4c profile)
+  width       INTEGER,
+  height      INTEGER,
+  duration_ms INTEGER,
+  bytes       INTEGER,
+  state       TEXT NOT NULL CHECK (state IN ('ready','pending','failed')),
+  error       TEXT,                                  -- why the last recording or probe failed; the last good clip stays
+  updated_at  INTEGER NOT NULL
+) STRICT;
 
 CREATE TABLE kv (                                    -- singletons: directory poll cursor + staleness, provisioner tier, last export, last drill, alert state, disk budget state
   key   TEXT PRIMARY KEY,
@@ -2835,6 +2877,7 @@ It warns at 80 % of the budget, and at 95 % **refuses new writes** (versions, as
 | Events log (agent feed) | 30 days, then `cursor_expired` | prune job | — |
 | Versions and blobs | every version kept (deduplicated); the bin for 30 days; unreferenced blobs collected | GC job | `export` |
 | Data snapshots | daily keep 7 / hourly keep 48; the last one kept after 90 days idle | prune job | export |
+| Previews (posters and `og:video` clips, §4c) | the newest per part; 2 GiB in total, new previews stop at the cap | replaced on each new live version; GC | export (part blobs) |
 | BuildKit cache | 10 GiB, LRU | `buildkit prune` on a schedule | — |
 | Advisory DB (§3h) | the latest sync only, under a cap sized from the advisories spike | replaced by each sync | — (downloaded again) |
 | Stored image SBOMs (§3h) | kept while their build exists, under a per-build cap (5 MiB by default) | pruned with the build | the build record |
@@ -2867,7 +2910,7 @@ logs + metrics, and a same-machine regression bench. Spikes: rolldown/oxc, rmcp,
 
 **P1 Edge + identity.** The ingress contract with example proxy configs, `provision` with the manual and Cloudflare providers (the example deployment's tunnel and wildcard), generic OIDC login + the claims re-read directory, the Authentik directory adapter, `/grant` → the part host,
 the **part-host wrapper** with its chrome API and CORS, policy engine + audience ladder + spaces + the role × runtime matrix, admin pin + native passkey step-up,
-the Stockroom workspace (gallery, search, history, diff, preview old versions, restore, bin, share sheet, Move to Family), admin-only public links on the part host with open counts, tier (a) cards,
+the Stockroom workspace (gallery, search, history, diff, preview old versions, restore, bin, share sheet, Move to Family), admin-only public links on the part host with open counts, tier (a) cards, previews (posters and `og:video` for public links and the gallery, decision 53),
 rate limits, quotas, health page with optional ops alerts, backups (consistent DB copy, `export`/`import`, the nightly export on by default, per-part data snapshots on by default), the first drill on a second OCI host, the image + compose + env contract with an example CI workflow, `doctor`,
 the Insights store with request ids, traces and the log pipeline (§5g), the janitor, the disk budget and the retention test (§5h), the no-content-in-logs fuzz test,
 the **portability lane** (full e2e with Dex, Caddy and local exports, §5f), and the **nginx/HAProxy comparison on the real content path**.
@@ -2900,7 +2943,7 @@ and, with the Authentik provisioner on, an invited email address enrols the same
 viewer uploads (assets), and the agent inbox with stewards. The spec is shartifacts' compatibility matrix (credited).
 *Done when:* a page copied from a claude.ai artifact runs unchanged, including state persistence and self-editing, and a viewer's photo upload reaches the agent's inbox.
 
-**P4 Family + family hub + phone.** Family onboarding, embedding via `[embed] frame_ancestors` (the family hub, with its service identity), the Hermes `hub-family` profile, slides + Mermaid, the optional OTLP export adapter, screenshot thumbnails for the private gallery and opt-in screenshot cards for public links,
+**P4 Family + family hub + phone.** Family onboarding, embedding via `[embed] frame_ancestors` (the family hub, with its service identity), the Hermes `hub-family` profile, slides + Mermaid, the optional OTLP export adapter (screenshot thumbnails and preview cards moved right after Slice 1, decision 53),
 and tap-to-edit text and point-and-comment on phones. (Notifications for people were cut in round 2b, and approval queues in round 2c, §4.)
 *Done when:* a family member opens a family hub-embedded part, fixes a typo by tapping it on the phone, long-presses to ask Hermes for a change, and Hermes, watching the event log, tells them in its own chat when the fix lands.
 
@@ -2927,7 +2970,7 @@ This section is the order the pieces depend on each other, and why. Read each ar
 
 **Right after Slice 1.**
 - **`tsx`** (oxc + rolldown, the library set). It needs the build worker, mirroring and the blob host, and it closes P0, so P0's "Done when" is met just after the slice ships (decision 39).
-- **The rest of P1:** the titled card pipeline; search → the workspace extras (versions rail, bin, diff, inward rungs, Move to Family, Ask for access); `provision` → the Cloudflare and Authentik adapters; `doctor` after the disk budget, because it checks that every store is capped; the Insights store → traces and the log pipeline → the no-content fuzz test; the ops-alert webhook after Health and the disk budget; the deliverable extras → the portability lane; the bench → the nginx/HAProxy comparison.
+- **The rest of P1:** the titled card pipeline → previews (posters and `og:video` for public links and the gallery; they need the render sidecar and the titled card); search → the workspace extras (versions rail, bin, diff, inward rungs, Move to Family, Ask for access); `provision` → the Cloudflare and Authentik adapters; `doctor` after the disk budget, because it checks that every store is capped; the Insights store → traces and the log pipeline → the no-content fuzz test; the ops-alert webhook after Health and the disk budget; the deliverable extras → the portability lane; the bench → the nginx/HAProxy comparison.
 - **The rest of P2:** OAuth authorization code; comments, leases, block ids, notes and `part_find`; `part_watch` and webhooks → the source editor; agent sharing → the Hermes skill; Jig; live reload; renames; the Insights pages → the debugging UI; the remaining deep links.
 - **Advisories** (§3h): the spike → matching and its surfaces → `update` and the Update libraries button → auto-update.
 - Some pieces plug in later without anything waiting on them: `doctor` adds the provisioner probe once the Authentik gate has run, and the Insights store and the log pipeline register their janitor jobs and retention-test rows when they land.
@@ -2937,7 +2980,7 @@ This section is the order the pieces depend on each other, and why. Read each ar
 - **P2a Backends:** the runner (after the deliverable) → backend builds → lifecycle → routing (after Can-contribute links and request ids) and data, secrets and permissions → the backend security suite and `communal_pixel_editor_backend`. Backend SBOMs and base-image checks come with the runner. The runner lane is shorter than the routing chain, so it can start as soon as the deliverable lands, beside the backend Insights pages.
 - **P2b Invites:** native invites and local accounts → the Authentik provisioner gate → Authentik invites → Authentik extras. Cleanup lists follow native invites.
 - **P3:** `claude.use` (after shared data, comments and `/grant`), Tailwind and shadcn (after `tsx`), viewer uploads, the agent inbox (after comments and the event log).
-- **P4:** family onboarding (after native invites), family hub embedding and service identities, slides and Mermaid (after block ids), screenshot thumbnails (after the render sidecar and the titled card), phone editing, OTLP. **P5:** each item on its own, after what it extends.
+- **P4:** family onboarding (after native invites), family hub embedding and service identities, slides and Mermaid (after block ids), phone editing, OTLP. **P5:** each item on its own, after what it extends.
 
 ## 7. Security checklist (run from outside the network, in CI against staging)
 
@@ -3003,7 +3046,8 @@ Every line runs against the example deployment's staging (Cloudflare + Authentik
 - An advisory sync or match never changes a live part's import map or image digest; only `part_edit {update}`, Update libraries or opt-in auto-update makes a new version, and auto-update is recorded as `system`.
 
 **Render sidecar**
-- The renderer has no route off the internal Docker network (an egress canary to an external host fails). Renderer caps can't persist `/_rt` writes. A public link without the screenshot opt-in never gets a screenshot card.
+- The renderer has no route off the internal Docker network (an egress canary to an external host fails). Renderer caps can't persist `/_rt` writes, including during a preview recording.
+- A private part's root never carries `og:video` or a content poster. `/og/<hash>` on a part host answers only while that part has an active public link with that preview on: otherwise, and at once after revoke, it's a 404 byte-identical to an unknown path. A link set to `card` never gets a preview. An agent-supplied MP4 with an audio track or a codec other than H.264 fails its build with `preview_invalid`. The gallery's clip endpoint refuses a viewer who can't open the part.
 
 **Operations**
 - The origin is reachable only through the configured ingress (a direct connection to the listeners from outside fails). `:9090` is never routed. A client-IP header from an address outside `trusted_proxies` is ignored.
@@ -3086,6 +3130,13 @@ Every line runs against the example deployment's staging (Cloudflare + Authentik
 50. **Tasks live only in beads.** The plan carries no task ids and no task table: §6a is the build order, `br ready` lists the work, and beads are created only at conversion. The change logs moved to `docs/plan-history.md`.
 51. **Backend data is the part's business; rollback is best effort.** As in shartifacts, volumes are shared by every version, rollback restores code only, and partifactory runs no migrations or data rollbacks for backends. It guarantees the exact code and the health gate, nothing more. The backend contract says to migrate forward, additive changes, read per request, lock writes, and back up before a non-additive change. Page data keeps its per-part data snapshots (§5c).
 52. **Real devices never block.** Every gate uses emulated or simulated devices: Playwright Chromium (mobile emulation, virtual authenticator), WebKit (mobile profile) and Firefox in CI, and Mobile Safari in the iOS Simulator run locally on a Mac with its results as evidence. Real phones (iPhone Safari, Android Chrome, the Telegram in-app browser, the by-hand run on the example deployment) are human checks the admin does whenever. Nothing depends on them, and a failure is filed as a bug for the swarm. *Why:* the swarm shouldn't wait on a person, and simulated WebKit plus Chromium catch nearly everything a phone would; the rest is cheap to fix afterwards.
+
+
+**2026-10-23 (round 4).**
+
+53. **Previews show the content wherever the viewer could see it anyway** (the admin, 2026-10-23). A public link unfurls with the titled card and an automatic screenshot poster, plus a short muted `og:video` clip when the part has one, **on by default** for every public link and switchable per link to Image or Card only. The gallery shows the same previews to people who can open the part, and a private part's unfurl stays content-free.
+    Posters are made automatically by the render sidecar. A clip is optional and the agent's choice: its own MP4 or `preview.video: "record"`, which the sidecar records while running `preview.actions`. The guide asks agents to consider one for animated or interactive parts. Neither is ever on the save path. In Slice 1, gallery thumbnails are the latest passing render screenshot; the rest of §4c's previews ships right after Slice 1, pulled forward from P4.
+    *Why:* a link that shows what it is gets opened, and the privacy line is the audience, not the card.
 
 ## 9. Non-goals (v1)
 

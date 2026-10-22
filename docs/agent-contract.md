@@ -369,9 +369,9 @@ Read `message` (expected, found), then do what `hint` says. `retryable: true` me
 
 ## A worked session
 
-the admin asks Hermes for a communal pixel editor that anyone can paint on.
+The admin asks Hermes for a communal pixel editor that anyone can paint on.
 
-**1. Connect.** Hermes starts a device grant for the admin, sends him `https://parts.<domain>/device?code=KMQT-4XRA`, he taps Allow, and Hermes stores the access and refresh tokens.
+**1. Connect.** Hermes starts a device grant for the admin, sends them `https://parts.<domain>/device?code=KMQT-4XRA`, they tap Allow, and Hermes stores the access and refresh tokens.
 
 **2. Create.** Hermes writes `board.html`:
 ```html
@@ -438,7 +438,7 @@ The page threw, so `live` is still `null`: nobody has seen the broken version.
 
 **6. Post the link** to the admin: "Your pixel board: https://pixel-part.<domain>/. Only you can open it for now."
 
-**7. Hand over the people-only step.** Strangers painting needs a contribute link, which only the admin can make; the admin is the admin:
+**7. Hand over the people-only step.** Strangers painting needs a contribute link, which only the admin can make, so Hermes hands the admin the link:
 ```json
 {"name":"pixel","action":"contribute"}
 → {"action":"contribute","url":"https://pixel-part.<domain>/#share=contribute","who":"admin"}
@@ -449,3 +449,5 @@ Later, `part_data {"name":"pixel","action":"list","prefix":"px:"}` shows what gu
 ## After Slice 1
 
 Not available yet, so don't call them: `part_find` (search), `part_share` (inward sharing), `part_comments`, `part_watch` (the event feed), `design_system` (Jig), `part_inbox`; block edits and leases in `part_edit`; `notes` and `render: "text"` in `part_get`; `upload` URLs in `part_create`/`part_edit`; the browser OAuth flow for MCP; backends; `claude.use(...)`; kinds `tsx`, `svg`, `code` and `slides`; `part_link_for` actions other than `public_link` and `contribute`.
+
+Coming right after Slice 1: **previews**. Every part gets an automatic screenshot poster, used as its gallery thumbnail and as the `og:image` of its public links. You may also give a part a short muted `og:video` clip with a `preview` field on `part_create`/`part_edit {meta}`, either your own MP4 or `"record"` with `actions` that show it working. Check the clip with `part_check {record: true}` before you share the link. A clip is optional, so consider one for anything animated or interactive. Until then, don't send `preview`.
