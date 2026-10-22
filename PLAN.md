@@ -853,8 +853,19 @@ Anything else (`ports`, `privileged`, `cap_add`, `network_mode`, `pid`, `devices
 
 **Lifecycle.**
 - **One container set per live version.** When a version builds, its set starts next to the current one. Its health check (the compose `healthcheck`, or a TCP connect to the main port) must pass within 60 s before `live` moves. A set that fails ends the build `failed` with `backend_unhealthy` and its last 50 log lines, and the old set keeps serving. The old set drains for 30 s, then stops.
-- **Rollback rolls back backends.** Restoring version 9 starts version 9's images (kept for live + the previous 2 versions; older ones are rebuilt from source, re-pulled by digest, or need the tarball again).
-  **Volumes belong to the part, not the version**, so a rollback rolls back code, not data. Data comes back from an export (below).
+- **Rollback rolls back backends' code, not their data.** Restoring version 9 starts version 9's images (kept for live + the previous 2 versions; older ones are rebuilt from source, re-pulled by digest, or need the tarball again).
+  **Volumes belong to the part, not the version**, and every version shares them, as in shartifacts ("every version shares it… so migrate forward").
+- **Rolling forward or back is best effort, and the part's own data is the part's business.** partifactory guarantees two things only:
+  1. the restored or new version's code is exactly what it was built from;
+  2. it never goes live unless its health check passes, so a version that can't run against today's data fails with `backend_unhealthy` and the current one keeps serving.
+  It doesn't promise that old code understands data a newer version wrote, and it runs no migrations, down-migrations or data rollbacks for backends.
+  Whatever a part puts in its containers (schemas, migrations, file formats), its agent manages.
+  - *Why:* any "magic" here (automatic down-migrations, version-tagged volume snapshots) only works for the storage engines we'd special-case, and it would fail silently for the rest. The honest guarantee is the health gate. Recovery beyond it is the part's own export hook, or a folder backup or export (§5c).
+- **The backend contract** (it goes into `docs/agent-contract.md` when backends ship):
+  - migrate forward, with additive changes, so the previous version still runs against the new data;
+  - versions run at the same time during the 30 s drain (and a restored version meets the newest data), so read from storage per request rather than caching in memory, and lock writes (a database, SQLite with WAL, or a file lock);
+  - if a change can't be additive, take your own backup first (e.g. `pg_dump` into the volume) and say so in the version's edit message;
+  - exit promptly on SIGTERM.
 - **Scale to zero** is the default: the set starts on the first request (the proxy holds the request for up to 10 s; a cold start is typically 1–2 s) and stops after 15 minutes without one. **Always on** is a per-part setting for workers and websocket games, counted against the global quota. `cron` services run on schedule even while the rest is scaled to zero.
 - **Logs** from every container are captured per part (ring segments, §5h), along with restarts, cold starts and resource use (§5g).
 
@@ -970,7 +981,7 @@ Parts are built once and then left alone, so something has to notice when a libr
   - **the admin or an editor:** an **Update libraries** button in the part's chrome does the same in one tap (§4a.6, §4a.7). Undo is the normal restore.
   - **Ignore, with a reason:** by a person, or by an agent with `parts:write`. It's audited.
 - **Auto-update.** Site config `[advisories] auto_update = "never" | "patch"`, overridable per part.
-  - **Provisional, pending the admin:** frontends default to `never`. Backends default to `patch`, only for an advisory with a known fix (`fixed_in`), through the `after_check` gate, with automatic rollback if the check fails.
+  - **Provisional, pending the admin:** frontends default to `never`. Backends default to `patch`, only for an advisory with a known fix (`fixed_in`), through the `after_check` gate, with automatic rollback if the check fails (code only, best effort, like every backend rollback, §3f).
   - *Why:* backends are the exposed layer, and a patch-level base-image bump rarely breaks.
   - The action is recorded as done by `system`, never as the admin.
 
@@ -3073,6 +3084,7 @@ Every line runs against the example deployment's staging (Cloudflare + Authentik
 48. **`build_deps` is recorded in Slice 1** *(provisional)*, so advisory history exists from day one. Matching, the UI and `update` come after Slice 1, backend SBOMs with P2a, and a spike first sizes the OSV dumps, times matching against 10k rows and picks Syft or Trivy.
 49. **Auto-update** *(provisional)*: `[advisories] auto_update = "never" | "patch"`, per part too. Frontends default to `never`; backends to `patch`, only with a known fix, through the `after_check` gate, rolled back automatically if the check fails, and recorded as `system`.
 50. **Tasks live only in beads.** The plan carries no task ids and no task table: §6a is the build order, `br ready` lists the work, and beads are created only at conversion. The change logs moved to `docs/plan-history.md`.
+51. **Backend data is the part's business; rollback is best effort.** As in shartifacts, volumes are shared by every version, rollback restores code only, and partifactory runs no migrations or data rollbacks for backends. It guarantees the exact code and the health gate, nothing more. The backend contract says to migrate forward, additive changes, read per request, lock writes, and back up before a non-additive change. Page data keeps its per-part data snapshots (§5c).
 
 ## 9. Non-goals (v1)
 
