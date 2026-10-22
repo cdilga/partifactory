@@ -52,7 +52,7 @@ Adding anything to it takes a decision from Chris. Work that straddled the line 
 | Export and import | consistent DB copy, nightly export, `import` with the boot-epoch bump, the drill |
 | Health | logs and metrics, `/healthz`, `/readyz`, the basic Health page |
 | Retention | the janitor for the stores that exist, the disk budget, store caps, the retention test, blob GC, quotas |
-| Shipping it | the ingress contract with the Caddy example, the amd64 OCI image + compose file + env contract, the §7 suite and the real-device pass |
+| Shipping it | the ingress contract with the Caddy example, the amd64 OCI image + compose file + env contract, the §7 suite and the simulated device matrix (real phones are non-blocking human checks) |
 | The acceptance test | `communal_pixel_editor` |
 
 **The ops in Slice 1** are `part_create`, `part_edit`, `part_get`, `part_check`, `part_data` and `part_link_for`. Their exact fields, outputs and errors are in `docs/agent-contract.md` and the field table in §4.
@@ -68,7 +68,7 @@ Adding anything to it takes a decision from Chris. Work that straddled the line 
 - **No search.** Agents address parts by name (the name is in the link they posted). FTS5 search and `part_find` come after Slice 1.
 - **Ingress through the contract only.** The example deployment's Cloudflare tunnel runs as a plain proxy that meets the ingress contract (§3), configured by hand, and its two DNS records are made by hand. The Cloudflare adapter and `provision` come after.
 - **`window.storage` is the part's data API.** `claude.use("db")` and the `/_rt` `db.*` ops come in P3, with the rest of `claude.use`.
-- **Telegram in-app browser (Chris, 2026-10-23).** A 5-minute real-phone test of passkey sign-in in Telegram's in-app browser stays in the real-device pass. If it fails, the fixes are: (1) set Telegram to open links in the normal browser, and (2) Hermes' messages hint "open in browser". The person-bound-link fallback is rejected (`docs/plan-history.md`).
+- **Telegram in-app browser (Chris, 2026-10-23).** A 5-minute real-phone test of passkey sign-in in Telegram's in-app browser is in the human checks, done whenever, blocking nothing (decision 52). If it fails, the fixes are: (1) set Telegram to open links in the normal browser, and (2) Hermes' messages hint "open in browser". The person-bound-link fallback is rejected (`docs/plan-history.md`).
 - **Final round (2026-10-23), provisional, pending Chris** (§8 decisions 39–42):
   - **`tsx` is right after Slice 1.** The oxc + rolldown kind moves off the Slice 1 path and runs right after it; the compiler spike stays in P0 and in the slice, so a rolldown or oxc problem still shows up first. In Slice 1 agents send `html`; React through the mirrored UMD build (a cdnjs or jsDelivr `<script>` tag) works.
   - **The preview card is two static PNGs.** In Slice 1 both card variants are content-free with fixed text, so the slice embeds two 1200×630 PNGs in the binary. The SVG → resvg pipeline moves to the titled card, where fields first vary.
@@ -93,13 +93,13 @@ Adding anything to it takes a decision from Chris. Work that straddled the line 
 
 **Definition of done.** Slice 1 is done when all of these hold:
 1. **`communal_pixel_editor` passes in CI on every PR** (on the e2e harness: Dex and Caddy with an internal-CA wildcard cert for `pf.test`. Chris's sign-in, step-up, share, roll back and freeze run on Chromium with the virtual authenticator, and the signed-out guest runs on a mobile WebKit profile): an agent connected by device code creates the board in one `part_create`, runs `part_check`, posts `https://pixel-part.<domain>/`; Chris does Share → Anyone with the link → Can contribute → Copy (4 interactions + 1 biometric); a signed-out browser paints and Chris's open tab shows it within 1 s; Chris rolls back one snapshot and freezes the link, and the guest's next write is refused.
-2. **The same flow passes once by hand on the example deployment** (its Authentik as plain OIDC, its tunnel as the proxy): a real agent, Chris on his phone, a signed-out phone on mobile data.
+2. **The same flow passes on the device matrix** (decision 52): Playwright Chromium (mobile emulation), WebKit (mobile profile) and Firefox in CI, and Mobile Safari in the iOS Simulator, run locally on a Mac with its results attached as evidence.
 3. **Every acceptance test of the work in Slice 1 passes** (they live in its beads), including cross-surface conformance over MCP, HTTP, the CLI and `/skill.md` with device-code and personal tokens.
 4. **The §7 lines for what exists pass from outside**, the guest, agent and render-sidecar lines included. No agent token, scope or op can make a public link.
 5. **Export and import round-trip**: the nightly export imported into a fresh container brings back every part, version, data document and snapshot, and every cap minted before it is dead.
 6. **Every store that exists is capped** and passes its fill-past-cap case; the Health page shows each one, the backup layers and the disk budget; no `[unsafe]` key is set.
 7. **`/skill.md` is `docs/agent-contract.md`**, and the test that regenerates its op reference from the registry passes.
-8. **The Telegram passkey test is recorded** (pass, or fail with the two fixes applied and re-tested).
+8. **Not in the gate: real devices.** The by-hand run on the example deployment (a real agent, Chris on his phone, a signed-out phone on mobile data) and the Telegram passkey test sit in the human checks, which never block Slice 1 (decision 52). A failure there becomes a bug for the swarm.
 
 ---
 
@@ -348,7 +348,7 @@ The wrapper has its own strict CSP (no `sandbox`): scripts and styles only from 
   There's no `<meta refresh>` and no target URL in the HTML, so a crawler finds nothing to follow. The root `/` and `/l/` read the DB through a cache. Under `/c/`, blob paths are DB-free (cap check + manifest LRU); the **entry document** does one indexed read (the `data_docs` primary key for this person's `__storage` personal docs, cached per cap) to inline `pf-boot`, and `/_rt` reads and writes through the pool. For `link:`, `render` and guest subjects the snapshot is empty.
 - **The response never depends on the User-Agent.** Bots and people get byte-identical HTML. What it reveals is decided by the audience: the root carries the content-free card unless the part has an active public link, in which case its title is already public and the root carries the public card; `/l/` always carries the public card.
   *Why:* unfurl-bot detection is unreliable. iMessage fetches from the sender's device, and several apps use browser-like UAs.
-- **Telegram in-app browser and passkeys: decided (Chris, 2026-10-23).** A 5-minute test on a real phone, in the real-device pass, checks passkey sign-in in Telegram's in-app browser. If it fails, the fixes are (1) set Telegram to open links in the normal browser, and (2) Hermes' messages hint "open in browser".
+- **Telegram in-app browser and passkeys: decided (Chris, 2026-10-23).** A 5-minute test on a real phone, in the non-blocking human checks (decision 52), checks passkey sign-in in Telegram's in-app browser. If it fails, the fixes are (1) set Telegram to open links in the normal browser, and (2) Hermes' messages hint "open in browser".
   There is no fallback link: the person-bound link considered in round 2 is rejected (`docs/plan-history.md`).
 
 ## 3. Topology
@@ -553,7 +553,7 @@ Either way: pending invites show their status (sent, opened, enrolled, expired) 
 ### UX: click budgets, tested end to end
 
 Every flow has a budget in **real human interactions, including OS/browser prompts and the biometric**. The e2e suite (Chromium + virtual WebAuthn) enforces the page-level part,
-and a manual pass on a **real iPhone (Safari), an Android phone and the Telegram in-app browser** before each phase's sign-off covers what a virtual authenticator can't see. §4a.7 adds the UI-level budgets.
+and the simulated device matrix (decision 52: Chromium, WebKit and Firefox in Playwright, Mobile Safari in the iOS Simulator) gates every phase. A manual pass on a **real iPhone (Safari), an Android phone and the Telegram in-app browser** covers what simulation can't see, whenever Chris gets to it; it never blocks a phase, and a failure is filed as a bug. §4a.7 adds the UI-level budgets.
 
 | Flow | Who | Budget |
 | --- | --- | --- |
@@ -1700,7 +1700,7 @@ The risks are hydration bundle size on phones, API churn (0.9 is in release cand
 
 **Why a child process for builds**: see §3d. In short, a hang or panic in young compiler code costs one build, not the server.
 
-**Maturity check before P0 freezes**: one-day spikes on rolldown/oxc as libraries, rmcp stateless Streamable HTTP, Leptos SSR vs templates, and the **opaque-origin sandbox on real browsers**. The sandbox spike checks, on Chrome, Safari, iOS Safari and Firefox:
+**Maturity check before P0 freezes**: one-day spikes on rolldown/oxc as libraries, rmcp stateless Streamable HTTP, Leptos SSR vs templates, and the **opaque-origin sandbox on every browser engine**. The sandbox spike checks, on Chromium, WebKit and Firefox (Playwright) and on Mobile Safari in the iOS Simulator (`xcrun simctl`, a self-reporting test page that posts its results back), with no human in the loop:
 1. `'self'` in `script-src`/`connect-src` still matches the part host from a sandboxed document (fallback: list the host explicitly);
 2. `Origin` (`null`) and `Sec-Fetch-Site` (`cross-site`) values on a fetch to the part's own host;
 3. `fetch("./x.json")`, `<script type="module">` and `import()` with `ACAO: null` and no credentials;
@@ -1713,7 +1713,7 @@ The risks are hydration bundle size on phones, API churn (0.9 is in release cand
 10. the wrapper flow: a `#pf=` fragment in a 302 `Location` survives to the part host; `history.replaceState` clears it before any other script; an explicit part-host `frame-ancestors` admits the same-host wrapper; and a credentialed same-site `fetch` from the part host to the workspace carries the `Lax` session cookie (Safari's tracking prevention included);
 11. *Cloudflare adapter only:* the wildcard CNAME to `<tunnel>.cfargotunnel.com` serves a new `*-part` name;
 12. a WebSocket from a sandboxed document to its own host (`Origin: null` in the handshake) and SSE under `/c/<cap>/api/`, both through each example proxy;
-13. a WebAuthn assertion from the wrapper origin with `rp.id` = the apex, on Safari and the Telegram webview.
+13. a WebAuthn assertion from the wrapper origin with `rp.id` = the apex, with the virtual authenticator on each engine (and in the iOS Simulator where WebKit allows it). The Telegram webview is approximated by the WebKit lanes and confirmed on a real phone in the human checks.
 The sandbox spike runs in the first week, before the content listener starts, since items 10, 12 and 13 decide the wrapper flow.
 A separate runner spike (P2a, part of the runner work) checks rootless BuildKit in a container and the firewall rules on Docker (`DOCKER-USER`) and on Podman (netavark + nftables).
 An advisories spike (before matching ships, §3h) measures the OSV dump sizes for the ecosystems in use and the matching speed against 10k `build_deps` rows, and chooses between Syft and Trivy as the runner's pinned scanner image.
@@ -2783,7 +2783,7 @@ It gates every release, so a hidden dependency on the example deployment's stack
 - **WebAuthn passkeys** for step-up and local accounts. They're a W3C standard implemented in the binary, and passkey-only sign-in is what makes phishing via parts inert (§3).
 - **OCI images + compose** as the deployment unit. Both are open standards with several implementations, and the alternative (OS packages per distro) is more coupling, not less.
 - **The mirror allowlist's default CDNs** (cdnjs, jsDelivr `/npm/`, unpkg, esm.sh, Google Fonts). They're what Claude-written pages reference, so they're a compatibility target, not infrastructure; the list is config.
-- **The Telegram in-app browser in the real-device pass.** It's where the household opens links, so it stays in the test matrix; nothing in partifactory talks to Telegram.
+- **The Telegram in-app browser in the human checks.** It's where the household opens links, so a real phone checks it (non-blocking, decision 52); nothing in partifactory talks to Telegram.
 
 ## 5g. Insights: analytics and observability, in the workspace (admin-only)
 
@@ -2862,7 +2862,7 @@ Each phase ends with something usable and has its own "Done when". Slice 1 (top 
 
 **P0 Core (local).** Repo, schema + migrations, blob store (temp → fsync → rename), source manifests + build records, the build child process, HTML/Markdown/text/SVG/code **and TSX** kinds with the golden corpus,
 mirror-on-build, the content listener with **path caps and the canonical sandbox CSP**, the prelude with the `localStorage` shim and `runtime_errors`, the operation registry, the HTTPS API with `/openapi.json`, the `part` CLI (dev token),
-logs + metrics, and a same-machine regression bench. Spikes: rolldown/oxc, rmcp, Leptos vs templates, **the sandbox on real browsers** (§5), including the wrapper flow, and the Authentik adapter spike (conditional UI, blueprint-over-API, `groups` claim, membership by API, recovery-link permission).
+logs + metrics, and a same-machine regression bench. Spikes: rolldown/oxc, rmcp, Leptos vs templates, **the sandbox on every browser engine, emulated and simulated** (§5), including the wrapper flow, and the Authentik adapter spike (conditional UI, blueprint-over-API, `groups` claim, membership by API, recovery-link permission).
 *Done when:* `part put x.html --name packing` opens at `packing-part.localhost:8081/c/<cap>/` under the sandbox, a Claude-written page using `localStorage` and a CDN `<script>` runs unchanged there, and the TSX corpus compiles.
 
 **P1 Edge + identity.** The ingress contract with example proxy configs, `provision` with the manual and Cloudflare providers (the example deployment's tunnel and wildcard), generic OIDC login + the claims re-read directory, the Authentik directory adapter, `/grant` → the part host,
@@ -2871,7 +2871,7 @@ the Stockroom workspace (gallery, search, history, diff, preview old versions, r
 rate limits, quotas, health page with optional ops alerts, backups (consistent DB copy, `export`/`import`, the nightly export on by default, per-part data snapshots on by default), the first drill on a second OCI host, the image + compose + env contract with an example CI workflow, `doctor`,
 the Insights store with request ids, traces and the log pipeline (§5g), the janitor, the disk budget and the retention test (§5h), the no-content-in-logs fuzz test,
 the **portability lane** (full e2e with Dex, Caddy and local exports, §5f), and the **nginx/HAProxy comparison on the real content path**.
-Real-device pass, including the 5-minute Telegram in-app-browser passkey test (§2).
+The simulated device matrix (decision 52). The real-device pass, including the 5-minute Telegram in-app-browser passkey test (§2), is a human check that blocks nothing.
 *Done when:* Chris opens a part on his phone at its own host link via SSO; the portability lane is green; a public link opens from mobile data with no login and unfurls as a card; the security checklist (§7) passes from outside; and the drill restores everything on a second OCI host in < 15 min.
 
 **P2 Agents + the household loop.** OAuth AS (device grant first, then auth code + PKCE + CIMD/DCR + manual clients), personal agent tokens, one connection per (agent, person) and service identities,
@@ -2922,7 +2922,7 @@ This section is the order the pieces depend on each other, and why. Read each ar
 - **The registry → `part_edit`, the read path and `part_check` → MCP → discovery and `/skill.md` → cross-surface conformance.** The third chain of the same length.
 - **Identity, in parallel once the schema lands:** generic OIDC with the e2e harness → the claims re-read directory → the policy engine → `/grant` → the part-host wrapper and its chrome API → the share sheet's public rung. The admin pin and step-up sit beside `/grant`.
 - **Agent connections:** the token service (after OIDC, the policy engine and the admin pin) → the device grant and personal tokens.
-- **Shipping:** logs and metrics → Health; backups → import and the drill; the ingress contract → the deliverable → the §7 suite and the real-device pass.
+- **Shipping:** logs and metrics → Health; backups → import and the drill; the ingress contract → the deliverable → the §7 suite and the simulated device matrix. The human checks on real phones hang off nothing and block nothing.
 - **`build_deps`** *(provisional, §3h)* rides on mirror-on-build and needs nothing else.
 
 **Right after Slice 1.**
@@ -3011,7 +3011,7 @@ Every line runs against the example deployment's staging (Cloudflare + Authentik
 - Rate limits trip at the configured thresholds, and quotas stop a looping agent. At 95 % of the disk budget, writes get `storage_full` while reads and deletes continue.
 - Every growing store has a cap (`doctor` fails otherwise), and each one, filled past its cap in a test, comes back under. A safe default switched off without its `[unsafe]` key fails `config check`.
 - A parts-only export contains no grants, tokens, sessions or people (schema test).
-- Real-device pass (iPhone Safari, Android Chrome, the Telegram in-app browser) for: standalone open, part-host open (first open and reload), embedding, invite acceptance, sign-in.
+- The simulated device matrix in the gate; a non-blocking real-device pass (iPhone Safari, Android Chrome, the Telegram in-app browser) for: standalone open, part-host open (first open and reload), embedding, invite acceptance, sign-in.
 
 ## 8. Decisions
 
@@ -3063,7 +3063,7 @@ Every line runs against the example deployment's staging (Cloudflare + Authentik
 **2026-10-23 (Slice 1 freeze)**
 
 35. **Slice 1 is frozen**: exactly what `communal_pixel_editor` needs, cut through P0–P2, with a definition of done. Work that straddled it was split, and the remainders come after Slice 1. Changing it takes Chris.
-36. **Telegram in-app browser**: a 5-minute real-phone passkey test stays in the real-device pass. If it fails, Telegram is set to open links in the normal browser and Hermes' messages hint "open in browser". The person-bound-link fallback is rejected.
+36. **Telegram in-app browser**: a 5-minute real-phone passkey test is in the non-blocking human checks (decision 52). If it fails, Telegram is set to open links in the normal browser and Hermes' messages hint "open in browser". The person-bound-link fallback is rejected.
 37. **OAuth authorization code is after Slice 1.** Slice 1 connects agents by device code and personal tokens; every MCP client the slice needs accepts a static bearer header.
 38. **`docs/agent-contract.md` is the shared guide** and the body of `/skill.md`, checked against the registry by a test. It replaces `USAGE.md`.
 
@@ -3085,6 +3085,7 @@ Every line runs against the example deployment's staging (Cloudflare + Authentik
 49. **Auto-update** *(provisional)*: `[advisories] auto_update = "never" | "patch"`, per part too. Frontends default to `never`; backends to `patch`, only with a known fix, through the `after_check` gate, rolled back automatically if the check fails, and recorded as `system`.
 50. **Tasks live only in beads.** The plan carries no task ids and no task table: §6a is the build order, `br ready` lists the work, and beads are created only at conversion. The change logs moved to `docs/plan-history.md`.
 51. **Backend data is the part's business; rollback is best effort.** As in shartifacts, volumes are shared by every version, rollback restores code only, and partifactory runs no migrations or data rollbacks for backends. It guarantees the exact code and the health gate, nothing more. The backend contract says to migrate forward, additive changes, read per request, lock writes, and back up before a non-additive change. Page data keeps its per-part data snapshots (§5c).
+52. **Real devices never block.** Every gate uses emulated or simulated devices: Playwright Chromium (mobile emulation, virtual authenticator), WebKit (mobile profile) and Firefox in CI, and Mobile Safari in the iOS Simulator run locally on a Mac with its results as evidence. Real phones (iPhone Safari, Android Chrome, the Telegram in-app browser, the by-hand run on the example deployment) are human checks Chris does whenever. Nothing depends on them, and a failure is filed as a bug for the swarm. *Why:* the swarm shouldn't wait on a person, and simulated WebKit plus Chromium catch nearly everything a phone would; the rest is cheap to fix afterwards.
 
 ## 9. Non-goals (v1)
 

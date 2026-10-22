@@ -1,0 +1,19 @@
+# Closing a bead needs two recorded gate passes (see AGENTS.md, "Closing a bead"):
+#   ci_green  - CI is green on main with the bead's tests in it
+#   verified  - the bead's verification gate was observed on a real running build
+# Record them with `br gate report <id> --gate <name> --provider <who> --status pass`
+# after the bead's last status change, then `br close <id> --reason "<evidence>"`.
+# `workflow.gates` is only enforced with `strict: true`; bare target keys ("closed")
+# are not enforced in br 0.7.4, so every "from -> closed" transition is listed.
+allow_bypass: false
+workflow:
+  strict: true
+  gates:
+    "open -> closed":
+      require_all: [ci_green, verified]
+    "in_progress -> closed":
+      require_all: [ci_green, verified]
+    "blocked -> closed":
+      require_all: [ci_green, verified]
+    "deferred -> closed":
+      require_all: [ci_green, verified]
