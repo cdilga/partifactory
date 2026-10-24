@@ -40,6 +40,7 @@ A bead is done when its **Verification gate** has been observed, not when its un
 - **See it run for real.** Watch the outcome the gate names on the binary built from `main`, running in the e2e harness (Dex + Caddy + `pf.test`) or in the compose deployment.
 - **CI is green on `main`** with the bead's tests in it.
 - **The logs are checked.** The e2e run asserts on the log lines or metrics the gate names.
+- **Simulator lanes run on the Mac.** A gate that names Mobile Safari in the iOS Simulator (`tests/device/ios-sim.sh`) can only be observed on the Mac, where the iOS runtime is installed, so claim those beads from a session there.
 - **Nothing regressed.** The full e2e suite passes, including every earlier bead's gate tests. Gates accumulate, so once a gate test lands it runs on every PR.
 - **Close with evidence.** br enforces this: `.beads/policy.yaml` won't let any bead move to `closed` until the gates `ci_green` and `verified` have passed, and `--bypass-policy` is turned off. Gate results apply to the bead's current status, so record them after your last status change, right before you close:
 

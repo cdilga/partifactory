@@ -735,7 +735,7 @@ The common case is "change that thing from last week", so finding a part and mak
     Failures reject with a `PfError {code, message, retryable, retry_after?}` whose `code` is from the error catalogue (§4b): `rate_limited`, `forbidden_view_only`, `quota_exceeded`, `too_large`, `storage_full`, `invalid_input`, `forbidden`. Limits are in §3a. Its documents are `part_data` collection `__storage`, with the key as `doc_id`. They're the part's state across versions and devices, agents read and write them (`part_data`), and they're in every copy of `/data` and every full export.
   - **Self-editing parts**: `claude.use("artifact").publish(...)` lets a part save a new version of itself, using compare-and-set against the version it's running, which must also be head. Viewers with `edit` can do it. Public-link viewers never can.
   - **Assets** (P3): viewers with `comment` or higher can add files from the page (`POST /_rt/v1 {op: "assets.put"}`, 25 MiB each, counted against the space quota). They're part blobs served at `/_a/<id>` behind the cap, listed and deletable by agents via `part_data {collection: "_assets"}`.
-  - **Phone editing** (P4): "Edit text" mode lets you tap any text in the preview and change it. It's saved as an anchor edit (`old_str` = the original text), so it works whenever the text occurs exactly once in the source (Markdown maps to block ids).
+  - **Phone editing** (P4): "Edit text" mode lets you tap any text in the preview and change it. It's saved as an anchor edit (`old_str` = the original text), so it works whenever the text occurs exactly once in the source. Markdown and `text` parts use the formatted view instead (decision 54).
     Otherwise it offers "Ask the agent" with the text pre-filled. Long-press any element to comment with an anchor `{version, block_id | selector, text_quote, rect}`. Both run over the wrapper ↔ part `postMessage` channel, so the trusted UI stays outside the part.
 - **Prompt-injection hygiene**: every comment, data document and asset carries `provenance: person | agent | link_viewer` in the JSON, and results carry `contains_untrusted: true` when any is from someone other than the connection's person.
   The MCP text rendering also wraps such content in `<untrusted_content>`. The shared guide tells agents to treat it as data, not instructions.
@@ -1563,7 +1563,7 @@ GPT Actions constraints are checked by a CI lint: every op has an `operationId`,
 | `/.well-known/mcp/server.json` | the MCP registry `server.json` shape (name, description, version, `remotes: [{type: streamable-http, url}]`). **Served, not published** to the public registry: this is a private instance, and the registry doesn't support private servers. The public repo ships a template |
 
 - **No A2A agent card.** A2A describes agents that accept tasks. partifactory is a tool and resource server, not an agent. If Hermes ever speaks A2A, *Hermes* publishes the card and lists partifactory as a tool.
-- Every `401` from `/api` or `/mcp` carries `WWW-Authenticate: Bearer resource_metadata="…"` **and** a JSON body explaining the three ways to get a token (OAuth, device code, personal token), with links. An agent that hits the endpoint blind learns how to authenticate from the error alone.
+- Every `401` from `/api` or `/mcp` carries `WWW-Authenticate: Bearer resource_metadata="…"` **and** a JSON body explaining the ways to get a token that are mounted (device code and personal token in Slice 1; OAuth once authorization code lands), with links. An agent that hits the endpoint blind learns how to authenticate from the error alone.
 - Discovery documents are unauthenticated and contain no site secrets or user data: they never list spaces, parts or people.
 
 ### Auth for each kind of client (one token model)
@@ -1635,7 +1635,7 @@ share inward with a group → get a deep link for a public link (`part_link_for`
 3. The CLI via subprocess with `--json`.
 4. **The skill file itself**: the example commands in `/skill.md` and `/llms-full.txt` are extracted and executed.
 
-Normalised results (ids, timestamps) and audit rows must be identical across drivers and across the three auth kinds. The suite also validates `/openapi.json`, runs the GPT Actions lint and fetches every discovery URL.
+Normalised results (ids, timestamps) and audit rows must be identical across drivers and across the auth kinds that exist (device code and personal token in Slice 1; OAuth authorization code joins when it lands). The suite also validates `/openapi.json`, runs the GPT Actions lint and fetches every discovery URL.
 An optional nightly, not gating: a small model gets only `PARTIFACTORY_URL` + a PAT + "make a packing list page and give me the link", and must succeed via discovery.
 
 ## 4c. Previews and render checks
@@ -1729,7 +1729,7 @@ One Cargo workspace builds **one static binary** (`partifactory`, with `part` as
 | Workspace UI | Leptos 0.8 (SSR + hydration), or `askama`/`maud` templates + small vanilla-JS islands if the spike says so (below). CodeMirror 6 for the source editor (the one JS dependency, vendored as a shared blob) |
 | Backends | the runner sidecar: `bollard` (Docker Engine API client; Docker or Podman), rootless BuildKit (`buildkitd`) for image builds, nftables/iptables rules it applies itself, optional gVisor (`runsc`) |
 | Observability | `tracing` (JSON logs, spans into the trace store), `metrics` + Prometheus exporter, a separate `insights.db` (§5g), optional OTLP adapter |
-| Tests | `cargo nextest`, golden tests (manifests, diffs, builds), property tests (cap for A never reads B), OAuth conformance, cross-surface conformance, browser e2e with virtual WebAuthn against `*.localhost`, a sandbox compat corpus (30 real Claude-written artifacts and 10 Vite builds rendered under the sandbox in CI with zero uncaught errors) |
+| Tests | `cargo nextest`, golden tests (manifests, diffs, builds), property tests (cap for A never reads B), OAuth conformance, cross-surface conformance, browser e2e with virtual WebAuthn against `pf.test` (Dex + Caddy, internal-CA wildcard cert), a sandbox compat corpus (30 real Claude-written artifacts and 10 Vite builds rendered under the sandbox in CI with zero uncaught errors) |
 
 **Why Rust, not Go** (the reference is 21k lines of Go):
 one static `FROM scratch` binary with every asset embedded; `rmcp`, `oxc`, `rolldown` and `resvg` in the same binary instead of sidecars; `webauthn-rs` for native step-up; memory safety on an internet-facing authorization server; and the owner's preference.
@@ -1754,7 +1754,7 @@ The risks are hydration bundle size on phones, API churn (0.9 is in release cand
 10. the wrapper flow: a `#pf=` fragment in a 302 `Location` survives to the part host; `history.replaceState` clears it before any other script; an explicit part-host `frame-ancestors` admits the same-host wrapper; and a credentialed same-site `fetch` from the part host to the workspace carries the `Lax` session cookie (Safari's tracking prevention included);
 11. *Cloudflare adapter only:* the wildcard CNAME to `<tunnel>.cfargotunnel.com` serves a new `*-part` name;
 12. a WebSocket from a sandboxed document to its own host (`Origin: null` in the handshake) and SSE under `/c/<cap>/api/`, both through each example proxy;
-13. a WebAuthn assertion from the wrapper origin with `rp.id` = the apex, with the virtual authenticator on each engine (and in the iOS Simulator where WebKit allows it). The Telegram webview is approximated by the WebKit lanes and confirmed on a real phone in the human checks.
+13. a WebAuthn assertion from the wrapper origin with `rp.id` = the apex, with the virtual authenticator on Chromium, the only Playwright engine that has one (WebKit and Firefox record `not_assertable`), and in the iOS Simulator where WebKit allows it. The Telegram webview is approximated by the WebKit lanes and confirmed on a real phone in the human checks.
 The sandbox spike runs in the first week, before the content listener starts, since items 10, 12 and 13 decide the wrapper flow.
 A separate runner spike (P2a, part of the runner work) checks rootless BuildKit in a container and the firewall rules on Docker (`DOCKER-USER`) and on Podman (netavark + nftables).
 An advisories spike (before matching ships, §3h) measures the OSV dump sizes for the ecosystems in use and the matching speed against 10k `build_deps` rows, and chooses between Syft and Trivy as the runner's pinned scanner image.
