@@ -3,7 +3,7 @@
 # beads (pf-1q1u, pf-7qza, pf-wmcw, pf-8ssu) have landed.
 [workspace]
 resolver = "2"
-members = ["spike-mcp", "spike-ui", "spike-compiler"]
+members = ["spike-mcp", "spike-ui", "spike-ui-app", "spike-compiler"]
 
 [workspace.package]
 version = "0.0.0"
@@ -18,3 +18,12 @@ incremental = false
 [profile.test]
 debug = false
 incremental = false
+
+# The hydrated Leptos bundle, measured the way leptos recommends shipping it.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+debug = false

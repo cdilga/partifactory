@@ -1,0 +1,28 @@
+:root { --ink: #1d1d1b; --ink-3: #8a8780; --paper: #f7f5f0; --line: #dedad2; --amber: #b86e00; --blue: #2a62d4; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.4 system-ui, sans-serif; color: var(--ink); background: var(--paper); }
+button { font: inherit; border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 4px 10px; min-height: 32px; cursor: pointer; }
+.bar { height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-bottom: 1px solid var(--line); background: #fff; position: relative; white-space: nowrap; overflow: hidden; }
+.bar .tag, .sheet .tag { font: 11px ui-monospace, monospace; background: #efe7d6; padding: 2px 6px; border-radius: 4px; }
+.bar .title { font-weight: 600; }
+.bar .name { color: var(--ink-3); }
+.bar .activity { color: var(--blue); font-size: 12px; }
+.bar .pulse { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--blue); margin-right: 6px; }
+.bar .spacer { flex: 1; }
+.menu { position: absolute; right: 8px; top: 44px; background: #fff; border: 1px solid var(--line); list-style: none; margin: 0; padding: 4px 0; }
+.menu li { padding: 6px 14px; }
+.sheet { display: none; position: fixed; right: 16px; top: 52px; width: 480px; max-width: calc(100vw - 32px); background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 16px; box-shadow: 0 8px 30px #0002; }
+.sheet.open { display: block; }
+.sheet h2 { margin: 0 0 12px; font-size: 16px; display: flex; gap: 8px; align-items: center; }
+.sheet .close { margin-left: auto; }
+.ladder, .mode { display: flex; gap: 0; flex-wrap: wrap; }
+.ladder button, .mode button { border-radius: 0; flex: 1 1 auto; }
+.ladder button.on, .mode button.on { background: var(--ink); color: #fff; }
+.ladder button.amber.on { background: var(--amber); }
+.sentence { font-size: 16px; font-weight: 600; margin: 14px 0; }
+.warn { color: var(--amber); }
+.url { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
+.stepup.ok { color: green; }
+.foot { color: var(--ink-3); font-size: 12px; }
+.frame { margin: 12px; height: calc(100vh - 68px); border: 1px dashed var(--line); display: grid; place-items: center; color: var(--ink-3); }
+@media (max-width: 600px) { .sheet { left: 0; right: 0; top: auto; bottom: 0; width: auto; max-width: none; border-radius: 12px 12px 0 0; } .bar .activity, .bar .name { display: none; } }

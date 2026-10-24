@@ -3,3 +3,20 @@ name = "spike-ui"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+
+[dependencies]
+spike-ui-app = { path = "../spike-ui-app", features = ["ssr"] }
+leptos = { version = "=0.8.22", features = ["ssr"] }
+leptos_axum = "=0.8.10"
+any_spawner = { version = "0.3", features = ["tokio"] }
+askama = "=0.16.1"
+axum = "=0.8.9"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+tower-http = { version = "0.6", features = ["fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+anyhow = "1"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

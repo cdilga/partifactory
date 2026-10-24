@@ -1,0 +1,20 @@
+[package]
+name = "spike-ui-app"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+leptos = { version = "=0.8.22" }
+wasm-bindgen = { version = "=0.2.129", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+web-sys = { version = "0.3", optional = true, features = ["Navigator", "Clipboard", "Window"] }
+
+[features]
+hydrate = ["leptos/hydrate", "dep:wasm-bindgen", "dep:console_error_panic_hook", "dep:web-sys"]
+ssr = ["leptos/ssr"]
+# CodeMirror 6 interop probe; kept out of the part-view bundle that measure.sh sizes.
+editor = []

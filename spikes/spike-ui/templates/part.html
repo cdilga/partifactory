@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Photo finder · templates</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script type="module" src="/static/share-island.js"></script>
+</head>
+<body>
+  <header class="bar">
+    <a class="back" href="/">‹ Parts</a>
+    <span class="tag">P-0142 TSX</span>
+    <span class="title">Photo finder</span>
+    <code class="name">photofinder</code>
+    <button class="rev">REV 12 ▾</button>
+    <span class="activity"><i class="pulse"></i>Hermes is editing app.tsx</span>
+    <span class="spacer"></span>
+    <button class="chip" data-open-share>{{ chip }}</button>
+    <button class="share" data-open-share>Share</button>
+    <a class="edit" href="/edit">Edit</a>
+    <button class="comments">Comments 3</button>
+    <button class="more" data-menu>⋯</button>
+    <ul class="menu" hidden>
+      <li>Open standalone ↗</li><li>Copy link</li><li>Details</li>
+    </ul>
+  </header>
+
+  <div class="sheet" role="dialog" aria-label="Share" data-share>
+    <h2>Share <em>Photo finder</em> <span class="tag">P-0142</span> <button class="close" data-close>×</button></h2>
+    <div class="ladder" role="radiogroup">
+      {% for (label, on, amber) in rungs %}
+      <button role="radio" data-rung="{{ loop.index0 }}" class="{% if on %}on{% endif %} {% if amber %}amber{% endif %}" aria-checked="{{ on }}">{{ label }}</button>
+      {% endfor %}
+    </div>
+    <p class="sentence" data-sentence>{{ sentence }}</p>
+    <div data-public hidden>
+      <p class="warn">The worst option: no sign-in, anyone who gets the link can open it.</p>
+      <div class="mode" role="radiogroup">
+        <button class="on" data-mode="view">Can view</button>
+        <button data-mode="contribute">Can contribute</button>
+      </div>
+      <div class="url"><code>https://photofinder-part.example.com/</code> <button data-copy>Copy</button></div>
+      <button class="stepup" data-stepup>Turn on public link</button>
+    </div>
+    <p class="foot">Changes save as you go.</p>
+  </div>
+  <main class="frame"><p>the part, full-bleed, sandboxed on its own host</p></main>
+</body>
+</html>
