@@ -24,7 +24,8 @@ if [ -n "$run" ] && [ -d "$run" ]; then
   fi
 fi
 
-docker compose -f "$h/compose.yaml" --profile container down -v --remove-orphans >/dev/null 2>&1 || true
+docker compose -f "$h/compose.yaml" --profile container --profile browsers down -v --remove-orphans 2>&1 \
+  | grep -vE 'Stopp|Remov|Stopped|Removed' >&2 || true
 
 # Only this compose project's objects: other harnesses (the sandbox spike) share the label.
 f=(--filter label=pf.harness=1 --filter label=com.docker.compose.project=pf-harness)
@@ -32,7 +33,7 @@ left_c="$(docker ps -aq "${f[@]}")"
 left_v="$(docker volume ls -q "${f[@]}")"
 left_n="$(docker network ls -q "${f[@]}")"
 if [ -n "$left_c$left_v$left_n" ]; then
-  echo "down.sh: pf.harness=1 objects left behind; removing" >&2
+  echo "down.sh: left behind after compose down, removing: containers[$left_c] volumes[$left_v] networks[$left_n]" >&2
   [ -n "$left_c" ] && docker rm -f $left_c >/dev/null 2>&1
   [ -n "$left_v" ] && docker volume rm $left_v >/dev/null 2>&1
   [ -n "$left_n" ] && docker network rm $left_n >/dev/null 2>&1
