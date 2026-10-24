@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bloom: a multiplayer garden war</title>
+<script>if (!window.storage) document.write('<script src="../dev-shim.js"><\/script>');</script>
+<style>
+  :root {
+    --bg: #0b0d12; --panel: rgba(20, 24, 33, 0.82); --line: rgba(255, 255, 255, 0.08);
+    --text: #e8ecf3; --muted: #8a93a6; --accent: #ffd166;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden;
+    -webkit-tap-highlight-color: transparent; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; touch-action: manipulation; cursor: crosshair; }
+  .hud { position: fixed; left: 12px; right: 12px; top: 10px; display: flex; gap: 10px; align-items: flex-start;
+    justify-content: space-between; pointer-events: none; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 14px;
+    backdrop-filter: blur(8px); pointer-events: auto; }
+  h1 { margin: 0; font-size: 20px; letter-spacing: 0.02em; }
+  h1 span { color: var(--accent); }
+  .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .clock { font-variant-numeric: tabular-nums; font-size: 22px; font-weight: 650; text-align: right; }
+  .phase { color: var(--muted); font-size: 12px; text-align: right; }
+  .pips { display: flex; gap: 5px; margin-top: 8px; }
+  .pip { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--me, #fff); opacity: 0.35; transition: all .2s; }
+  .pip.on { background: var(--me, #fff); opacity: 1; box-shadow: 0 0 10px var(--me, #fff); }
+  .board { position: fixed; right: 12px; bottom: 12px; min-width: 190px; max-width: 46vw; }
+  .board h2 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .row { display: flex; align-items: center; gap: 8px; padding: 2px 0; font-variant-numeric: tabular-nums; }
+  .row .sw { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .row .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row.me .nm { font-weight: 700; }
+  .help { position: fixed; left: 12px; bottom: 12px; max-width: min(340px, 50vw); font-size: 12.5px; color: var(--muted); }
+  .help b { color: var(--text); font-weight: 600; }
+  .help input { width: 100%; margin-top: 8px; background: rgba(255,255,255,.06); border: 1px solid var(--line);
+    color: var(--text); border-radius: 8px; padding: 6px 8px; font: inherit; }
+  .banner { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); text-align: center;
+    pointer-events: none; transition: opacity .4s; opacity: 0; }
+  .banner.show { opacity: 1; }
+  .banner .big { font-size: clamp(28px, 7vw, 56px); font-weight: 800; text-shadow: 0 4px 30px rgba(0,0,0,.6); }
+  .banner .small { color: var(--muted); margin-top: 6px; font-size: 15px; }
+  .toast { position: fixed; left: 50%; top: 84px; transform: translateX(-50%); background: #3a1d24; color: #ffd7dd;
+    border: 1px solid #6b2a36; padding: 6px 12px; border-radius: 10px; font-size: 13px; opacity: 0; transition: opacity .25s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  @media (max-width: 560px) {
+    .help { display: none; }
+    .board { left: 12px; right: 12px; max-width: none; }
+    .board .rows { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hud">
+  <div class="card">
+    <h1>Bloom<span>.</span></h1>
+    <div class="sub" id="who">connecting…</div>
+    <div class="pips" id="pips"></div>
+  </div>
+  <div class="card">
+    <div class="clock" id="clock">--:--</div>
+    <div class="phase" id="phase">round</div>
+  </div>
+</div>
+<div class="card help" id="help">
+  <b>Tap a hex to plant a seed.</b> Two seeds side by side take root and spread.
+  Plant on a rival to wither it; surround ground to capture it. Seeds refill every two seconds.
+  The <b>wild</b> grows on its own. Most ground at the bell wins.
+  <input id="name" maxlength="24" placeholder="Your name" autocomplete="off">
+</div>
+<div class="card board"><h2>Garden</h2><div class="rows" id="rows"></div></div>
+<div class="banner" id="banner"><div class="big" id="bannerBig"></div><div class="small" id="bannerSmall"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+// Every player's seeds live in one shared key per round, `b:<round>:<player>`, holding
+// {n: name, j: join tick, m: "tick,cell;tick,cell;…"}. Each browser replays the same moves
+// through the same deterministic simulation, so the board needs no game server: the shared
+// data is the move log, and partifactory's data.changed events carry it between players.
+
+const R = 9;                    // hex radius: 271 cells
+const TICK_MS = 400;
+const ROUND_TICKS = 375;        // 150 s of play
+const BREAK_TICKS = 25;         // 10 s between rounds
+const ROUND_MS = (ROUND_TICKS + BREAK_TICKS) * TICK_MS;
+const LEAD = 2;                 // a seed lands two ticks after the tap, so it reaches everyone first
+const GROW_EVERY = 4, HEAL_EVERY = 8, WILD_EVERY = 10;
+const ENERGY_START = 3, ENERGY_MAX = 6, ENERGY_EVERY = 5;
+const PALETTE = ["#ff5d73", "#4cc9f0", "#ffd166", "#9b5de5", "#06d6a0", "#f78c3b", "#f15bb5", "#7bdff2"];
+const WILD_COLOR = "#5b6b4e";
+
+// --- the board ---------------------------------------------------------------------------
+const cells = [], index = new Map();
+for (let q = -R; q <= R; q++) for (let r = Math.max(-R, -q - R); r <= Math.min(R, -q + R); r++) {
+  index.set(q + "," + r, cells.length); cells.push({ q, r });
+}
+const N = cells.length;
+const DIRS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+const nbrs = cells.map(({ q, r }) => DIRS.map(([dq, dr]) => index.get((q + dq) + "," + (r + dr))).filter(i => i !== undefined));
+
+// --- identity ----------------------------------------------------------------------------
+const store = (k, v) => { try { v === undefined ? null : localStorage.setItem(k, v); return localStorage.getItem(k); } catch { return null; } };
+let myId = store("bloom:id") || Math.random().toString(36).slice(2, 10);
+store("bloom:id", myId);
+if (window.partifactory.__shim) {           // local testing: every tab is its own player
+  myId = sessionStorage.getItem("bloom:tab") || Math.random().toString(36).slice(2, 10);
+  sessionStorage.setItem("bloom:tab", myId);
+}
+let myName = store("bloom:name") || "";
+let viewOnly = false;
+
+// --- shared state ------------------------------------------------------------------------
+let round = -1;
+const players = new Map();      // id -> {n, j, moves: [[tick, cell]]}
+let order = [];                 // player ids, colour order
+let states = [];                // states[t] = {own: Int8Array, hp: Int8Array}, the board after tick t
+let validTo = -1;               // states[0..validTo] are up to date
+
+const now = () => Date.now();
+const roundOf = t => Math.floor(t / ROUND_MS);
+const tickOf = t => Math.floor((t - roundOf(t) * ROUND_MS) / TICK_MS);
+const keyFor = (r, id) => `b:${r}:${id}`;
+
+function parseValue(v) {
+  try {
+    const o = JSON.parse(v);
+    const moves = (o.m || "").split(";").filter(Boolean).map(s => s.split(",").map(Number))
+      .filter(([t, c]) => Number.isInteger(t) && Number.isInteger(c) && c >= 0 && c < N && t >= 0 && t < ROUND_TICKS);
+    return { n: String(o.n || "").slice(0, 24), j: Number(o.j) || 0, moves };
+  } catch { return null; }
+}
+
+function setPlayer(id, p) {
+  const before = players.get(id);
+  players.set(id, p);
+  const newOrder = [...players.keys()].sort((a, b) => (players.get(a).j - players.get(b).j) || (a < b ? -1 : 1));
+  if (newOrder.join() !== order.join()) { order = newOrder; validTo = -1; return; }
+  // Only moves at or after the earliest changed tick need replaying.
+  const seen = new Set((before?.moves || []).map(m => m.join()));
+  const fresh = p.moves.filter(m => !seen.has(m.join()));
+  if (fresh.length) validTo = Math.min(validTo, Math.min(...fresh.map(m => m[0])) - 1);
+}
+
+// --- the simulation ----------------------------------------------------------------------
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+function plant(own, hp, cell, who) {
+  if (own[cell] === -1) { own[cell] = who; hp[cell] = 3; }
+  else if (own[cell] === who) { hp[cell] = Math.min(5, hp[cell] + 2); }
+  else { hp[cell] -= 3; if (hp[cell] <= 0) { own[cell] = who; hp[cell] = 2; } }
+}
+
+function wildPlan(r) {      // the wild's seeds this round: deterministic from the round number
+  const rnd = mulberry32(r * 2654435761), plan = new Map();
+  for (let t = WILD_EVERY; t < ROUND_TICKS; t += WILD_EVERY) {
+    plan.set(t, [Math.floor(rnd() * N)]);   // single seeds: the wild spreads only where it clumps
+  }
+  return plan;
+}
+let wild = new Map();
+
+function movesByTick() {    // tick -> [[slot, cell]], players in colour order; energy enforced for everyone
+  const byTick = new Map();
+  order.forEach((id, i) => {
+    const slot = i + 1, sorted = players.get(id).moves.slice().sort((a, b) => a[0] - b[0]);
+    let energy = ENERGY_START, lastT = 0;
+    for (const [t, c] of sorted) {
+      energy = Math.min(ENERGY_MAX, energy + Math.floor(t / ENERGY_EVERY) - Math.floor(lastT / ENERGY_EVERY));
+      lastT = t;
+      if (energy < 1) continue;     // a move beyond its player's seeds is ignored by everyone
+      energy--;
+      if (!byTick.has(t)) byTick.set(t, []);
+      byTick.get(t).push([slot, c]);
+    }
+  });
+  return byTick;
+}
+
+function step(prev, t, byTick) {
+  const own = prev.own.slice(), hp = prev.hp.slice();
+  for (const c of wild.get(t) || []) plant(own, hp, c, 0);
+  for (const [slot, c] of byTick.get(t) || []) plant(own, hp, c, slot);
+  if (t % GROW_EVERY === 0) {
+    const o0 = own.slice(), h0 = hp.slice();
+    for (let i = 0; i < N; i++) {
+      const counts = new Map();
+      for (const j of nbrs[i]) if (o0[j] !== -1 && h0[j] >= 2) counts.set(o0[j], (counts.get(o0[j]) || 0) + 1);
+      let best = -1, bestN = 0, tie = false;
+      for (const [who, n] of counts) { if (n > bestN) { best = who; bestN = n; tie = false; } else if (n === bestN) tie = true; }
+      const need = best === 0 ? 3 : 2;      // the wild is a slow weed
+      if (o0[i] === -1) { if (bestN >= need && !tie) { own[i] = best; hp[i] = 1; } }
+      else if (best !== o0[i] && bestN >= 4 && !tie) { own[i] = best; hp[i] = 1; }
+    }
+  }
+  if (t % HEAL_EVERY === 0) for (let i = 0; i < N; i++) if (own[i] !== -1) hp[i] = Math.min(5, hp[i] + 1);
+  return { own, hp };
+}
+
+function simulateTo(T) {
+  T = Math.min(T, ROUND_TICKS - 1);
+  if (validTo >= T) return states[T];
+  const byTick = movesByTick();
+  if (validTo < 0) { states[0] = step({ own: new Int8Array(N).fill(-1), hp: new Int8Array(N) }, 0, byTick); validTo = 0; }
+  for (let t = validTo + 1; t <= T; t++) states[t] = step(states[t - 1], t, byTick);
+  validTo = T;
+  return states[T];
+}
+
+function energyNow(t) {
+  const p = players.get(myId);
+  let energy = ENERGY_START, lastT = 0;
+  for (const [mt] of (p ? p.moves : []).slice().sort((a, b) => a[0] - b[0])) {
+    energy = Math.min(ENERGY_MAX, energy + Math.floor(mt / ENERGY_EVERY) - Math.floor(lastT / ENERGY_EVERY));
+    lastT = mt; if (energy >= 1) energy--;
+  }
+  return Math.min(ENERGY_MAX, energy + Math.floor(t / ENERGY_EVERY) - Math.floor(lastT / ENERGY_EVERY));
+}
+
+// --- sync with partifactory --------------------------------------------------------------
+async function loadRound(r) {
+  round = r; players.clear(); order = []; states = []; validTo = -1; wild = wildPlan(r);
+  let cursor = null;
+  do {
+    const page = await window.storage.list(`b:${r}:`, true, { values: true, cursor, limit: 1000 });
+    for (const key of page.keys) {
+      const p = parseValue(page.values[key]);
+      if (p) setPlayer(key.slice(`b:${r}:`.length), p);
+    }
+    cursor = page.next_cursor;
+  } while (cursor && round === r);
+}
+
+window.partifactory.on("data.changed", async e => {
+  const prefix = `b:${round}:`;
+  if (!e.key.startsWith(prefix)) return;
+  const id = e.key.slice(prefix.length);
+  if (id === myId) return;
+  if (e.op === "delete") { players.delete(id); order = order.filter(x => x !== id); validTo = -1; return; }
+  const got = await window.storage.get(e.key, true);
+  const p = got && parseValue(got.value);
+  if (p && e.key.startsWith(`b:${round}:`)) setPlayer(id, p);
+});
+
+let writing = Promise.resolve();
+function saveMine() {
+  const p = players.get(myId);
+  const value = JSON.stringify({ n: myName || whoName, j: p.j, m: p.moves.map(m => m.join(",")).join(";") });
+  const r = round;
+  writing = writing.then(() => window.storage.set(keyFor(r, myId), value, true)).catch(err => {
+    if (err && err.code === "forbidden_view_only") { viewOnly = true; toast("This link is view only: you're watching."); }
+    else if (err && err.code === "rate_limited") toast("Easy, gardener: too many seeds at once.");
+    else toast("Couldn't plant: " + ((err && err.message) || "network error"));
+    const mine = players.get(myId);
+    if (mine && round === r) { mine.moves.pop(); setPlayer(myId, { ...mine, moves: mine.moves.slice() }); validTo = -1; }
+  });
+}
+
+function tapCell(cell) {
+  const t = tickOf(now());
+  if (viewOnly || t >= ROUND_TICKS - LEAD) return;
+  if (energyNow(t) < 1) { toast("No seeds left: they refill every two seconds."); return; }
+  let p = players.get(myId);
+  if (!p) p = { n: myName || whoName, j: t, moves: [] };
+  const moves = p.moves.concat([[t + LEAD, cell]]);
+  setPlayer(myId, { ...p, moves });
+  ripples.push({ cell, at: performance.now() + LEAD * TICK_MS, color: colorOf(order.indexOf(myId) + 1) });
+  saveMine();
+}
+
+// --- drawing -----------------------------------------------------------------------------
+const canvas = document.getElementById("c"), ctx = canvas.getContext("2d");
+let size = 20, cx = 0, cy = 0, dpr = 1;
+const ripples = [];
+const shown = new Float32Array(N);          // eased fill alpha per cell
+let lastOwn = new Int8Array(N).fill(-1);
+
+function resize() {
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  canvas.width = innerWidth * dpr; canvas.height = innerHeight * dpr;
+  const narrow = innerWidth < 560;
+  const usableH = innerHeight - (narrow ? 230 : 110), usableW = innerWidth - 24;
+  size = Math.max(8, Math.min(usableW / (Math.sqrt(3) * (2 * R + 1)), usableH / (1.5 * (2 * R) + 2)));
+  cx = innerWidth / 2; cy = (narrow ? 96 : 70) + usableH / 2;
+}
+addEventListener("resize", resize); resize();
+
+const center = c => [cx + size * Math.sqrt(3) * (c.q + c.r / 2), cy + size * 1.5 * c.r];
+function hexPath(x, y, s) {
+  ctx.beginPath();
+  for (let k = 0; k < 6; k++) { const a = Math.PI / 180 * (60 * k - 30); ctx.lineTo(x + s * Math.cos(a), y + s * Math.sin(a)); }
+  ctx.closePath();
+}
+const colorOf = slot => slot === 0 ? WILD_COLOR : PALETTE[(slot - 1) % PALETTE.length];
+
+function pixelToCell(px, py) {
+  const x = (px - cx) / size, y = (py - cy) / size;
+  let q = (Math.sqrt(3) / 3 * x - y / 3), r = (2 / 3 * y), s = -q - r;
+  let rq = Math.round(q), rr = Math.round(r), rs = Math.round(s);
+  const dq = Math.abs(rq - q), dr = Math.abs(rr - r), ds = Math.abs(rs - s);
+  if (dq > dr && dq > ds) rq = -rr - rs; else if (dr > ds) rr = -rq - rs;
+  return index.get(rq + "," + rr);
+}
+
+let hover = -1;
+canvas.addEventListener("pointermove", e => { hover = pixelToCell(e.clientX, e.clientY) ?? -1; });
+canvas.addEventListener("pointerleave", () => { hover = -1; });
+canvas.addEventListener("pointerdown", e => { const c = pixelToCell(e.clientX, e.clientY); if (c !== undefined) tapCell(c); });
+
+function draw() {
+  const t = now(), r = roundOf(t), tick = tickOf(t);
+  if (r !== round) switchRound(r);
+  const playing = tick < ROUND_TICKS;
+  const st = simulateTo(Math.max(0, Math.min(tick, ROUND_TICKS - 1)));
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, innerWidth, innerHeight);
+
+  const pnow = performance.now();
+  for (let i = 0; i < N; i++) {
+    const [x, y] = center(cells[i]), o = st.own[i];
+    if (o !== lastOwn[i]) { shown[i] = 0; lastOwn[i] = o; }
+    const target = o === -1 ? 0 : 0.35 + 0.13 * st.hp[i];
+    shown[i] += (target - shown[i]) * 0.18;
+    hexPath(x, y, size * 0.93);
+    ctx.fillStyle = "rgba(255,255,255,0.035)"; ctx.fill();
+    if (o !== -1) {
+      ctx.globalAlpha = shown[i]; ctx.fillStyle = colorOf(o);
+      hexPath(x, y, size * (0.55 + 0.38 * Math.min(1, shown[i] / 0.6))); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    if (i === hover && playing && !viewOnly) {
+      hexPath(x, y, size * 0.93); ctx.strokeStyle = colorOf(Math.max(1, order.indexOf(myId) + 1)); ctx.lineWidth = 2; ctx.stroke();
+    }
+  }
+  for (let k = ripples.length - 1; k >= 0; k--) {
+    const rp = ripples[k], age = (pnow - rp.at) / 700;
+    if (age > 1) { ripples.splice(k, 1); continue; }
+    const [x, y] = center(cells[rp.cell]);
+    ctx.globalAlpha = age < 0 ? 0.5 : 1 - age;
+    hexPath(x, y, size * (age < 0 ? 0.5 : 0.9 + age * 1.4)); ctx.strokeStyle = rp.color; ctx.lineWidth = 2; ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  hud(st, tick, playing);
+  requestAnimationFrame(draw);
+}
+
+// --- HUD ---------------------------------------------------------------------------------
+const $ = id => document.getElementById(id);
+let whoName = "Guest";
+function hud(st, tick, playing) {
+  const left = playing ? (ROUND_TICKS - tick) * TICK_MS : (ROUND_TICKS + BREAK_TICKS - tick) * TICK_MS;
+  const s = Math.max(0, Math.ceil(left / 1000));
+  $("clock").textContent = Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+  $("phase").textContent = playing ? `round ${round % 1000}` : "next round in";
+
+  const mySlot = order.indexOf(myId) + 1;
+  const myColor = mySlot ? colorOf(mySlot) : PALETTE[0];
+  document.documentElement.style.setProperty("--me", myColor);
+  const e = playing && !viewOnly ? energyNow(tick) : 0;
+  const pips = $("pips");
+  if (pips.childElementCount !== ENERGY_MAX) pips.innerHTML = '<div class="pip"></div>'.repeat(ENERGY_MAX);
+  [...pips.children].forEach((p, i) => p.classList.toggle("on", i < e));
+  $("who").textContent = viewOnly ? "watching (view only)" : `you are ${myName || whoName}`;
+
+  const counts = new Map();
+  for (let i = 0; i < N; i++) if (st.own[i] !== -1) counts.set(st.own[i], (counts.get(st.own[i]) || 0) + 1);
+  const rows = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([slot, n]) => {
+    const name = slot === 0 ? "the wild" : (players.get(order[slot - 1])?.n || "?");
+    const me = slot === mySlot ? " me" : "";
+    return `<div class="row${me}"><span class="sw" style="background:${colorOf(slot)}"></span><span class="nm">${esc(name)}</span><span>${Math.round(100 * n / N)}%</span></div>`;
+  });
+  const html = rows.join("") || '<div class="row"><span class="nm" style="color:var(--muted)">bare earth: tap to plant</span></div>';
+  if ($("rows").innerHTML !== html) $("rows").innerHTML = html;
+
+  const banner = $("banner");
+  if (!playing) {
+    const [top] = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    const name = !top ? "Nobody" : top[0] === 0 ? "The wild" : (players.get(order[top[0] - 1])?.n || "Someone");
+    $("bannerBig").textContent = top && top[0] === mySlot ? "You won the garden!" : `${name} won the garden`;
+    $("bannerSmall").textContent = "a fresh plot opens when the clock runs out";
+    banner.classList.add("show");
+  } else banner.classList.remove("show");
+}
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+let toastTimer;
+function toast(msg) { const el = $("toast"); el.textContent = msg; el.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 2200); }
+
+// --- rounds ------------------------------------------------------------------------------
+let switching = null;
+function switchRound(r) {
+  if (switching === r) return;
+  switching = r;
+  const prev = round;
+  round = r; players.clear(); order = []; states = []; validTo = -1; wild = wildPlan(r);
+  loadRound(r).catch(err => toast("Couldn't load the garden: " + (err && err.message)));
+  // Tidy up after ourselves: our key from an earlier round.
+  if (prev >= 0 && !viewOnly) window.storage.delete(keyFor(prev, myId), true).catch(() => {});
+}
+
+$("name").value = myName;
+$("name").addEventListener("change", e => {
+  myName = e.target.value.trim().slice(0, 24); store("bloom:name", myName);
+  if (players.has(myId)) saveMine();
+});
+
+(async () => {
+  try { const u = window.partifactory.user && await window.partifactory.user(); if (u && u.name) whoName = u.name; } catch {}
+  switchRound(roundOf(now()));
+  requestAnimationFrame(draw);
+  setTimeout(() => window.partifactory.ready(), 300);
+})();
+</script>
+</body>
+</html>
