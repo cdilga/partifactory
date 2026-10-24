@@ -1,0 +1,20 @@
+# Throwaway spike workspace for pf-twz8. The root workspace excludes `spikes/`,
+# so nothing here is linked into the release binary. Delete once the dependent
+# beads (pf-1q1u, pf-7qza, pf-wmcw, pf-8ssu) have landed.
+[workspace]
+resolver = "2"
+members = ["spike-mcp", "spike-ui", "spike-compiler"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Disk hygiene: no debuginfo anywhere, no incremental state.
+[profile.dev]
+debug = false
+incremental = false
+
+[profile.test]
+debug = false
+incremental = false
