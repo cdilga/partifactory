@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>item 3</title>
+{{SPIKE_JS}}
+<script type="module" src="../assets/m.js"></script>
+<body>
+<h3>Item 3: fetch, module scripts and import() with ACAO: null, no credentials</h3>
+<script>
+(async function () {
+  var S = spike;
+  try {
+    var r = await fetch('../assets/x.json');
+    S.rec(3, 'fetch_relative_json', (await r.json()).ok ? 'pass' : 'fail', 'status ' + r.status);
+  } catch (e) { S.rec(3, 'fetch_relative_json', 'fail', S.err(e)); }
+  for (var i = 0; i < 30 && window.__m !== 'm'; i++) await S.sleep(100);
+  S.rec(3, 'module_script_tag', window.__m === 'm' ? 'pass' : 'fail', 'window.__m=' + window.__m);
+  try {
+    var m2 = await import('../assets/m2.js');
+    S.rec(3, 'dynamic_import_own_host', m2.v === 'm2' ? 'pass' : 'fail', 'v=' + m2.v);
+  } catch (e) { S.rec(3, 'dynamic_import_own_host', 'fail', S.err(e)); }
+  try {
+    var m3 = await import('{{BLOB}}/b/m3.js');
+    S.rec(3, 'dynamic_import_blob_host', m3.v ? 'pass' : 'fail', 'v=' + m3.v);
+  } catch (e) { S.rec(3, 'dynamic_import_blob_host', 'fail', S.err(e)); }
+  // A credentialed read must fail: part responses never carry Access-Control-Allow-Credentials.
+  try {
+    await fetch('../assets/x.json', { credentials: 'include' }).then(function (r) { return r.json(); });
+    S.rec(3, 'credentialed_read_refused', 'fail', 'credentialed fetch was readable');
+  } catch (e) { S.rec(3, 'credentialed_read_refused', 'pass', S.err(e)); }
+  S.done();
+})();
+</script>

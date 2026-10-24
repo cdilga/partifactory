@@ -1,0 +1,71 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>item 6</title>
+{{SPIKE_JS}}
+<body>
+<h3>Item 6: popups escaping the sandbox, clipboard, navigator.share, fullscreen</h3>
+<script>
+(async function () {
+  var S = spike;
+  var t = S.rid();
+  // allow=src: the runner framed this page with the default allowlist ('src'), which an opaque
+  // origin never matches; otherwise it used "<feature> *".
+  var P = S.q.get('allow') === 'src' ? 'allowsrc_' : '';
+  S.rec(6, 'api_presence', 'info', {
+    clipboard: !!(navigator.clipboard && navigator.clipboard.writeText),
+    share: typeof navigator.share, canShare: typeof navigator.canShare,
+    fullscreenEnabled: document.fullscreenEnabled, webkitFullscreenEnabled: document.webkitFullscreenEnabled,
+    requestFullscreen: typeof document.documentElement.requestFullscreen,
+  });
+  var w0 = null;
+  try { w0 = window.open('{{CANARY}}/popup?noact=1', '_blank'); } catch (e) {}
+  S.rec(6, 'popup_without_activation', w0 ? 'info' : 'pass', w0 ? 'opened (no popup blocker in this lane)' : 'blocked');
+  try { if (w0) w0.close(); } catch (e) {}
+
+  var NA = 'not_assertable';
+  var noTap = 'no user activation in this lane (needs a tap)';
+  var res = {};
+  var clicked = await Promise.all([
+    S.activation('act-clip', 'Copy', function () {
+      if (!navigator.clipboard) { res.clip = ['fail', 'navigator.clipboard absent']; return; }
+      return navigator.clipboard.writeText('pf-spike').then(function () { res.clip = ['pass', 'writeText resolved']; },
+        function (e) { res.clip = ['fail', S.err(e)]; });
+    }),
+    S.activation('act-fs', 'Fullscreen', function () {
+      var el = document.documentElement;
+      var fn = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (!fn) { res.fs = ['info', 'requestFullscreen absent on this platform (iPhone WebKit has no element fullscreen)']; return; }
+      return Promise.resolve(fn.call(el)).then(function () {
+        res.fs = ['pass', 'entered: ' + !!(document.fullscreenElement || document.webkitFullscreenElement)];
+        return (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      }, function (e) { res.fs = ['fail', S.err(e)]; });
+    }),
+    S.activation('act-share', 'Share', function () {
+      if (typeof navigator.share !== 'function') { res.share = [NA, 'navigator.share absent in this lane']; return; }
+      return S.withTimeout(navigator.share({ title: 'pf', url: 'https://example.com/' }), 2500, 'share')
+        .then(function () { res.share = ['pass', 'resolved']; },
+          function (e) {
+            res.share = [e && e.name === 'NotAllowedError' ? 'fail' : 'info', S.err(e)];
+          });
+    }),
+    S.activation('act-pop', 'Popup', function () {
+      var w = window.open('{{CANARY}}/popup?lane=' + encodeURIComponent(S.lane) + '&run=' + encodeURIComponent(S.q.get('run') || '') + '&t=' + t + (P ? '&p=' + P : ''), '_blank');
+      res.pop = [w ? 'pass' : 'fail', w ? 'window.open returned a window' : 'window.open returned null'];
+    }),
+  ]);
+  var names = [['clipboard_write', 'clip'], ['fullscreen', 'fs'], ['navigator_share', 'share'], ['popup_with_activation', 'pop']];
+  names.forEach(function (n, i) {
+    if (!clicked[i]) S.rec(6, P + n[0], NA, noTap);
+    else {
+      var o = (res[n[1]] || ['fail', 'no result'])[0];
+      // allow=src is the control: a block there is the expected finding, not a design failure.
+      if (P && o === 'fail' && n[1] !== 'pop') o = 'info';
+      S.rec(6, P + n[0], o, (P && o === 'info' ? 'blocked as expected with the default allowlist: ' : '') + (res[n[1]] || [])[1]);
+    }
+  });
+  if (!clicked[3]) S.rec(6, P + 'popup_escapes_sandbox', NA, noTap);
+  // With a tap, the popup itself reports popup_escapes_sandbox from the canary host.
+  S.done();
+})();
+</script>

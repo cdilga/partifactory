@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8">
+{{META}}
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>item 9</title>
+{{SPIKE_JS}}
+<body>
+<h3>Item 9: CSP sandbox honoured from the header only</h3>
+<script>
+(function () {
+  var S = spike;
+  var v = S.q.get('csp') || 'canonical';
+  var ls = S.tryit(function () { return localStorage.length; });
+  var d = { origin: self.origin, localStorage: ls.ok ? 'available' : ls.err };
+  if (v === 'ro') S.rec(9, 'not_from_report_only', self.origin !== 'null' ? 'pass' : 'info', d);
+  else if (v === 'meta') S.rec(9, 'not_from_meta', self.origin !== 'null' ? 'pass' : 'info', d);
+  else S.rec(9, 'from_header', self.origin === 'null' ? 'pass' : 'fail', d);
+  S.done();
+})();
+</script>

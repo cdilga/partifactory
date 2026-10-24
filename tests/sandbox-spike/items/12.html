@@ -1,0 +1,68 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>item 12</title>
+{{SPIKE_JS}}
+<body>
+<h3>Item 12: WebSocket and SSE from a sandboxed document, held open</h3>
+<pre id="live"></pre>
+<script>
+(async function () {
+  var S = spike;
+  var labels = location.hostname.split('.');
+  var via = /^(caddy|nginx|nginxnaive|traefik)$/.test(labels[1]) ? labels[1] : 'direct';
+  var hold = +(S.q.get('hold') || 75) * 1000;
+  var hb = +(S.q.get('hb') || 25) * 1000;
+  var want = Math.floor((hold - 2000) / hb); // heartbeats due strictly inside the hold
+  var base = location.pathname.replace(/\/items\/.*$/, '');
+  var live = document.getElementById('live');
+  var st = {};
+  function show() { live.textContent = via + ' ' + JSON.stringify(st); }
+
+  function watchSse(name, url) {
+    var s = { hello: 0, hbs: 0, errors: 0, firstMs: null, origin: null };
+    st[name] = s;
+    var t0 = performance.now();
+    var es;
+    try { es = new EventSource(url); } catch (e) { s.ctor = S.err(e); return function () { return s; }; }
+    es.addEventListener('hello', function (e) {
+      s.hello++; if (s.firstMs === null) s.firstMs = Math.round(performance.now() - t0);
+      try { s.origin = JSON.parse(e.data).origin; } catch (x) {}
+      show();
+    });
+    es.addEventListener('hb', function () { s.hbs++; show(); });
+    es.onerror = function () { s.errors++; show(); };
+    return function () { s.readyState = es.readyState; es.close(); return s; };
+  }
+  function watchWs(name, url) {
+    var s = { hello: 0, hbs: 0, closed: null, firstMs: null, origin: null };
+    st[name] = s;
+    var t0 = performance.now();
+    var ws;
+    try { ws = new WebSocket(url); } catch (e) { s.ctor = S.err(e); return function () { return s; }; }
+    ws.onmessage = function (e) {
+      var m = JSON.parse(e.data);
+      if (m.type === 'hello') { s.hello++; s.origin = m.origin; s.firstMs = Math.round(performance.now() - t0); }
+      if (m.type === 'hb') s.hbs++;
+      show();
+    };
+    ws.onerror = function () { s.error = true; show(); };
+    ws.onclose = function (e) { s.closed = { code: e.code, reason: e.reason, atMs: Math.round(performance.now() - t0) }; show(); };
+    return function () { s.readyState = ws.readyState; try { ws.close(1000, 'done'); } catch (x) {} return s; };
+  }
+  var stops = {
+    ws: watchWs('ws', 'wss://' + location.host + base + '/api/ws'),
+    sse_api: watchSse('sse_api', base + '/api/sse'),
+    sse_rt: watchSse('sse_rt', base + '/_rt/events'),
+  };
+  await S.sleep(hold);
+  Object.keys(stops).forEach(function (k) {
+    var s = stops[k]();
+    var ok = s.hello === 1 && s.hbs >= want && (k === 'ws' ? s.closed === null && s.origin === 'null' : s.errors === 0);
+    var slow = s.firstMs !== null && s.firstMs > 3000;
+    s.want = want;
+    S.rec(12, k + '@' + via, ok && !slow ? 'pass' : 'fail', (slow ? 'first event delayed (buffered); ' : '') + JSON.stringify(s));
+  });
+  S.done();
+})();
+</script>

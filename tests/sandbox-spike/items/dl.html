@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>downloads</title>
+{{SPIKE_JS}}
+<body>
+<h3>Known loss: own-host &lt;a download&gt; names (use ?dl=1)</h3>
+<p><a id="dl1" download="nice-name.txt" href="../dl/file.txt">download attr</a></p>
+<p><a id="dl2" href="../dl/file.txt?dl=1">?dl=1 (Content-Disposition)</a></p>
+<script>
+(function () {
+  var S = spike;
+  // With ?observer=1 a Playwright lane opens this page top-level (it is still sandboxed) and
+  // clicks the links itself, recording the suggested filenames. Without an observer (the
+  // simulator lane: no taps, no download events) the checks are not assertable.
+  if (S.q.get('observer')) return;
+  S.rec('L', 'download_attr_name_lost', 'not_assertable', 'needs a tap and a download observer (Playwright lanes only)');
+  S.rec('L', 'dl1_content_disposition_name', 'not_assertable', 'needs a tap and a download observer (Playwright lanes only)');
+  S.done();
+})();
+</script>

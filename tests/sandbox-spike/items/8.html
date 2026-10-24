@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>item 8</title>
+{{SPIKE_JS}}
+<body>
+<h3>Item 8: a part's fetch/POST to a sibling service and to the workspace carries no Lax cookies</h3>
+<script>
+(async function () {
+  var S = spike;
+  var canonical = S.q.get('csp') === 'canonical';
+  var t = S.rid();
+  var violations = [];
+  document.addEventListener('securitypolicyviolation', function (e) { violations.push(e.blockedURI + ' (' + e.violatedDirective + ')'); });
+  var targets = [['canary', '{{CANARY}}/echo'], ['workspace', '{{WS}}/echo']];
+  for (var i = 0; i < targets.length; i++) {
+    var base = targets[i][1] + '?t=' + t + '&k=' + targets[i][0];
+    try { await fetch(base + '-get', { credentials: 'include' }); } catch (e) {}
+    try { await fetch(base + '-post', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'text/plain' }, body: 'x' }); } catch (e) {}
+  }
+  await S.sleep(300);
+  var seen = await (await fetch('/_spike/seen?t=' + t)).json();
+  var LAX = ['__Host-pf_sess', 'pf_dom_lax'];
+  function check(target) {
+    var hits = seen.filter(function (s) { return s.target === target; });
+    var lax = hits.filter(function (s) { return s.cookies.some(function (c) { return LAX.indexOf(c) >= 0; }); });
+    var none = hits.some(function (s) { return s.cookies.indexOf('pf_dom_none') >= 0; });
+    return { hits: hits.length, lax: lax.length, none: none, detail: hits };
+  }
+  ['canary', 'workspace'].forEach(function (target) {
+    var c = check(target);
+    if (canonical) {
+      S.rec(8, 'canonical_csp_blocks_' + target, c.hits === 0 ? 'pass' : 'fail', { reached: c.hits, violations: violations.length });
+    } else {
+      S.rec(8, 'no_lax_cookies_to_' + target, c.hits === 0 ? 'info' : (c.lax === 0 ? 'pass' : 'fail'),
+        c.hits === 0 ? 'request never reached the server' : c.detail);
+      S.rec(8, 'samesite_none_cookie_to_' + target, 'info', c.none ? 'SENT (any SameSite=None cookie on the apex is exposed)' : 'not sent');
+    }
+  });
+  S.done();
+})();
+</script>

@@ -1,0 +1,38 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>passkey register (workspace)</title>
+<body style="font-family:system-ui">
+<h3>Item 13a: register a passkey on the workspace with rp.id = the apex</h3>
+<pre id="out"></pre>
+<script>
+(async function () {
+  var q = new URLSearchParams(location.search);
+  var wa = q.get('wa') || 'none';
+  var hostRest = location.host.replace(/^parts\./, '');
+  var apex = location.hostname.replace(/^parts\./, '');
+  function b64u(buf) { return btoa(String.fromCharCode.apply(null, new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+  function timeout(p, ms) { return Promise.race([p, new Promise(function (_, rej) { setTimeout(function () { rej(new Error('timeout ' + ms + 'ms')); }, ms); })]); }
+  var R = [];
+  try {
+    if (!window.PublicKeyCredential) throw new Error('PublicKeyCredential absent');
+    var cred = await timeout(navigator.credentials.create({ publicKey: {
+      rp: { id: apex, name: 'pf spike' },
+      user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'spike@' + apex, displayName: 'Spike' },
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+      authenticatorSelection: { residentKey: 'preferred', userVerification: 'preferred' },
+      timeout: 15000,
+    } }), 20000);
+    var cd = JSON.parse(new TextDecoder().decode(cred.response.clientDataJSON));
+    await fetch('/_spike/wa/store', { method: 'POST', body: JSON.stringify({ id: b64u(cred.rawId) }) });
+    R.push({ item: '13', check: 'register_on_workspace_rpid_apex', outcome: 'pass', detail: JSON.stringify({ rpId: apex, origin: cd.origin }) });
+  } catch (e) {
+    R.push({ item: '13', check: 'register_on_workspace_rpid_apex', outcome: wa === 'virt' ? 'fail' : 'not_assertable', detail: e.name + ': ' + e.message });
+  }
+  document.getElementById('out').textContent = JSON.stringify(R, null, 1);
+  await fetch('/_spike/result', { method: 'POST', body: JSON.stringify({ type: 'spike:results', lane: q.get('lane'), run: q.get('run'), ua: navigator.userAgent, results: R }) });
+  await new Promise(function (r) { setTimeout(r, 1000); });
+  location.replace('https://a-part.' + hostRest + '/_pf/webauthn' + location.search);
+})();
+</script>

@@ -1,0 +1,10 @@
+# Item 12 through Traefik v3 (static config). Draft only (example configs ship after Slice 1).
+entryPoints:
+  websecure:
+    address: ":443"
+providers:
+  file:
+    filename: /etc/traefik/dynamic.yml
+log:
+  level: INFO
+accessLog: {}

@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>item 4</title>
+<script src="{{BLOB}}/b/prelude.js"></script>
+{{SPIKE_JS}}
+<body>
+<h3>Item 4: localStorage redefined before page scripts, visible to later inline scripts</h3>
+<script>
+  // A "page script": runs after the prelude, uses the globals the way Claude-written code does.
+  window.__pageSaw = (function () {
+    var out = {};
+    try { localStorage.setItem('k', 'v'); out.ls = localStorage.getItem('k'); } catch (e) { out.ls = 'threw ' + e.name; }
+    try { localStorage.prop = 'p'; out.lsProp = localStorage.getItem('prop'); } catch (e) { out.lsProp = 'threw ' + e.name; }
+    try { out.lsIsPf = localStorage.__pf === true && window.localStorage === localStorage; } catch (e) { out.lsIsPf = false; }
+    try { sessionStorage.setItem('s', '1'); out.ss = sessionStorage.getItem('s'); } catch (e) { out.ss = 'threw ' + e.name; }
+    try { document.cookie = 'a=1; Path=/'; out.cookie = document.cookie; } catch (e) { out.cookie = 'threw ' + e.name; }
+    out.idb = typeof indexedDB;
+    out.caches = typeof caches;
+    return out;
+  })();
+</script>
+<script>
+(function () {
+  var S = spike, P = window.__pfPrelude || {}, w = window.__pageSaw;
+  S.rec(4, 'native_storage_in_opaque_origin', 'info', P.native);
+  S.rec(4, 'redefine_localStorage', P.redefine && P.redefine.localStorage === 'ok' && w.ls === 'v' && w.lsIsPf ? 'pass' : 'fail',
+    { redefine: P.redefine && P.redefine.localStorage, pageRead: w.ls, isPf: w.lsIsPf });
+  S.rec(4, 'localStorage_property_access', w.lsProp === 'p' ? 'pass' : 'fail', 'localStorage.prop -> ' + w.lsProp);
+  S.rec(4, 'redefine_sessionStorage', w.ss === '1' ? 'pass' : 'fail', w.ss);
+  S.rec(4, 'redefine_document_cookie', w.cookie === 'a=1' ? 'pass' : 'fail', { redefine: P.redefine && P.redefine.cookie, read: w.cookie });
+  S.rec(4, 'indexedDB_caches_undefined', w.idb === 'undefined' && w.caches === 'undefined' ? 'pass' : 'fail', { idb: w.idb, caches: w.caches });
+  S.done();
+})();
+</script>

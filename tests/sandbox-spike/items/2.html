@@ -1,0 +1,55 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>item 2</title>
+{{SPIKE_JS}}
+<body>
+<h3>Item 2: Origin and Sec-Fetch-* values from a sandboxed document</h3>
+<script>
+(async function () {
+  var S = spike;
+  var top = window.top === window;
+  var pre = top ? 'top_' : 'framed_';
+  function pick(h) {
+    if (!h) return null;
+    return { origin: h.origin, site: h['sec-fetch-site'], mode: h['sec-fetch-mode'], dest: h['sec-fetch-dest'],
+      user: h['sec-fetch-user'], accept: h.accept && h.accept.slice(0, 40), preflight: h.preflight, cookies: h.cookies };
+  }
+  async function hdr(id) { await S.sleep(150); return (await (await fetch('/_spike/headers/' + id)).json()); }
+
+  // This document's own navigation (framed by the runner, or top-level for 2top).
+  var nav = pick(await hdr(S.q.get('nav')));
+  var wantDest = top ? 'document' : 'iframe';
+  S.rec(2, pre + 'navigation_dest', nav && nav.dest === wantDest ? 'pass' : (nav && !nav.dest ? 'info' : 'fail'), nav);
+
+  // fetch() to the part's own host.
+  var id1 = S.rid();
+  var fetchErr = null;
+  try { await (await fetch('../probe?probe=' + id1)).json(); } catch (e) { fetchErr = S.err(e); }
+  var fh = pick(await hdr(id1));
+  if (fh && fetchErr) fh.readError = fetchErr;
+  S.rec(2, pre + 'fetch_origin_null', fh && fh.origin === 'null' ? 'pass' : 'fail', fh);
+  S.rec(2, pre + 'fetch_sec_fetch_site', fh && fh.site === 'cross-site' ? 'pass' : 'info', fh);
+
+  // Subresources: image, classic script, module import.
+  var id2 = S.rid();
+  await new Promise(function (res) { var i = new Image(); i.onload = i.onerror = res; i.src = '../px.gif?probe=' + id2; });
+  var ih = pick(await hdr(id2));
+  S.rec(2, pre + 'subresource_image', ih && ih.dest === 'image' ? 'pass' : (ih && !ih.dest ? 'info' : 'fail'), ih);
+  var id3 = S.rid();
+  await new Promise(function (res) { var s = document.createElement('script'); s.onload = s.onerror = res; s.src = '../assets/self.js?probe=' + id3; document.head.appendChild(s); });
+  var sh = pick(await hdr(id3));
+  S.rec(2, pre + 'subresource_script', sh && sh.dest === 'script' ? 'pass' : (sh && !sh.dest ? 'info' : 'fail'), sh);
+  var id4 = S.rid();
+  try { await import('../assets/m2.js?probe=' + id4); } catch (e) {}
+  var mh = pick(await hdr(id4));
+  S.rec(2, pre + 'subresource_module', mh && mh.origin === 'null' ? 'pass' : 'info', mh);
+
+  // The /_rt shape: POST text/plain must be CORS-simple (no preflight through the proxy).
+  var id5 = S.rid();
+  try { await fetch('../probe?probe=' + id5, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: '{"op":"user"}' }); } catch (e) {}
+  var ph = pick(await hdr(id5));
+  S.rec(2, pre + 'rt_post_is_simple', ph && ph.preflight === false && ph.mode === 'cors' ? 'pass' : (ph && ph.preflight === false && !ph.mode ? 'info' : 'fail'), ph);
+  S.done();
+})();
+</script>

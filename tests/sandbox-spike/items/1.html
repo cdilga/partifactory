@@ -1,0 +1,59 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>item 1</title>
+{{SPIKE_JS}}
+<script>window.__selfjs = 0;</script>
+<script src="../assets/self.js"></script>
+<body>
+<h3>Item 1: 'self' in script-src / connect-src matches the part host</h3>
+<script>
+(async function () {
+  var S = spike;
+  // csp=selfonly: the policy uses 'self'; csp=explicit: the control, host spelled out.
+  var pre = { explicit: 'explicit_', explicithttps: 'explicit_https_only_' }[S.q.get('csp')] || 'self_';
+  S.rec(1, pre + 'origin_is_opaque', self.origin === 'null' ? 'pass' : 'fail', 'self.origin=' + self.origin);
+  S.rec(1, pre + 'script_src', window.__selfjs === 1 ? 'pass' : 'fail', 'own-host script ran=' + window.__selfjs);
+  try {
+    var r = await fetch('../assets/x.json');
+    var j = await r.json();
+    S.rec(1, pre + 'connect_src', j.ok ? 'pass' : 'fail', 'status ' + r.status);
+  } catch (e) {
+    S.rec(1, pre + 'connect_src', 'fail', S.err(e));
+  }
+  var imgOk = await new Promise(function (res) {
+    var i = new Image(); i.onload = function () { res(true); }; i.onerror = function () { res(false); }; i.src = '../px.gif';
+  });
+  S.rec(1, pre + 'img_src', imgOk ? 'pass' : 'fail', '');
+  try {
+    var ws = new WebSocket('wss://' + location.host + location.pathname.replace(/\/items\/.*$/, '/api/ws'));
+    var wsr = await S.withTimeout(new Promise(function (res, rej) {
+      ws.onmessage = function (e) { res(e.data); }; ws.onerror = function () { rej(new Error('ws error')); };
+    }), 5000, 'ws');
+    ws.close();
+    S.rec(1, pre + 'connect_src_wss', 'pass', 'wss to own host allowed: ' + wsr.slice(0, 80));
+  } catch (e) {
+    // For the https-only control, a block is the expected finding (an https host-source does not cover wss).
+    S.rec(1, pre + 'connect_src_wss', pre === 'explicit_https_only_' ? 'info' : 'fail', 'blocked: ' + S.err(e));
+  }
+  // form-action + frame-src: a form POST into a same-document iframe on the part's own host.
+  var fid = S.rid();
+  var ifr = document.createElement('iframe'); ifr.name = 'ff' + fid; ifr.style.display = 'none'; document.body.appendChild(ifr);
+  var form = document.createElement('form'); form.method = 'POST'; form.target = ifr.name;
+  form.action = '../formsink?id=' + fid; document.body.appendChild(form);
+  var sunk = new Promise(function (res) {
+    window.addEventListener('message', function (e) { if (e.data === 'formsink:' + fid) res(true); });
+    setTimeout(function () { res(false); }, 3000);
+  });
+  try { form.submit(); } catch (e) {}
+  S.rec(1, pre + 'form_action_and_frame_src', (await sunk) ? 'pass' : 'fail', 'form POST into a same-host iframe');
+  // 'self' must not match a sibling part's host.
+  try {
+    await fetch('{{SIBLING}}/c/{{CAP}}/assets/x.json');
+    S.rec(1, pre + 'excludes_sibling_host', 'fail', 'fetch to b-part succeeded');
+  } catch (e) {
+    S.rec(1, pre + 'excludes_sibling_host', 'pass', 'blocked: ' + e.name);
+  }
+  S.done();
+})();
+</script>

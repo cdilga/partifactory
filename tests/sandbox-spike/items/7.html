@@ -1,0 +1,40 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>item 7</title>
+{{SPIKE_JS}}
+<body>
+<h3>Item 7: document.cookie and cookieStore.set both fail</h3>
+<script>
+(async function () {
+  var S = spike;
+  try {
+    document.cookie = 'pf_t=1; Path=/';
+    var back = document.cookie;
+    S.rec(7, 'document_cookie_write_fails', /pf_t=1/.test(back) ? 'fail' : 'pass', 'no throw; read back ' + JSON.stringify(back));
+  } catch (e) {
+    S.rec(7, 'document_cookie_write_fails', 'pass', 'threw ' + S.err(e));
+  }
+  if (!('cookieStore' in window)) {
+    S.rec(7, 'cookiestore_set_fails', 'pass', 'cookieStore absent in this engine');
+  } else {
+    try {
+      await S.withTimeout(cookieStore.set('pf_t2', '1'), 3000, 'cookieStore.set');
+      S.rec(7, 'cookiestore_set_fails', 'fail', 'cookieStore.set resolved');
+    } catch (e) {
+      S.rec(7, 'cookiestore_set_fails', 'pass', 'rejected ' + S.err(e));
+    }
+  }
+  // And nothing reaches the part host as a Cookie header afterwards.
+  var id = S.rid();
+  try { await fetch('../probe?probe=' + id, { credentials: 'include' }); } catch (e) {}
+  await S.sleep(150);
+  var h = await (await fetch('/_spike/headers/' + id)).json();
+  var planted = h ? h.cookies.filter(function (c) { return c === 'pf_t' || c === 'pf_t2'; }) : ['no probe'];
+  S.rec(7, 'no_part_planted_cookie_reaches_part_host', planted.length === 0 ? 'pass' : 'fail', h && h.cookies);
+  // The rig's workspace also sets pf_dom_none (Domain=<apex>; SameSite=None) to show what a
+  // SameSite=None apex cookie would do: it rides along on the part's own credentialed requests.
+  S.rec(7, 'info_apex_samesite_none_cookie_reaches_part_host', 'info', h && h.cookies.indexOf('pf_dom_none') >= 0 ? 'SENT' : 'not sent');
+  S.done();
+})();
+</script>

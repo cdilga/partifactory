@@ -1,0 +1,20 @@
+# Traefik v3 dynamic config: every host to the rig backend, TLS with the rig cert.
+http:
+  routers:
+    all:
+      rule: "HostRegexp(`^.+$`)"
+      entryPoints: [websecure]
+      service: app
+      tls: {}
+  services:
+    app:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: "http://host.docker.internal:8080"
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /certs/fullchain.pem
+        keyFile: /certs/key.pem

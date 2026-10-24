@@ -47,6 +47,33 @@ jobs:
         if: always()
         run: PF_CLEAN_NO_DOCKER=1 scripts/clean-build.sh --apply || true
 
+  spike:
+    # pf-6qma: the opaque-origin sandbox rig on the five Playwright projects (throwaway; the
+    # part host bead keeps what it needs as regression fixtures).
+    if: github.event_name != 'schedule' && (github.event_name != 'workflow_dispatch' || inputs.job == '')
+    runs-on: browser
+    steps:
+      - name: checkout
+        run: |
+          git init -q .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git -c http.extraHeader="Authorization: token ${{ github.token }}" fetch -q --depth=1 origin "${GITHUB_SHA}"
+          git checkout -q FETCH_HEAD
+      - name: run
+        run: ci/spike.sh
+      - name: results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: sandbox-spike
+          path: |
+            target/sandbox-spike/results.jsonl
+            target/sandbox-spike/results.md
+            target/sandbox-spike/screens/
+      - name: clean
+        if: always()
+        run: docker rm --force $(docker ps -aq --filter label=pf.spike=1) 2>/dev/null || true
+
   advisories:
     if: (github.event_name == 'schedule' && github.event.schedule == '17 3 * * *') || (github.event_name == 'workflow_dispatch' && inputs.job == 'advisories')
     runs-on: rust

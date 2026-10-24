@@ -1,0 +1,54 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>item 5</title>
+{{SPIKE_JS}}
+<body>
+<h3>Item 5: blob workers and the relative-URL Worker wrapper</h3>
+<script>
+(async function () {
+  var S = spike;
+  var abs = new URL('../assets/x.json', location.href).href;
+  var imp = new URL('../assets/imp.js', location.href).href;
+  function talk(w, ms) {
+    return S.withTimeout(new Promise(function (res, rej) {
+      w.onmessage = function (e) { res(e.data); };
+      w.onerror = function (e) { rej(new Error('worker error: ' + (e.message || 'onerror'))); };
+      w.postMessage({ ping: 'p', abs: abs, imp: imp });
+    }), ms || 5000, 'worker');
+  }
+  // 1. Inline blob worker.
+  try {
+    var src = 'onmessage=function(e){postMessage({pong:e.data.ping, origin:self.origin})}';
+    var w1 = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+    var r1 = await talk(w1);
+    S.rec(5, 'blob_worker_inline', r1.pong === 'p' ? 'pass' : 'fail', r1);
+    w1.terminate();
+  } catch (e) { S.rec(5, 'blob_worker_inline', 'fail', S.err(e)); }
+  // 2. The prelude's wrapper: fetch the relative URL, start it from a blob: URL.
+  try {
+    var code = await (await fetch('../assets/w.js')).text();
+    var w2 = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })));
+    var r2 = await talk(w2);
+    S.rec(5, 'relative_url_wrapper', r2.pong === 'p' ? 'pass' : 'fail', r2);
+    S.rec(5, 'blob_worker_fetch_own_host_absolute', r2.fetch === 200 ? 'pass' : 'fail', 'fetch -> ' + r2.fetch);
+    S.rec(5, 'blob_worker_importScripts_own_host', r2.imp === 'ok' ? 'pass' : 'info', 'importScripts -> ' + r2.imp);
+    w2.terminate();
+  } catch (e) { S.rec(5, 'relative_url_wrapper', 'fail', S.err(e)); }
+  // 3. Direct relative-URL worker: expected to fail from an opaque origin (why the wrapper exists).
+  try {
+    var w3 = new Worker('../assets/w.js');
+    var r3 = await talk(w3, 4000);
+    S.rec(5, 'direct_relative_worker', 'info', 'worked: ' + JSON.stringify(r3));
+    w3.terminate();
+  } catch (e) { S.rec(5, 'direct_relative_worker', 'info', 'failed (wrapper needed): ' + S.err(e)); }
+  // 4. Module worker from a blob: URL.
+  try {
+    var w4 = new Worker(URL.createObjectURL(new Blob(['onmessage=e=>postMessage({pong:e.data.ping})'], { type: 'text/javascript' })), { type: 'module' });
+    var r4 = await talk(w4);
+    S.rec(5, 'blob_module_worker', r4.pong === 'p' ? 'pass' : 'info', r4);
+    w4.terminate();
+  } catch (e) { S.rec(5, 'blob_module_worker', 'info', S.err(e)); }
+  S.done();
+})();
+</script>

@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spike popup</title>
+<body>
+<p>popup opened from a sandboxed part</p>
+<script>
+(async function () {
+  var q = new URLSearchParams(location.search);
+  if (q.get('noact')) { setTimeout(function () { window.close(); }, 300); return; }
+  var ls;
+  try { localStorage.setItem('x', '1'); ls = localStorage.getItem('x') === '1'; } catch (e) { ls = 'threw ' + e.name; }
+  var escaped = self.origin !== 'null' && ls === true;
+  var payload = { type: 'spike:results', lane: q.get('lane'), run: q.get('run'), ua: navigator.userAgent,
+    results: [{ item: '6', check: (q.get('p') || '') + 'popup_escapes_sandbox', outcome: escaped ? 'pass' : 'fail',
+      detail: JSON.stringify({ origin: self.origin, localStorage: ls, opener: !!window.opener }) }] };
+  await fetch('/_spike/result', { method: 'POST', body: JSON.stringify(payload) });
+  document.body.append(' reported: ' + (escaped ? 'escaped' : 'still sandboxed'));
+  setTimeout(function () { window.close(); }, 500);
+})();
+</script>

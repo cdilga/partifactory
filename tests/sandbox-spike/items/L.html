@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>known losses</title>
+{{SPIKE_JS}}
+<body>
+<h3>Known losses under the sandbox (§2)</h3>
+<script>
+(async function () {
+  var S = spike;
+  // Service workers: lost.
+  try {
+    if (!('serviceWorker' in navigator)) throw new Error('navigator.serviceWorker absent');
+    await S.withTimeout(navigator.serviceWorker.register('../assets/sw.js'), 4000, 'sw');
+    S.rec('L', 'service_worker_lost', 'fail', 'register resolved');
+  } catch (e) { S.rec('L', 'service_worker_lost', 'pass', S.err(e)); }
+  // Persistent IndexedDB: lost.
+  try {
+    var req = indexedDB.open('pf-spike');
+    var r = await S.withTimeout(new Promise(function (res, rej) { req.onsuccess = function () { res('opened'); }; req.onerror = function () { rej(req.error || new Error('error')); }; }), 3000, 'idb');
+    S.rec('L', 'indexeddb_lost', 'fail', r + ' (check persistence: opaque origins get none)');
+  } catch (e) { S.rec('L', 'indexeddb_lost', 'pass', S.err(e)); }
+  try {
+    await caches.open('x');
+    S.rec('L', 'cache_storage_lost', 'fail', 'caches.open resolved');
+  } catch (e) { S.rec('L', 'cache_storage_lost', 'pass', S.err(e)); }
+  // Remembered permissions: structural (no stable origin to key a grant on); record what the API says.
+  var st = 'n/a';
+  try { st = (await S.withTimeout(navigator.permissions.query({ name: 'geolocation' }), 2000)).state; } catch (e) { st = S.err(e); }
+  S.rec('L', 'remembered_permissions_lost', self.origin === 'null' ? 'pass' : 'fail',
+    'origin=' + self.origin + ' (no stable origin to remember a grant against); geolocation permission state: ' + st);
+  S.done();
+})();
+</script>

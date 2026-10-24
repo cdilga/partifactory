@@ -1,0 +1,16 @@
+{
+  "name": "pf-sandbox-spike",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Throwaway rig for pf-6qma: opaque-origin sandbox and wrapper flow on every browser engine",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "spike": "./run.sh",
+    "render": "node render.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.62.1",
+    "ws": "8.18.0"
+  }
+}

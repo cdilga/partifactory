@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>part (spike)</title>
+<body style="font-family:system-ui;background:#f4f1ea">
+<h3>Sandboxed part content</h3>
+<p id="o"></p>
+<script>
+(function () {
+  function tryit(fn) { try { return { ok: true, v: String(fn()).slice(0, 60) }; } catch (e) { return { ok: false, err: e.name + ': ' + e.message }; } }
+  var r = {
+    origin: self.origin,
+    parent_document: tryit(function () { return parent.document.title; }),
+    parent_sessionStorage: tryit(function () { return parent.sessionStorage.length; }),
+    parent_location_href: tryit(function () { return parent.location.href; }),
+    own_localStorage: tryit(function () { return localStorage.length; }),
+  };
+  document.getElementById('o').textContent = JSON.stringify(r);
+  parent.postMessage({ type: 'pf:hello', r: r, csp: new URLSearchParams(location.search).get('csp') }, '*');
+})();
+</script>
