@@ -53,9 +53,19 @@ br close <id> --reason "<commit SHAs>; CI <run>; <gate commands + output excerpt
   A bead closed without that evidence gets reopened.
 - **Beads are only edited after conversion, never created mid-task.** The one exception is a defect you find while working: you may file it as a `bug` bead, labelled `found-in:<bead id>` (`br create "..." -t bug -l found-in:<id>`), and link it with `br dep add` if it blocks your bead. If you see work missing from a bead, edit that bead or tell the admin; don't create a new one.
 
+## Disk hygiene (binding: builds have repeatedly filled the admin's disk)
+
+- **Check before you build.** Run `scripts/disk-guard.sh` (until pf-tokl lands it, `df -h .`). If the volume has less than 20 GiB free, or `target/` is over 30 GiB, run the cleanup below first. If that still isn't enough, stop and tell the admin. Never delete anything outside the repo to make room.
+- **One `target/`, shared.** Never set your own `CARGO_TARGET_DIR`, and never add sccache or another cache. Build tests with the one documented feature set (`--features dev`), so dependencies build once.
+- **Release builds only when needed.** Use `--release` and the musl target only for a gate, a bench or the image.
+- **Clean as you go, never all at once.** After you close a bead, and at session end, run `scripts/clean-build.sh --apply` (until it exists, `cargo sweep --time 2`).
+  - Never run a full `cargo clean`: other agents are building in the same `target/`. If one is really needed, ask in Agent Mail first.
+- **Tear down what you start.** Every harness run ends with `docker compose down -v --remove-orphans`, even on failure. Docker objects you create carry the label `pf.harness=1`, so the cleanup can find them.
+
 ## Landing the plane at session end
 
 1. Update the bead statuses: close what passed its gate, and leave the rest `in_progress` with a comment saying where it stands.
+   Then run the disk cleanup above (`scripts/clean-build.sh --apply`, or `cargo sweep --time 2` before it exists).
 2. Run `br sync --flush-only`.
 3. Commit (the bead files under `.beads/` together with your code).
 4. Run `git pull --rebase`.
