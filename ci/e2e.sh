@@ -25,9 +25,7 @@ export HOST_UID="$(id -u)" HOST_GID="$(id -g)"
 if [ "${PF_E2E_SKIP_BUILD:-0}" != 1 ]; then
   cargo build -p partifactory --features "$PF_FEATURES"
 fi
-if [ "$(uname -s)" != Darwin ]; then
-  export PF_BIN="${PF_BIN:-$repo/target/debug/partifactory}"
-fi
+export PF_BIN="${PF_BIN:-${CARGO_TARGET_DIR:-$repo/target}/debug/partifactory}"
 ( cd "$repo/tests/e2e" && npm ci --no-audit --no-fund --silent )
 
 run=""

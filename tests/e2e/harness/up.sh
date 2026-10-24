@@ -17,7 +17,7 @@ h="$repo/tests/e2e/harness"
 case "$(uname -s)" in Darwin) default_mode=host ;; *) default_mode=container ;; esac
 mode="${PF_HARNESS_MODE:-$default_mode}"
 export PF_HTTPS_PORT="${PF_HTTPS_PORT:-18443}"
-export PF_BIN="${PF_BIN:-$repo/target/debug/partifactory}"
+export PF_BIN="${PF_BIN:-${CARGO_TARGET_DIR:-$repo/target}/debug/partifactory}"
 export PF_RUN_DIR="${PF_RUN_DIR:-$repo/target/e2e-runs/$(date +%Y%m%d-%H%M%S)}"
 run="$PF_RUN_DIR"
 mkdir -p "$run"/{certs,dex,secrets,data}
