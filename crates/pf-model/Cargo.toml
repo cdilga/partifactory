@@ -1,10 +1,27 @@
 [package]
 name = "pf-model"
-description = "Core domain types: parts, versions, manifests, names, spaces, people and agents"
+description = "Core domain types and the part service: parts, versions, manifests, names, spaces"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
+
+[dependencies]
+pf-blobs = { path = "../pf-blobs" }
+pf-caps = { path = "../pf-caps" }
+pf-db = { path = "../pf-db" }
+serde.workspace = true
+serde_json.workspace = true
+similar = "2"
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+pf-auth = { path = "../pf-auth", features = ["dev"] }
+proptest.workspace = true
+tempfile.workspace = true
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+tracing-subscriber.workspace = true
 
 [lints]
 workspace = true

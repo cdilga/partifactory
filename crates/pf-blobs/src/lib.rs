@@ -206,6 +206,18 @@ impl BlobStore {
         Ok(bytes)
     }
 
+    /// The size of a stored blob (no verification).
+    pub fn size(&self, hash: &str) -> Result<u64, BlobError> {
+        Self::check(hash)?;
+        match fs::metadata(self.path(hash)) {
+            Ok(m) => Ok(m.len()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                Err(BlobError::NotFound(hash.to_string()))
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// Verify a blob without returning it.
     pub fn verify(&self, hash: &str) -> Result<(), BlobError> {
         self.get(hash).map(|_| ())
