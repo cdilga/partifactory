@@ -47,7 +47,12 @@ DEVICE_NAME="$(xcrun simctl list devices -j | node -e '
 echo "ios-sim: device $DEVICE_NAME ($UDID) on $RUNTIME"
 xcrun simctl boot "$UDID" 2>/dev/null || true
 xcrun simctl bootstatus "$UDID" -b >/dev/null
-xcrun simctl keychain "$UDID" add-root-cert "$SPIKE_OUT/certs/ca.pem"
+# add-root-cert can hang when the CA is already in the keychain, so do it once per device and CA.
+CA_MARK="$SIM_OUT/.ca-added-$UDID-$(openssl x509 -in "$SPIKE_OUT/certs/ca.pem" -noout -fingerprint -sha256 | tr -dc 'A-F0-9' | cut -c1-16)"
+if [[ ! -f "$CA_MARK" ]]; then
+  xcrun simctl keychain "$UDID" add-root-cert "$SPIKE_OUT/certs/ca.pem"
+  touch "$CA_MARK"
+fi
 
 RUNTIME_NAME="$(xcrun simctl list runtimes -j | node -e '
   const j = JSON.parse(require("fs").readFileSync(0, "utf8"));
@@ -68,7 +73,9 @@ for item in "${items[@]}"; do
   limit=90
   [[ "$item" == 12 ]] && limit=$((HOLD + 90))
   echo "ios-sim: item $item"
-  xcrun simctl openurl "$UDID" "$url"
+  # openurl can block until Safari finishes loading (or time out on a cold Safari), so detach it;
+  # completion is detected through the collector instead.
+  (xcrun simctl openurl "$UDID" "$url" >/dev/null 2>&1 &)
   shot=0
   for ((t = 0; t < limit; t++)); do
     if curl -s "http://127.0.0.1:$SPIKE_HTTP_PORT/_spike/done?run=$run" | grep -q '"done":true'; then break; fi

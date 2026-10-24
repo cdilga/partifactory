@@ -61,7 +61,11 @@
     var ok = s.hello === 1 && s.hbs >= want && (k === 'ws' ? s.closed === null && s.origin === 'null' : s.errors === 0);
     var slow = s.firstMs !== null && s.firstMs > 3000;
     s.want = want;
-    S.rec(12, k + '@' + via, ok && !slow ? 'pass' : 'fail', (slow ? 'first event delayed (buffered); ' : '') + JSON.stringify(s));
+    var o = ok && !slow ? 'pass' : 'fail';
+    // nginxnaive is the control (bare proxy_pass): its failures show which settings are required.
+    if (via === 'nginxnaive' && o === 'fail') o = 'info';
+    S.rec(12, k + '@' + via, o, (via === 'nginxnaive' && o === 'info' ? 'control, breaks without the tuned settings: ' : '') +
+      (slow ? 'first event delayed (buffered); ' : '') + JSON.stringify(s));
   });
   S.done();
 })();
