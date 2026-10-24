@@ -1,6 +1,10 @@
 //! partifactory: one static binary with every asset embedded. Invoked as `part` (argv[0]),
 //! it is the CLI; the build worker is this same binary re-exec'd as `build-worker`.
 
+#[cfg(feature = "dev")]
+mod dev;
+mod store;
+
 use clap::{Parser, Subcommand};
 use std::ffi::OsString;
 use std::path::Path;
@@ -56,6 +60,9 @@ enum Command {
     Bench,
     /// Tail or export logs.
     Logs,
+    /// Dev-only: drive a running `serve` before the HTTP API exists (never in release builds).
+    #[cfg(feature = "dev")]
+    Dev(dev::DevArgs),
 }
 
 #[derive(Subcommand)]
@@ -96,12 +103,14 @@ fn main() -> ExitCode {
             print!("{}", pf_config::env_md());
             ExitCode::SUCCESS
         }
-        Command::Serve => stub("serve"),
+        Command::Serve => serve(),
         Command::BuildWorker => stub("build-worker"),
         Command::Runner => stub("runner"),
         Command::Export => stub("export"),
         Command::Import => stub("import"),
-        Command::Migrate => stub("migrate"),
+        Command::Migrate => migrate(),
+        #[cfg(feature = "dev")]
+        Command::Dev(args) => dev::run(args),
         Command::Healthcheck => stub("healthcheck"),
         Command::Provision => stub("provision"),
         Command::Doctor => stub("doctor"),
@@ -122,9 +131,98 @@ fn stub(name: &str) -> ExitCode {
     ExitCode::from(pf_cli::EXIT_NOT_IMPLEMENTED as u8)
 }
 
+/// The fixture identity (`PF_DEV_IDENTITY`, the static directory) belongs to dev builds only: a
+/// release build refuses to start with it, so a test login can never reach a deployment.
+fn refuse_dev_identity_in_release(env: &pf_config::Env) -> Result<(), ExitCode> {
+    if cfg!(feature = "dev") || !env.contains_key("PF_DEV_IDENTITY") {
+        return Ok(());
+    }
+    tracing::error!(
+        event = "config.check",
+        outcome = "dev_identity_in_release",
+        var = "PF_DEV_IDENTITY",
+        "the fixture identity directory exists only in dev builds; unset PF_DEV_IDENTITY"
+    );
+    Err(ExitCode::from(EXIT_CONFIG))
+}
+
+fn load_config(env: &pf_config::Env) -> Result<pf_config::Loaded, ExitCode> {
+    refuse_dev_identity_in_release(env)?;
+    match pf_config::load_from_env(env) {
+        Ok(loaded) => {
+            for w in &loaded.warnings {
+                pf_config::report(w);
+            }
+            Ok(loaded)
+        }
+        Err(diags) => {
+            for d in &diags {
+                pf_config::report(d);
+            }
+            Err(ExitCode::from(EXIT_CONFIG))
+        }
+    }
+}
+
+/// `partifactory serve`: config, then the store (migrations, boot epoch), then the listeners.
+fn serve() -> ExitCode {
+    pf_obs::init_json_logs();
+    let env = pf_config::process_env();
+    let loaded = match load_config(&env) {
+        Ok(l) => l,
+        Err(code) => return code,
+    };
+    let data_dir = store::data_dir(&env);
+    let st = match store::open(&data_dir, &loaded.site) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(event = "store.open", outcome = "error", error = %e, "cannot open the store");
+            return ExitCode::FAILURE;
+        }
+    };
+    #[cfg(feature = "dev")]
+    if let Err(e) = dev::start(st.clone(), &env) {
+        tracing::error!(event = "dev.socket", outcome = "error", error = %e, "cannot start the dev socket");
+        return ExitCode::FAILURE;
+    }
+    let result = pf_serve::run_blocking(&loaded, &env, |b| {
+        let db = st.db.clone();
+        b.ready_check("db", pf_serve::CheckKind::Required, move || {
+            let db = db.clone();
+            async move { db.ping().await }
+        });
+        let insights = st.insights.clone();
+        b.ready_check("insights", pf_serve::CheckKind::Degraded, move || {
+            let db = insights.clone();
+            async move { db.ping().await }
+        });
+        b.ext(st.db.clone());
+        b.ext(st.blobs.clone());
+        b.ext(st.epochs.clone());
+        b.ext(st.parts.clone());
+    });
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(_) => ExitCode::FAILURE,
+    }
+}
+
+/// `partifactory migrate`: apply both databases' migrations under `PF_DATA_DIR` and exit.
+fn migrate() -> ExitCode {
+    pf_obs::init_json_logs();
+    let env = pf_config::process_env();
+    match store::migrate_only(&store::data_dir(&env)) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(_) => ExitCode::FAILURE,
+    }
+}
+
 fn config_check() -> ExitCode {
     pf_obs::init_json_logs();
     let env = pf_config::process_env();
+    if let Err(code) = refuse_dev_identity_in_release(&env) {
+        return code;
+    }
     match pf_config::load_from_env(&env) {
         Ok(loaded) => {
             for w in &loaded.warnings {

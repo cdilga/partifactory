@@ -75,15 +75,15 @@ impl PartService {
             self.url(name),
             name.to_string(),
         );
-        let (out, epoch) = self
+        let (out, epoch, committed) = self
             .db
             .write(move |tx| {
                 if let Some(r) = idem::lookup(tx, &pkey, &request_id, "part_edit", &hash)? {
-                    idem::log_write("part_edit", &pkey, "", true);
-                    return Ok((r, None));
+                    return Ok((r, None, None));
                 }
                 let row = find_part(tx, &name)?;
                 let mut epoch = None;
+                let mut committed = None;
                 let part_id = match mode {
                     Mode::Delete => {
                         let row = check_role(tx, policy.as_ref(), &p, row.filter(|r| r.deleted_at.is_none()), &name, MANAGE, now)?;
@@ -117,7 +117,7 @@ impl PartService {
                             live_gate: "always",
                             now,
                         };
-                        commit_version(tx, &blobs, &head, &entry, &files, &meta)?;
+                        committed = Some(commit_version(tx, &blobs, &head, &entry, &files, &meta)?);
                         row.id
                     }
                 };
@@ -127,13 +127,22 @@ impl PartService {
                     out["purge_at"] = Value::String(crate::read::iso(now + BIN_MS));
                 }
                 idem::store(tx, &pkey, &request_id, "part_edit", &hash, &out, now)?;
-                idem::log_write("part_edit", &pkey, &part_id, false);
-                Ok::<_, PfError>((out, epoch))
+                Ok::<_, PfError>((out, epoch, committed))
             })
             .await?;
         if let Some((key, e)) = epoch {
             self.epochs.set(&key, e);
         }
+        if let Some(c) = &committed {
+            crate::version::log_committed(c, &caller.principal);
+        }
+        let replayed = out.get("replayed").is_some();
+        idem::log_write(
+            "part_edit",
+            &caller.principal.key(),
+            committed.as_ref().map(|c| c.part_id.as_str()).unwrap_or(""),
+            replayed,
+        );
         Ok(out)
     }
 

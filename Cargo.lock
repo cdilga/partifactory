@@ -906,11 +906,18 @@ name = "partifactory"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "pf-auth",
+ "pf-blobs",
+ "pf-caps",
  "pf-cli",
  "pf-config",
+ "pf-db",
+ "pf-model",
  "pf-obs",
+ "pf-serve",
  "serde_json",
  "tempfile",
+ "tokio",
  "tracing",
 ]
 

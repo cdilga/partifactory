@@ -7,7 +7,7 @@
 //! - Reads use a small pool of `query_only` connections ([`Db::read`]), each read in its own
 //!   deferred transaction, so a read sees one consistent snapshot.
 //! - Migrations are embedded, forward-only and checked by sha256 at start ([`migrate`]).
-//! - `main.db` and `insights.db` are separate files, each with its own writer ([`MAIN`],
+//! - `partifactory.db` and `insights.db` are separate files, each with its own writer ([`MAIN`],
 //!   [`INSIGHTS`]).
 
 pub mod ids;
@@ -28,7 +28,7 @@ pub struct Migration {
     pub sql: &'static str,
 }
 
-/// The main database's migrations (`/data/main.db`).
+/// The main database's migrations (`/data/partifactory.db`).
 pub const MAIN: &[Migration] = &[Migration {
     version: 1,
     name: "0001_schema_v1",
@@ -318,6 +318,13 @@ impl Db {
         orx.await.map_err(|_| E::from(DbError::WriterGone))?
     }
 
+    /// Readiness probe: the writer is alive and can take the write lock.
+    pub async fn ping(&self) -> Result<(), String> {
+        self.write(|_| Ok::<(), DbError>(()))
+            .await
+            .map_err(|e| e.to_string())
+    }
+
     /// [`Db::write`] for synchronous callers. Must not be called from inside an async task.
     pub fn write_blocking<T, E, F>(&self, f: F) -> Result<T, E>
     where
@@ -400,7 +407,7 @@ impl std::ops::Deref for TempDb {
 
 /// A fresh, migrated main database in a temp dir, for tests.
 pub fn temp_db() -> TempDb {
-    temp_db_with(MAIN, "main.db")
+    temp_db_with(MAIN, "partifactory.db")
 }
 
 /// A fresh, migrated insights database in a temp dir, for tests.

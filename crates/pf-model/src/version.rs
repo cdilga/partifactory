@@ -50,6 +50,7 @@ pub struct CommitMeta<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Committed {
+    pub part_id: String,
     pub version_id: String,
     pub n: i64,
 }
@@ -140,8 +141,17 @@ pub fn commit_version(
             json!({"n": n, "version": version_id}).to_string()
         ],
     )?;
-    tracing::info!(event = "version.committed", part_id = %part.id, n, version = %version_id, principal = %meta.principal.key(), "version committed");
-    Ok(Committed { version_id, n })
+    Ok(Committed {
+        part_id: part.id.clone(),
+        version_id,
+        n,
+    })
+}
+
+/// The `version.committed` log line. Emitted by the service only after the transaction has
+/// committed, so a crash can never leave a line for a version that isn't there.
+pub fn log_committed(c: &Committed, principal: &Principal) {
+    tracing::info!(event = "version.committed", part_id = %c.part_id, n = c.n, version = %c.version_id, principal = %principal.key(), "version committed");
 }
 
 /// Move `live` to `(version_id, build_id)` only if that version is newer than the live one

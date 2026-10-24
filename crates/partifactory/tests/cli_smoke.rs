@@ -70,15 +70,71 @@ fn argv0_part_dispatches_to_cli() {
 
 #[test]
 fn stub_exits_64() {
-    for args in [
-        &["serve"][..],
-        &["export"],
-        &["admin", "bootstrap"],
-        &["logs"],
-    ] {
+    for args in [&["export"][..], &["admin", "bootstrap"], &["logs"]] {
         let out = Command::new(BIN).args(args).output().unwrap();
         assert_eq!(out.status.code(), Some(64), "{args:?}");
         assert!(String::from_utf8_lossy(&out.stderr).contains("not implemented yet"));
+    }
+}
+
+#[test]
+fn serve_without_secrets_exits_2() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = scrubbed(Command::new(BIN).arg("serve"))
+        .env("PF_DATA_DIR", dir.path())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    // Nothing was opened: config fails before the store.
+    assert!(!dir.path().join("partifactory.db").exists());
+}
+
+#[test]
+fn migrate_creates_both_databases() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = scrubbed(Command::new(BIN).arg("migrate"))
+        .env("PF_DATA_DIR", dir.path())
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(dir.path().join("partifactory.db").exists());
+    assert!(dir.path().join("insights.db").exists());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let ok = stdout
+        .lines()
+        .filter(|l| l.contains("\"event\":\"db.migrate\"") && l.contains("\"outcome\":\"ok\""))
+        .count();
+    assert_eq!(ok, 2, "{stdout}");
+}
+
+/// The dev subcommands exist only with the `dev` feature.
+#[test]
+fn dev_subcommand_matches_feature() {
+    let out = Command::new(BIN).args(["dev", "--help"]).output().unwrap();
+    assert_eq!(out.status.success(), cfg!(feature = "dev"));
+}
+
+/// A release build refuses the fixture identity; a dev build accepts it.
+#[test]
+fn config_check_refuses_dev_identity_in_release() {
+    let out = scrubbed(Command::new(BIN).args(["config", "check"]))
+        .env("PF_DEV_IDENTITY", "/nonexistent/identity.toml")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    if cfg!(feature = "dev") {
+        assert!(!stdout.contains("dev_identity_in_release"), "{stdout}");
+    } else {
+        assert_eq!(out.status.code(), Some(2));
+        assert!(
+            stdout.contains("\"outcome\":\"dev_identity_in_release\""),
+            "{stdout}"
+        );
     }
 }
 

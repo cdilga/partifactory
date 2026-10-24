@@ -473,7 +473,7 @@ impl PartService {
             .db
             .write(move |tx| {
                 if let Some(r) = idem::lookup(tx, &pkey, &request_id, "part_create", &hash)? {
-                    return Ok(r);
+                    return Ok((r, None));
                 }
                 // The name again, inside the writer: someone may have taken it meanwhile.
                 let name = resolve_name(tx, explicit.as_deref(), &title, &description, &p.user_id, &reserved)?;
@@ -524,21 +524,31 @@ impl PartService {
                     (None, Some((_, f))) => Some(f.clone()),
                     _ => None,
                 };
+                let mut committed = None;
                 if let (Some(files), Some(entry)) = (files, &entry) {
                     let head = PartHead { id: id.clone(), kind: kind.clone(), head_version_id: None, head_n: 0 };
                     let meta = CommitMeta { principal: &p, via, message: None, restored_from: None, live_gate: &live_gate, now };
-                    commit_version(tx, &blobs, &head, entry, &files, &meta)?;
+                    committed = Some(commit_version(tx, &blobs, &head, entry, &files, &meta)?);
                 }
                 let mut out = mutation(tx, &id, &url)?;
                 if let Value::Object(m) = &mut out {
                     m.insert("id".into(), Value::String(id.clone()));
                 }
                 idem::store(tx, &pkey, &request_id, "part_create", &hash, &out, now)?;
-                idem::log_write("part_create", &pkey, &id, false);
-                Ok::<_, PfError>(out)
+                Ok::<_, PfError>((out, committed))
             })
             .await?;
-        Ok(result)
+        let (out, committed) = result;
+        if let Some(c) = &committed {
+            crate::version::log_committed(c, &caller.principal);
+        }
+        idem::log_write(
+            "part_create",
+            &caller.principal.key(),
+            out["id"].as_str().unwrap_or(""),
+            out.get("replayed").is_some(),
+        );
+        Ok(out)
     }
 
     /// Commit `files` as a part's whole next version (the dev CLI's `put`).
@@ -574,10 +584,12 @@ impl PartService {
         let url = self.url(&row.name);
         let via = caller.via;
         let message = req.message.clone();
-        self.db
+        let part_id = row.id.clone();
+        let (out, committed) = self
+            .db
             .write(move |tx| {
                 if let Some(r) = idem::lookup(tx, &pkey, &request_id, "part_put", &hash)? {
-                    return Ok(r);
+                    return Ok((r, None));
                 }
                 let head = crate::version::part_head(tx, &row.id)?
                     .ok_or_else(|| PfError::not_found("part vanished"))?;
@@ -604,13 +616,22 @@ impl PartService {
                     live_gate: "always",
                     now,
                 };
-                commit_version(tx, &blobs, &head, &entry, &prepared.files, &meta)?;
+                let c = commit_version(tx, &blobs, &head, &entry, &prepared.files, &meta)?;
                 let out = mutation(tx, &row.id, &url)?;
                 idem::store(tx, &pkey, &request_id, "part_put", &hash, &out, now)?;
-                idem::log_write("part_put", &pkey, &row.id, false);
-                Ok::<_, PfError>(out)
+                Ok::<_, PfError>((out, Some(c)))
             })
-            .await
+            .await?;
+        if let Some(c) = &committed {
+            crate::version::log_committed(c, &caller.principal);
+        }
+        idem::log_write(
+            "part_put",
+            &caller.principal.key(),
+            &part_id,
+            committed.is_none(),
+        );
+        Ok(out)
     }
 
     /// A live (not deleted) part the principal holds at least `min_role` on. Invisible parts
