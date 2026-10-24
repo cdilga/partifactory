@@ -27,6 +27,8 @@ case "$job" in
   advisories) binstall cargo-audit cargo-deny ;;
   gitleaks) gitleaks_install ;;
   selftest) gitleaks_install ;;
+  store-durability)
+    command -v jq >/dev/null 2>&1 || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq jq >/dev/null; } ;;
   fmt | clippy | check-boundaries | env-docs) ;;
   *) echo "install-tools: unknown job $job" >&2; exit 2 ;;
 esac
