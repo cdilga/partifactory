@@ -83,7 +83,7 @@ Adding anything to it takes a decision from the admin. Work that straddled the l
 - **Insights beyond Health**: the Insights store, traces, the log pipeline, the no-content fuzz test, the Insights and debugging UIs, the OTLP adapter.
 - **Identity extras**: native invites and local passkey accounts, the Authentik spike, directory adapter and provisioner, cleanup lists, `provision`, the Cloudflare adapter, `doctor`, the portability lane.
 - **Agent extras**: OAuth authorization code, comments, inward sharing by agents, leases, block ids, notes, `render: "text"` and `part_find`, `part_watch` and event SSE, the other `part_link_for` actions, Jig and `design_system`, the Hermes skill.
-- **Workspace extras**: the versions rail and the bin view, search, diff, preview of old versions, comments rail, agent activity, inward sharing rungs, Move to Family, Ask for access, install as app; the source editor; live reload; renames.
+- **Workspace extras**: the versions rail and the bin view, search, diff, preview of old versions, comments rail, agent activity, inward sharing rungs, Move to Family, Ask for access, install as app; the source editor and the formatted view for Markdown and `text` parts; live reload; renames.
 - **Notifications**: the ops-alert webhook and signed event webhooks for agents.
 - **Previews** (right after Slice 1, pulled forward from P4 by decision 53): the card pipeline and the titled public card; automatic screenshot posters, and optional agent-chosen `og:video` clips, for public links (on by default) and the gallery; the `preview` fields and `part_check {record}`.
 - **More kinds**: `tsx` (first after the slice), `svg` and `code`, `slides` and Mermaid.
@@ -812,8 +812,9 @@ The common case is "change that thing from last week", so finding a part and mak
   An agent creates the outline, shares the link at once, and one or more agents each claim a section (`scope: block`) and fill it in.
 - `part_get` on a long doc returns the outline + block ids, so agents read the section they need rather than the whole document.
 
-**Do we need CRDTs?** Not for v1. CRDTs (Yjs/`yrs`, Automerge) are production-ready, but they solve *simultaneous keystroke-level typing by humans*.
-Agents submit whole edits, which versions, anchors, blocks and leases handle with far less machinery. If live human co-typing is ever wanted, `yrs` can run *inside one editing session*, with each session's result committed as an ordinary version.
+**Do we need CRDTs?** Not for v1, but live co-typing is deferred, not ruled out (decision 54). CRDTs (Yjs/`yrs`, Automerge) are production-ready, but they solve *simultaneous keystroke-level typing by humans*.
+Agents submit whole edits, which versions, anchors, blocks and leases handle with far less machinery, and the formatted view (§4a.7) saves people's edits the same way.
+If live co-typing is wanted, `yrs` runs *inside one formatted-view session* (presence, cursors, a `Y.Text` per block being edited), and the session's result commits as ordinary block ops and an ordinary version, so nothing below the editor changes.
 
 ## 3e. Search, history and the bin
 
@@ -1350,7 +1351,20 @@ Clicking a row previews it in the frame. **Compare** picks any two rows (default
 **In-place editor (CodeMirror 6).** `Edit` adds **Preview · Split · Source**. Split = file tree + CodeMirror + live preview rendered from the **draft** (a cap with a `d` claim, never the live version).
 Syntax in four hues (keyword: signal; string: agent blue; number/const: public-text amber; comment: `ink-3` italic), Plex Mono 13.5/20. Drafts autosave to the server.
 When an agent lands a version mid-edit: "Hermes saved REV 13 while you were editing. Your changes were merged." Overlaps open **Resolve** (Keep mine / Keep theirs / Edit per hunk).
-A lease shows a blue dot and "Hermes is editing this file until 14:32"; saving asks once. Markdown and slides get block-aware editing with pending placeholders. Phone: Source only, plus tap-to-edit text in P4 (§3c).
+A lease shows a blue dot and "Hermes is editing this file until 14:32"; saving asks once. Markdown and slides get block-aware editing with pending placeholders. Phone: Source, plus the formatted view for Markdown and `text` parts (below), and tap-to-edit text for other kinds in P4 (§3c).
+
+**Formatted view (Markdown and `text` parts, P2, decision 54).** `Edit` on a Markdown or `text` part adds **Formatted**, its default mode: you edit the page as it reads, like Claude Docs, in Jig typography.
+A small toolbar (heading level, bold, italic, inline code, link, bulleted, numbered and task lists, quote, code block, table, divider), Markdown shortcuts as you type (`## `, `- `, `**…**`, `` ` ``), and pasted rich text converted to Markdown.
+- **Every change is a block edit.** Each top-level block (§3d) is its own editing island, using ProseMirror with `prosemirror-markdown`, vendored as a shared blob beside CodeMirror. Only the blocks you touch are serialised again; every other block stays byte-identical, so a formatted save never reformats the document and Compare shows only what you changed.
+  A block the view can't represent faithfully (raw HTML, front matter, footnote definitions, a table with merged or multi-line cells) opens in place as a small inline source box.
+- **Saving.** Changes autosave to the server draft (the same per-person draft as Source, so switching modes loses nothing) and commit as one version, message "Edited in the page", on ⌘S, **Done**, leaving, or 30 s idle. The commit is `replace_block`, `insert_after` and `delete_block` ops with `if_hash`, so it rebases by block id.
+- **Agents in the same document.** Agent commits to blocks you aren't in arrive in place over the event feed (`part_watch`), with a brief blue edge and "Hermes edited". A commit to the block under your cursor keeps your text and offers **Resolve** for that block only.
+  A lease on a block or section shows "Hermes is writing this section", and `pending` blocks render as placeholders that fill in as the agent writes. Typing in a leased block asks once, and a person can always override.
+- **Comments** start from a selection: select → **Comment**, anchored to the block id and the quote, in the same rail.
+- **`text` parts**: the formatted view is the text shell made editable, with line numbers and line-anchored comments kept; saves are anchor edits.
+- **Phones**: the same view, with the toolbar above the keyboard and 44 px targets. For Markdown and `text` it supersedes P4's tap-to-edit, which stays for HTML and the other kinds.
+- **Who**: `edit` and up, as for Source; never guests or public-link viewers.
+- **Not co-typing**: two people in the formatted view at once see each other's commits arrive block by block, not keystroke by keystroke (§3d).
 
 **Comments.** A right rail, threads ordered by position then time, each with its anchor quote. **"For the agent"** toggle (the `to_agent` flag), shown as a blue chip. Then "Hermes is on it", then "Fixed in REV 14 · View diff".
 Comments from public-link viewers or other people carry a small "untrusted for agents" marker for the owner. Resolve, reopen, "show resolved". Phone: a bottom sheet with the composer above the keyboard.
@@ -1418,6 +1432,7 @@ These extend §3a's identity budgets, counted the same way. The e2e suite assert
 | Undelete from the bin | Bin → Restore | **2** |
 | Update a part's libraries after an advisory | advisory badge → Update libraries | **2**, undo is the normal restore |
 | Small text fix by hand | Edit → (type) → ⌘S | **2 + type** |
+| Fix a sentence in a Markdown doc | Edit (opens Formatted) → click the sentence → (type) → Done | **3 + type** |
 | Comment for the agent | Comments → type → "For the agent" → Post | **3 + type** |
 | Connect a headless agent on the phone | tap link in chat → Allow → biometric | **3** |
 | Connect Claude Code (signed in) | (browser opens) → Allow → biometric | **2** |
@@ -2919,7 +2934,7 @@ The simulated device matrix (decision 52). The real-device pass, including the 5
 
 **P2 Agents + the household loop.** OAuth AS (device grant first, then auth code + PKCE + CIMD/DCR + manual clients), personal agent tokens, one connection per (agent, person) and service identities,
 MCP + discovery + the error contract + cross-surface conformance, `part_edit` with rebase, block ids, leases, notes, `part_get` full content and `render: "text"`, comments with provenance,
-the event log (long-poll, SSE, webhooks), live reload, inward agent sharing (`share:household`) and `part_link_for` deep links for people-only actions, **`part_check` + the render sidecar (the P2 headline)**, Jig, the source editor with drafts, renames,
+the event log (long-poll, SSE, webhooks), live reload, inward agent sharing (`share:household`) and `part_link_for` deep links for people-only actions, **`part_check` + the render sidecar (the P2 headline)**, Jig, the source editor with drafts and the formatted view for Markdown and `text`, renames,
 shared data over `/_rt` with live `data.changed`, "Can contribute" public links for guests, the Insights pages and debugging UI, and the Hermes skill with per-person pairing.
 *Done when:* a household member pairs with Hermes, says "make a packing list and share it with the family" in Telegram, Hermes checks its own render and posts the part's link, another family member opens it on their phone, comments, and watches the fix land;
 and Claude Code connects with one passkey tap + Allow and edits a week-old part in one call;
@@ -2971,7 +2986,7 @@ This section is the order the pieces depend on each other, and why. Read each ar
 **Right after Slice 1.**
 - **`tsx`** (oxc + rolldown, the library set). It needs the build worker, mirroring and the blob host, and it closes P0, so P0's "Done when" is met just after the slice ships (decision 39).
 - **The rest of P1:** the titled card pipeline → previews (posters and `og:video` for public links and the gallery; they need the render sidecar and the titled card); search → the workspace extras (versions rail, bin, diff, inward rungs, Move to Family, Ask for access); `provision` → the Cloudflare and Authentik adapters; `doctor` after the disk budget, because it checks that every store is capped; the Insights store → traces and the log pipeline → the no-content fuzz test; the ops-alert webhook after Health and the disk budget; the deliverable extras → the portability lane; the bench → the nginx/HAProxy comparison.
-- **The rest of P2:** OAuth authorization code; comments, leases, block ids, notes and `part_find`; `part_watch` and webhooks → the source editor; agent sharing → the Hermes skill; Jig; live reload; renames; the Insights pages → the debugging UI; the remaining deep links.
+- **The rest of P2:** OAuth authorization code; comments, leases, block ids, notes and `part_find`; `part_watch` and webhooks → the source editor → the formatted view; agent sharing → the Hermes skill; Jig; live reload; renames; the Insights pages → the debugging UI; the remaining deep links.
 - **Advisories** (§3h): the spike → matching and its surfaces → `update` and the Update libraries button → auto-update.
 - Some pieces plug in later without anything waiting on them: `doctor` adds the provisioner probe once the Authentik gate has run, and the Insights store and the log pipeline register their janitor jobs and retention-test rows when they land.
 - Adapters land in the same phase as the generic default they sit beside, never before it.
@@ -3138,12 +3153,18 @@ Every line runs against the example deployment's staging (Cloudflare + Authentik
     Posters are made automatically by the render sidecar. A clip is optional and the agent's choice: its own MP4 or `preview.video: "record"`, which the sidecar records while running `preview.actions`. The guide asks agents to consider one for animated or interactive parts. Neither is ever on the save path. In Slice 1, gallery thumbnails are the latest passing render screenshot; the rest of §4c's previews ships right after Slice 1, pulled forward from P4.
     *Why:* a link that shows what it is gets opened, and the privacy line is the audience, not the card.
 
+**2026-10-24 (round 4, continued).**
+
+54. **Markdown and `text` parts get a formatted-view editor in P2** (the admin, 2026-10-24). People edit the page as it reads, like Claude Docs, and every change saves as block edits, so untouched blocks stay byte-identical and agents' edits keep merging by block id. shartifacts and the earlier plan had source editing only.
+    Live co-typing moves from the non-goals to a deferred option: `yrs` inside one formatted-view session, committing ordinary versions.
+    *Why:* the people who read a write-up are the ones who'll fix a sentence in it, and they shouldn't need Markdown to do it.
+
 ## 9. Non-goals (v1)
 
 Multi-tenant SaaS. Multi-node. Offline mode. Listed or indexable public parts. Replacing the family hub's knowledge base.
 Public sign-up. A dedicated Telegram bot (Hermes is the bot). Notifications for people: web push, email, mention or reply alerts, per-person notification settings. Agents making public links or inviting people. An A2A agent card, or publishing to the public MCP registry.
 Device permissions (camera, mic, geolocation) and service workers in sandboxed parts, except through the admin-gated `unsandboxed` flag. Device-local part storage.
-A git or Gitea dependency for part content or backups. A hard dependency on any one vendor for ingress, DNS, identity, CI, hosting or notifications. Backing up the IdP (its operator's concern). Sending email. Version pruning. Live human co-typing (CRDTs).
+A git or Gitea dependency for part content or backups. A hard dependency on any one vendor for ingress, DNS, identity, CI, hosting or notifications. Backing up the IdP (its operator's concern). Sending email. Version pruning. (Live co-typing moved from here to a deferred option, decision 54.)
 Approval queues or request inboxes of any kind. Reading a secret back. Unauthenticated routes into a backend. Privileged containers, host mounts or Engine API access for parts. Backend features outside the compose subset. Third-party analytics or telemetry services (the OTLP adapter sends only where the operator points it). WASM backends in v1.
 
 ## 10. Change logs
