@@ -1,0 +1,140 @@
+# The e2e harness (pf-kurh): Caddy with the shipped Caddyfile and a per-run CA cert, two Dex
+# instances, and (in container mode) partifactory itself with `_FILE` secrets.
+#
+# Driven by tests/e2e/harness/up.sh and down.sh (ci/e2e.sh wraps both). Never run it by hand
+# without `docker compose down -v --remove-orphans` afterwards. Everything here carries the label
+# pf.harness=1 so cleanup can find it.
+#
+# Env (set by up.sh):
+#   PF_RUN_DIR            this run's dir (certs/, dex/, secrets/, site.toml, data/)
+#   PF_UPSTREAM_WORKSPACE / PF_UPSTREAM_CONTENT  where Caddy finds partifactory
+#   PF_HTTPS_PORT         host port for Caddy's 443 (default 18443)
+#   PF_BIN                (container mode) a Linux partifactory binary
+#   PF_IMAGE_TAG          one tag per commit, so runs never pile up untagged images
+
+name: pf-harness
+
+x-labels: &labels
+  pf.harness: "1"
+
+networks:
+  harness:
+    labels: *labels
+    ipam:
+      config:
+        - subnet: 172.30.77.0/24
+
+volumes:
+  pf-data:
+    labels: *labels
+
+services:
+  caddy:
+    image: caddy:2.11.4-alpine
+    labels: *labels
+    restart: "no"
+    ports:
+      - "127.0.0.1:${PF_HTTPS_PORT:-18443}:443"
+    environment:
+      PF_APEX: pf.test
+      PF_UPSTREAM_WORKSPACE: ${PF_UPSTREAM_WORKSPACE:-partifactory:8080}
+      PF_UPSTREAM_CONTENT: ${PF_UPSTREAM_CONTENT:-partifactory:8081}
+    volumes:
+      # The shipped config, unchanged; only the cert paths are this run's.
+      - ../../../deploy/proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../../../deploy/proxy:/srv/pf-proxy:ro
+      - ${PF_RUN_DIR:?}/certs/cert.pem:/etc/caddy/certs/cert.pem:ro
+      - ${PF_RUN_DIR:?}/certs/key.pem:/etc/caddy/certs/key.pem:ro
+      - ./sites.d:/etc/caddy/sites.d:ro
+    # Caddy's state is per run: tmpfs, not the image's anonymous volumes.
+    tmpfs: [/data, /config]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      harness:
+        ipv4_address: 172.30.77.10
+        aliases: [dex.pf.test, dex2.pf.test, parts.pf.test]
+
+  dex:
+    image: ghcr.io/dexidp/dex:v2.45.1
+    labels: *labels
+    restart: "no"
+    command: ["dex", "serve", "/etc/dex/dex.yaml"]
+    volumes:
+      - ${PF_RUN_DIR:?}/dex/dex.yaml:/etc/dex/dex.yaml:ro
+    networks: [harness]
+
+  dex2:
+    image: ghcr.io/dexidp/dex:v2.45.1
+    labels: *labels
+    restart: "no"
+    command: ["dex", "serve", "/etc/dex/dex.yaml"]
+    volumes:
+      - ${PF_RUN_DIR:?}/dex/dex2.yaml:/etc/dex/dex.yaml:ro
+    networks: [harness]
+
+  # Playwright (all four projects) on the harness network: `docker compose run --rm browsers
+  # <playwright args>`. The repo is mounted at /repo (node_modules installed on the host by
+  # ci/e2e.sh; @playwright/test is plain JS). Fixed names resolve to Caddy through /etc/hosts;
+  # Chromium maps the whole wildcard with --host-resolver-rules.
+  browsers:
+    profiles: ["browsers"]
+    image: mcr.microsoft.com/playwright:v1.64.1-noble
+    labels: *labels
+    restart: "no"
+    ipc: host
+    init: true
+    entrypoint: ["bash", "/repo/tests/e2e/harness/browsers-entry.sh"]
+    environment:
+      CI: ${CI:-}
+      PF_E2E_RUN: ${PF_E2E_RUN:-local}
+      PF_CA_SPKI: ${PF_CA_SPKI:-}
+      PF_HARNESS_IP: 172.30.77.10
+      PF_FIREFOX_PROFILE: /run/pf/run/firefox-profile
+      PF_ORIGIN_DOWN: ${PF_ORIGIN_DOWN:-}
+      HOST_UID: ${HOST_UID:-}
+      HOST_GID: ${HOST_GID:-}
+    volumes:
+      - ../../..:/repo
+      - ${PF_RUN_DIR:?}/certs/ca.pem:/run/pf/ca.pem:ro
+      - ${PF_RUN_DIR:?}:/run/pf/run:ro
+    extra_hosts:
+      - "parts.pf.test:172.30.77.10"
+      - "notes-part.pf.test:172.30.77.10"
+      - "demo-part.pf.test:172.30.77.10"
+      - "blobs-part.pf.test:172.30.77.10"
+      - "forge.pf.test:172.30.77.10"
+      - "dex.pf.test:172.30.77.10"
+      - "dex2.pf.test:172.30.77.10"
+    networks: [harness]
+
+  # Container mode only (Linux CI): partifactory from a binary built on the runner.
+  # On a Mac the harness runs the native binary on the host instead (up.sh), and Caddy reaches
+  # it through host.docker.internal.
+  partifactory:
+    profiles: ["container"]
+    image: ubuntu:24.04
+    labels: *labels
+    restart: "no"
+    command: ["/usr/local/bin/partifactory", "serve"]
+    environment:
+      PF_SITE_TOML: /run/pf/site.toml
+      PF_DATA_DIR: /data
+      PF_SESSION_KEY_FILE: /run/secrets/session_key
+      PF_CAP_HMAC_KEY_FILE: /run/secrets/cap_hmac_key
+      PF_METRICS_TOKEN_FILE: /run/secrets/metrics_token
+      PF_LOG: info
+      PF_DEV_LOG_RING: "20000"
+      SSL_CERT_FILE: /run/pf/ca.pem
+    volumes:
+      - ${PF_BIN:-/nonexistent}:/usr/local/bin/partifactory:ro
+      - ${PF_RUN_DIR:?}/site.toml:/run/pf/site.toml:ro
+      - ${PF_RUN_DIR:?}/certs/ca.pem:/run/pf/ca.pem:ro
+      - ${PF_RUN_DIR:?}/secrets:/run/secrets:ro
+      - pf-data:/data
+    ports:
+      # The ops listener, for the gate's curl; local only, never through Caddy.
+      - "127.0.0.1:19090:9090"
+    networks:
+      harness:
+        ipv4_address: 172.30.77.20

@@ -1,0 +1,75 @@
+# partifactory behind Caddy: the one Caddy config in the repo (§3, the ingress contract).
+#
+#   parts.<apex>  -> partifactory :8080 (workspace)
+#   *.<apex>      -> partifactory :8081 (content: <name>-part hosts, blobs-part)
+#
+# It never routes to :9090 (the ops listener: local network only). Caddy replaces any
+# client-sent X-Forwarded-For with the real peer address (it trusts no upstream proxies unless
+# told to), and stamps a fresh X-Request-Id; set partifactory's `[ingress] trusted_proxies` to
+# this proxy's address so both are honoured, and nothing else is.
+#
+# Everything deployment-specific comes from the environment, with defaults for the e2e harness:
+#   PF_APEX                the apex domain                (default pf.test)
+#   PF_WORKSPACE_LABEL     the workspace host's label     (default parts)
+#   PF_UPSTREAM_WORKSPACE  partifactory's :8080           (default partifactory:8080)
+#   PF_UPSTREAM_CONTENT    partifactory's :8081           (default partifactory:8081)
+#   PF_TLS_CERT/PF_TLS_KEY a wildcard cert for *.<apex> and <apex>
+#                          (default /etc/caddy/certs/{cert,key}.pem)
+# Extra sites for other services on the same proxy go in /etc/caddy/sites.d/*.caddy; an
+# explicit host there wins over the wildcard.
+
+{
+	admin off
+	auto_https disable_certs
+	servers {
+		timeouts {
+			read_header 10s
+			idle 2m
+		}
+	}
+}
+
+(pf_proxy) {
+	tls {$PF_TLS_CERT:/etc/caddy/certs/cert.pem} {$PF_TLS_KEY:/etc/caddy/certs/key.pem}
+
+	# 8 MiB request bodies, the same number as partifactory's own cap.
+	request_body {
+		max_size 8MiB
+	}
+
+	# The origin is down: the static maintenance page, never Caddy's raw error.
+	handle_errors 502 503 504 {
+		root * /srv/pf-proxy
+		rewrite * /maintenance.html
+		header Cache-Control "no-store"
+		header Retry-After "30"
+		file_server {
+			status 503
+		}
+	}
+}
+
+(pf_upstream_opts) {
+	# SSE and long-poll: flush every write, and let streams run (no response timeout).
+	flush_interval -1
+	header_up X-Request-Id {http.request.uuid}
+	transport http {
+		dial_timeout 3s
+	}
+}
+
+{$PF_WORKSPACE_LABEL:parts}.{$PF_APEX:pf.test} {
+	import pf_proxy
+	reverse_proxy {$PF_UPSTREAM_WORKSPACE:partifactory:8080} {
+		import pf_upstream_opts
+	}
+}
+
+*.{$PF_APEX:pf.test} {
+	import pf_proxy
+	reverse_proxy {$PF_UPSTREAM_CONTENT:partifactory:8081} {
+		import pf_upstream_opts
+	}
+}
+
+import /etc/caddy/sites.d/*.caddy

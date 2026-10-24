@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""Generate the harness's two Dex configs from tests/fixtures/identity.toml, so Dex and the
+StaticDirectory fixture never drift.
+
+  gen-dex.py <identity.toml> <out-dir>
+
+writes <out-dir>/dex.yaml (issuer from the fixture, normally https://dex.pf.test/dex) and
+<out-dir>/dex2.yaml (the second provider: https://dex2.pf.test/dex, its own client, no groups
+scope advertised) for the identity bead's second-provider test.
+
+Every static user's password is `password` (test only). Dex has no disabled state: a
+`disabled = true` user exists in Dex and partifactory's directory refuses them.
+"""
+import json
+import sys
+import tomllib
+
+# bcrypt("password"), cost 10: Dex's own example hash.
+PASSWORD_HASH = "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+
+
+def q(s):
+    # JSON strings are valid YAML scalars.
+    return json.dumps(s)
+
+
+def render(issuer, client_id, redirect_hosts, users, with_groups):
+    lines = [
+        f"issuer: {q(issuer)}",
+        "storage:",
+        "  type: memory",
+        "web:",
+        "  http: 0.0.0.0:5556",
+        "logger:",
+        "  level: info",
+        "  format: json",
+        "oauth2:",
+        "  skipApprovalScreen: true",
+        "  alwaysShowLoginScreen: false",
+        "expiry:",
+        "  idTokens: 10m",
+        "  refreshTokens:",
+        "    validIfNotUsedFor: 24h",
+        "    absoluteLifetime: 72h",
+        "enablePasswordDB: true",
+        "staticClients:",
+        f"  - id: {q(client_id)}",
+        f"    name: {q(client_id)}",
+        "    secret: harness-client-secret",
+        "    redirectURIs:",
+    ]
+    for h in redirect_hosts:
+        lines.append(f"      - {q(h)}")
+    lines.append("staticPasswords:")
+    for u in users:
+        lines += [
+            f"  - email: {q(u['email'])}",
+            f"    hash: {q(PASSWORD_HASH)}",
+            f"    username: {q(u['username'])}",
+            f"    name: {q(u.get('display_name', u['username']))}",
+            f"    userID: {q(u['sub'])}",
+        ]
+        if with_groups and u.get("groups"):
+            lines.append("    groups:")
+            for g in u["groups"]:
+                lines.append(f"      - {q(g)}")
+    return "\n".join(lines) + "\n"
+
+
+def main():
+    src, out = sys.argv[1], sys.argv[2]
+    with open(src, "rb") as f:
+        fx = tomllib.load(f)
+    users = fx.get("users", [])
+    known = {g["name"] for g in fx.get("groups", [])}
+    for u in users:
+        for g in u.get("groups", []):
+            if g not in known:
+                sys.exit(f"gen-dex: user {u['username']} is in unknown group {g}")
+    redirects = [
+        "https://parts.pf.test/oauth/callback",
+        "https://parts.pf.test/auth/callback",
+        "https://parts.pf.test/_dev/callback",
+    ]
+    issuer = fx.get("issuer", "https://dex.pf.test/dex")
+    with open(f"{out}/dex.yaml", "w") as f:
+        f.write(render(issuer, "partifactory", redirects, users, True))
+    with open(f"{out}/dex2.yaml", "w") as f:
+        f.write(render("https://dex2.pf.test/dex", "partifactory-second", redirects, users, False))
+    print(f"gen-dex: {len(users)} users, {len(known)} groups -> {out}/dex.yaml, dex2.yaml")
+
+
+if __name__ == "__main__":
+    main()

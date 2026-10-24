@@ -1,0 +1,13 @@
+# Harness-only extra sites (mounted at /etc/caddy/sites.d/). The two Dex instances sit behind
+# the same proxy and cert as partifactory, at their own explicit hosts, which win over the
+# wildcard.
+
+dex.pf.test {
+	import pf_proxy
+	reverse_proxy dex:5556
+}
+
+dex2.pf.test {
+	import pf_proxy
+	reverse_proxy dex2:5556
+}
