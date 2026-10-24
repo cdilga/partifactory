@@ -3,3 +3,15 @@ name = "spike-compiler"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+
+# The child-process protocol (PLAN §3d) and the esbuild-as-subprocess fallback.
+# The oxc + rolldown backend was deferred for disk; see docs/spikes/compiler.md.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ciborium = "=0.2.2"
+libc = "=0.2.191"
+tempfile = "3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+anyhow = "1"
