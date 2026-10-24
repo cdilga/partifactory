@@ -148,6 +148,10 @@ pub const DOCS: &[(&str, &str)] = &[
         "The request-id header passed through from the proxy, or minted when absent.",
     ),
     (
+        "ingress.rate_limits",
+        "The rate-limit layer. `false` switches it off and needs `[unsafe] rate_limits = \"off\"`.",
+    ),
+    (
         "dns.provider",
         "`manual` (prints the records to create) or `cloudflare` (the adapter, after Slice 1).",
     ),

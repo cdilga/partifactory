@@ -59,6 +59,7 @@ Run `partifactory config check` to load the config exactly as `serve` would. It 
 | `idp.provisioner.tier` | `PF_IDP_PROVISIONER_TIER` | string | (unset) | Provisioner adapter: the tier the provisioner gate recorded. |
 | `ingress.client_ip_header` | `PF_INGRESS_CLIENT_IP_HEADER` | string | `"X-Forwarded-For"` | The header the proxy puts the client IP in. Read only from `trusted_proxies`. |
 | `ingress.kind` | `PF_INGRESS_KIND` | string | `"proxy"` | How traffic arrives: `proxy` (any reverse proxy meeting the ingress contract), `cloudflare-tunnel` or `acme`. |
+| `ingress.rate_limits` | `PF_INGRESS_RATE_LIMITS` | bool | `true` | The rate-limit layer. `false` switches it off and needs `[unsafe] rate_limits = "off"`. |
 | `ingress.request_id_header` | `PF_INGRESS_REQUEST_ID_HEADER` | string | `"X-Request-Id"` | The request-id header passed through from the proxy, or minted when absent. |
 | `ingress.trusted_proxies` | `PF_INGRESS_TRUSTED_PROXIES` | list (comma-separated in env) | `[]` | CIDRs whose `client_ip_header` and `request_id_header` are believed. |
 | `mirror.allowlist` | `PF_MIRROR_ALLOWLIST` | list (comma-separated in env) | `["cdnjs.cloudflare.com", "cdn.jsdelivr.net", "unpkg.com", "esm.sh", "fonts.googleapis.com", "fonts.gstatic.com"]` | CDN hosts that builds may mirror libraries from. |
@@ -74,4 +75,5 @@ Switching one of these off fails `config check` unless `[unsafe] <name> = "off"`
 | Name | Switched off by |
 | --- | --- |
 | `nightly_export` | `backup.export_schedule` |
+| `rate_limits` | `ingress.rate_limits` |
 | `disk_budget` | `disk.budget_percent` |

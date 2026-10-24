@@ -66,6 +66,9 @@ pub struct Ingress {
     pub client_ip_header: String,
     pub trusted_proxies: Vec<String>,
     pub request_id_header: String,
+    /// The rate-limit layer (§5d). `false` is a protection switched off and needs
+    /// `[unsafe] rate_limits`.
+    pub rate_limits: bool,
 }
 
 impl Default for Ingress {
@@ -75,6 +78,7 @@ impl Default for Ingress {
             client_ip_header: "X-Forwarded-For".into(),
             trusted_proxies: vec![],
             request_id_header: "X-Request-Id".into(),
+            rate_limits: true,
         }
     }
 }

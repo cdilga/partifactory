@@ -178,6 +178,9 @@ proptest! {
             if key.path != "domain.apex" || !seed.is_empty() {
                 env.insert(key.env_var(), env_val);
             }
+            if key.path == "ingress.rate_limits" && !flag {
+                env.insert("PF_UNSAFE_RATE_LIMITS".into(), "off".into());
+            }
             if key.path == "backends.enabled" && flag {
                 env.insert("PF_RUNNER_KEY".into(), "r".into());
             }
@@ -340,6 +343,15 @@ fn unsafe_key_required_to_disable_protection() {
             name: "nightly_export".into(),
             key: "backup.export_schedule".into()
         }]
+    );
+    let d = errs(load("[ingress]\nrate_limits = false\n", &base_env()));
+    assert!(matches!(&d[0], Diag::UnsafeRequired { name, .. } if name == "rate_limits"));
+    assert!(
+        load(
+            "[ingress]\nrate_limits = false\n[unsafe]\nrate_limits = \"off\"\n",
+            &base_env()
+        )
+        .is_ok()
     );
     let d = errs(load("[disk]\nbudget_percent = 100\n", &base_env()));
     assert!(matches!(&d[0], Diag::UnsafeRequired { name, .. } if name == "disk_budget"));

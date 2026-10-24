@@ -20,6 +20,11 @@ pub const PROTECTIONS: &[Protection] = &[
         is_off: |c| c.backup.export_schedule == "off",
     },
     Protection {
+        name: "rate_limits",
+        key: "ingress.rate_limits",
+        is_off: |c| !c.ingress.rate_limits,
+    },
+    Protection {
         name: "disk_budget",
         key: "disk.budget_percent",
         is_off: |c| c.disk.budget_percent >= 100,
