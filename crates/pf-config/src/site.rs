@@ -231,6 +231,8 @@ impl Default for Mirror {
                 "cdn.jsdelivr.net".into(),
                 "unpkg.com".into(),
                 "esm.sh".into(),
+                "fonts.googleapis.com".into(),
+                "fonts.gstatic.com".into(),
             ],
         }
     }

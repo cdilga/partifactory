@@ -61,7 +61,7 @@ Run `partifactory config check` to load the config exactly as `serve` would. It 
 | `ingress.kind` | `PF_INGRESS_KIND` | string | `"proxy"` | How traffic arrives: `proxy` (any reverse proxy meeting the ingress contract), `cloudflare-tunnel` or `acme`. |
 | `ingress.request_id_header` | `PF_INGRESS_REQUEST_ID_HEADER` | string | `"X-Request-Id"` | The request-id header passed through from the proxy, or minted when absent. |
 | `ingress.trusted_proxies` | `PF_INGRESS_TRUSTED_PROXIES` | list (comma-separated in env) | `[]` | CIDRs whose `client_ip_header` and `request_id_header` are believed. |
-| `mirror.allowlist` | `PF_MIRROR_ALLOWLIST` | list (comma-separated in env) | `["cdnjs.cloudflare.com", "cdn.jsdelivr.net", "unpkg.com", "esm.sh"]` | CDN hosts that builds may mirror libraries from. |
+| `mirror.allowlist` | `PF_MIRROR_ALLOWLIST` | list (comma-separated in env) | `["cdnjs.cloudflare.com", "cdn.jsdelivr.net", "unpkg.com", "esm.sh", "fonts.googleapis.com", "fonts.gstatic.com"]` | CDN hosts that builds may mirror libraries from. |
 | `names.reserved` | `PF_NAMES_RESERVED` | list (comma-separated in env) | `[]` | Part names nobody may take. |
 | `render.enabled` | `PF_RENDER_ENABLED` | bool | `false` | Turn on the render sidecar for `part_check`. |
 | `unsafe` | `PF_UNSAFE` | table (PF_<TABLE>_<NAME> in env) | `{}` | Protections deliberately switched off, as `<name> = "off"`. Each one is reported as a warning. |
