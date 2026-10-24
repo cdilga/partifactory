@@ -6,5 +6,28 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+# Dev-only routes under `/_dev/` (harness self-test, log level, rate-limit self-test, SSE,
+# body echo, collector). Never in release builds; `partifactory/dev` turns it on.
+dev = []
+
+[dependencies]
+axum = { version = "0.8", features = ["http2"] }
+fs4 = "0.13"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+governor = "0.10"
+http = "1"
+ipnet = "2"
+pf-config = { path = "../pf-config" }
+pf-obs = { path = "../pf-obs" }
+serde.workspace = true
+serde_json.workspace = true
+tokio = { version = "1.47", features = ["rt-multi-thread", "net", "signal", "macros", "time", "sync", "fs"] }
+tower = { version = "0.5", features = ["util"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

@@ -1,19 +1,19 @@
-//! Observability: JSON logs, request ids, metrics and log redaction.
+//! Observability: JSON logs, request ids, metrics and log redaction (§5d).
+//!
+//! - [`logging`]: the one subscriber (flattened JSON on stdout, redacted, reloadable level).
+//! - [`fields`]: the shared field names and the access line helper.
+//! - [`redact`]: redaction by type (`CapToken`, `BearerToken`, …) and by pattern.
+//! - [`request_id`]: generation, validation and the task-local carrier.
+//! - [`metrics`]: the Prometheus registry, `record_http`, `record_op`.
+//! - [`testing`]: in-memory log capture for tests.
 
-use tracing_subscriber::EnvFilter;
+pub mod fields;
+pub mod logging;
+pub mod metrics;
+pub mod redact;
+pub mod request_id;
+pub mod testing;
 
-/// JSON log lines on stdout, one object per event with its fields at the top level
-/// (`{"timestamp":…,"level":…,"event":"config.check",…}`). The filter comes from `PF_LOG`
-/// (default `info`).
-pub fn init_json_logs() {
-    let filter = EnvFilter::try_from_env("PF_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
-    let _ = tracing_subscriber::fmt()
-        .json()
-        .flatten_event(true)
-        .with_current_span(false)
-        .with_span_list(false)
-        .with_target(false)
-        .with_env_filter(filter)
-        .with_writer(std::io::stdout)
-        .try_init();
-}
+pub use logging::{LogHandle, init_json_logs, log_handle};
+pub use metrics::{record_http, record_op};
+pub use redact::{BearerToken, CapToken, RefreshToken, SessionId, redact_str};
