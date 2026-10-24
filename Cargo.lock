@@ -935,6 +935,17 @@ version = "0.1.0"
 [[package]]
 name = "pf-auth"
 version = "0.1.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "pf-db",
+ "serde",
+ "sha2",
+ "thiserror",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "pf-backup"

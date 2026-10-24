@@ -1,0 +1,52 @@
+# The fixture identities every test signs in as, without a network (pf-auth `StaticDirectory`,
+# `dev` feature only). The e2e harness's Dex config seeds the same people and groups, so a test
+# that signs in through Dex and one that uses this file see the same directory.
+#
+# Role words only, never real names (AGENTS.md "Secrets and site config").
+
+issuer = "https://dex.pf.test/dex"
+
+[[groups]]
+name = "household"
+
+[[groups]]
+name = "adults"
+
+[[groups]]
+name = "kids"
+
+[[users]]
+sub = "fixture-admin"
+username = "admin"
+display_name = "The admin"
+email = "admin@example.com"
+groups = ["household", "adults"]
+
+[[users]]
+sub = "fixture-member-a"
+username = "member-a"
+display_name = "Member A"
+email = "member-a@example.com"
+groups = ["household", "adults"]
+
+[[users]]
+sub = "fixture-member-b"
+username = "member-b"
+display_name = "Member B"
+email = "member-b@example.com"
+groups = ["household", "kids"]
+
+[[users]]
+sub = "fixture-outsider"
+username = "outsider"
+display_name = "An outsider"
+email = "outsider@example.com"
+groups = []
+
+[[users]]
+sub = "fixture-disabled"
+username = "disabled"
+display_name = "A disabled user"
+email = "disabled@example.com"
+groups = ["household"]
+disabled = true

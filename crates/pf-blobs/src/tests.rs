@@ -21,7 +21,10 @@ pub(crate) fn capture_logs<T>(f: impl FnOnce() -> T) -> (T, String) {
         .flatten_event(true)
         .with_writer(move || w.clone())
         .finish();
-    let out = tracing::subscriber::with_default(sub, f);
+    let out = tracing::subscriber::with_default(sub, || {
+        tracing::callsite::rebuild_interest_cache();
+        f()
+    });
     let s = String::from_utf8(buf.0.lock().unwrap().clone()).unwrap();
     (out, s)
 }
