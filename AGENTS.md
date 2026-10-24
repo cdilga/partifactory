@@ -75,5 +75,5 @@ br close <id> --reason "<commit SHAs>; CI <run>; <gate commands + output excerpt
 ## Secrets and site config
 
 - gitleaks runs before every push, and in CI.
-- Never commit household names, internal IPs or the IdP inventory. Write "the admin" or "a family member", and use `<domain>` or `pf.test` in examples.
+- Never commit names (household members, the admin, the deployment's domain or its own services), internal IPs or the IdP inventory. Write "the admin" or "a family member", and use `<domain>`, `example.com` or `pf.test` in examples. Third-party products and the credit in `NOTICE` are fine.
 - Everything specific to one deployment lives in the private `partifactory-site` repo, never here. Secrets come from env vars or `_FILE` paths.

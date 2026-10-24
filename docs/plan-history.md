@@ -47,7 +47,7 @@ Kept as it was recorded. Round 2 supersedes several of these outcomes (the cooki
 | C7 oxc/rolldown risk, import maps | **Adopted**: pinned versions, golden compile corpus, import-map story. The `vite build` escape hatch stays prominent |
 | C8 rename collisions | **Adopted**: used names stay reserved, renames are admin-confirmed |
 | C9 hidden DB read on entry | **Adopted**: in-memory live-version cache |
-| O1 IdP traits are YAGNI | **Partly rejected**: the admin asked for swappability. Kept thin, with one real adapter + a test fake |
+| O1 IdP traits are YAGNI | **Partly rejected**: The admin asked for swappability. Kept thin, with one real adapter + a test fake |
 | O2 io_uring + frankensqlite | **Adopted**: both cut (parked as ideas) |
 | O3 webhook + poll | **Adopted**: poll only |
 | O4 reconciler/adapter matrix too heavy | **Partly adopted**: an honest idempotent script, owned resources only, no plan mode in v1. Multi-host stays (the admin wants DR and portability) |
@@ -68,7 +68,7 @@ Kept as it was recorded. Round 2 supersedes several of these outcomes (the cooki
 
 ### Round 2 (2026-10-23)
 
-Inputs: the admin's decisions in chat (binding, and later messages overriding earlier ones on backups), an Opus review (O1–O17), a Fable review (parts A–H), a grounding check against primary sources (G), a self-containment, data-model and task-graph validation (V), and a design proposal (D).
+Inputs: The admin's decisions in chat (binding, and later messages overriding earlier ones on backups), an Opus review (O1–O17), a Fable review (parts A–H), a grounding check against primary sources (G), a self-containment, data-model and task-graph validation (V), and a design proposal (D).
 
 **What changed.**
 - **Sandbox, no part-host cookies**: every part document gets CSP `sandbox` without `allow-same-origin`. The `__Host-pf_cap` cookie, the one-time `?g=` codes, the cookie-tossing prelude and the separate-domain open decision are gone. Caps are in the path, deterministic per 12 h window, with a boot-epoch floor.
@@ -84,7 +84,7 @@ Inputs: the admin's decisions in chat (binding, and later messages overriding ea
 - **Grounding fixes**: Authentik invitations can't set groups and have no use count; Cloudflare Free has one rate-limit rule; Cloudflare caches by extension; oxc/rolldown Rust APIs aren't semver-stable; the wildcard CNAME to the tunnel needs verifying.
 
 **Considered and rejected during round 2.**
-- **A git parts archive** (each version a commit in a private Gitea repo, pushed from an outbox). the admin: no git or Gitea dependency for part content or backups. Versioning stays inside partifactory, and backup is the `/data` folder.
+- **A git parts archive** (each version a commit in a private Gitea repo, pushed from an outbox). The admin: no git or Gitea dependency for part content or backups. Versioning stays inside partifactory, and backup is the `/data` folder.
 - **An async backup-sink outbox with storage-agnostic sinks** (local dir, S3 via `object_store`) on the core path. Replaced by `export` + host backups. An S3 upload of exports is optional and P5.
 - **15-minute `VACUUM INTO` snapshots shipped off-box.** Replaced by an hourly local consistent copy for host tools and full exports.
 
@@ -92,24 +92,24 @@ Inputs: the admin's decisions in chat (binding, and later messages overriding ea
 
 | Source | Item | Verdict | Where it landed |
 | --- | --- | --- | --- |
-| the admin 1 | No cookies on part hosts; sandbox; no second domain | **Adopted** | §2 Serving, §3, §8.10, §7 |
-| the admin 2 | Any AI, any surface; registry; discovery; PATs; one error shape; one event log; no MCP-only features; conformance | **Adopted** | §4, §4b, §3b, §8.11 |
-| the admin 3 | Tier (a) cards always, by audience; tier (b) sidecar; `part_check` headline | **Adopted** | §4c, §6 P2, §8.16 |
-| the admin 4 | No agent-minted preview links; admin-only public links, no default expiry, open counts | **Adopted** (round 2b: the link to post became the part's own host, and public links moved to `<name>-part/l/<token>`) | §2 link, §3a ladder, §5e `public_links` |
-| the admin 4 | Telegram in-app browser + passkeys | **Open item**, tested in P1; person-bound fallback, never anonymous. *Superseded at the Slice 1 freeze:* the fallback link is **rejected**; a 5-minute real-phone test stays, and its fixes are Telegram's open-in-browser setting and an "open in browser" hint in Hermes' messages | §2, §6 P1 |
-| the admin 4b | Inward yes (`share:household`), outward no; divergence from shartifacts; connecting = identity | **Adopted** | §3b, §1, §8.13 |
-| the admin 5 → later messages | Storage-agnostic sinks + outbox, then a git archive, then **`/data` + export/import** | **Final: `/data` + export/import**; git archive and core-path sinks rejected | §5c, §10 rejected list |
-| the admin 5 | Per-part data opt-in, expiry, keep the last one | **Adopted** as "keep data snapshots", for undo not DR (round 2b: on by default) | §5c, §5e |
-| the admin 5 | Authentik's Postgres out of scope | **Adopted** | §5c, §9 |
-| the admin 5 / F E1.5 | Image + CLI on the GitHub mirror for laptop drills | **Adopted** | §5b |
-| the admin (later) | Host contract, backup layers, `doctor` reports layers, moving checklist | **Adopted** | §5b, §5c |
-| the admin 6 | FTS5 search, filters, bm25 + recency, embeddings later | **Adopted** | §3e |
-| the admin 7 | Versions labelled, diff any two, preview old, restore = new, keep all, 30-day bin | **Adopted** | §3e, §4a.6 |
-| the admin 8 / D | Stockroom theme, Jig design system, mockup | **Adopted**, adjusted for `/p/<name>` (round 2b: the part view moved into the part host's wrapper), no previews, public links without expiry | §4a |
+| Admin 1 | No cookies on part hosts; sandbox; no second domain | **Adopted** | §2 Serving, §3, §8.10, §7 |
+| Admin 2 | Any AI, any surface; registry; discovery; PATs; one error shape; one event log; no MCP-only features; conformance | **Adopted** | §4, §4b, §3b, §8.11 |
+| Admin 3 | Tier (a) cards always, by audience; tier (b) sidecar; `part_check` headline | **Adopted** | §4c, §6 P2, §8.16 |
+| Admin 4 | No agent-minted preview links; admin-only public links, no default expiry, open counts | **Adopted** (round 2b: the link to post became the part's own host, and public links moved to `<name>-part/l/<token>`) | §2 link, §3a ladder, §5e `public_links` |
+| Admin 4 | Telegram in-app browser + passkeys | **Open item**, tested in P1; person-bound fallback, never anonymous. *Superseded at the Slice 1 freeze:* the fallback link is **rejected**; a 5-minute real-phone test stays, and its fixes are Telegram's open-in-browser setting and an "open in browser" hint in Hermes' messages | §2, §6 P1 |
+| Admin 4b | Inward yes (`share:household`), outward no; divergence from shartifacts; connecting = identity | **Adopted** | §3b, §1, §8.13 |
+| Admin 5 → later messages | Storage-agnostic sinks + outbox, then a git archive, then **`/data` + export/import** | **Final: `/data` + export/import**; git archive and core-path sinks rejected | §5c, §10 rejected list |
+| Admin 5 | Per-part data opt-in, expiry, keep the last one | **Adopted** as "keep data snapshots", for undo not DR (round 2b: on by default) | §5c, §5e |
+| Admin 5 | Authentik's Postgres out of scope | **Adopted** | §5c, §9 |
+| Admin 5 / F E1.5 | Image + CLI on the GitHub mirror for laptop drills | **Adopted** | §5b |
+| Admin (later) | Host contract, backup layers, `doctor` reports layers, moving checklist | **Adopted** | §5b, §5c |
+| Admin 6 | FTS5 search, filters, bm25 + recency, embeddings later | **Adopted** | §3e |
+| Admin 7 | Versions labelled, diff any two, preview old, restore = new, keep all, 30-day bin | **Adopted** | §3e, §4a.6 |
+| Admin 8 / D | Stockroom theme, Jig design system, mockup | **Adopted**, adjusted for `/p/<name>` (round 2b: the part view moved into the part host's wrapper), no previews, public links without expiry | §4a |
 | Sandbox mechanics | Cap in path, windowed, boot floor, no `?g=`, `pf:regrant`, `/_rt` simple request, ACAO null, no CORP, canonical CSP, shim, escape hatch, per-part hosts kept, P0 spike | **Adopted** | §2, §5 spike list |
 | O1 | Opaque-origin sandbox | **Adopted**, with ACAO `null` + `Vary` (not `*`) and no UA-mismatch re-grant | §2 |
 | O2 / F B6 | Spaces first-class | **Adopted**, live inheritance (V) over copy-at-create (F) | §2, §3a |
-| O3 | One token per (agent, person); family hub service principal | **Adopted** | §3b |
+| O3 | One token per (agent, person); family-hub service principal | **Adopted** | §3b |
 | O4 | Canonical smart link `/s/<token>` with fallbacks and agent previews | **Modified**: canonical `/p/<name>` + separate admin-only public link; `/s/` dropped. **Round 2b:** canonical is now the part's own host with a trusted wrapper; `/p/<name>` only redirects | §2 link |
 | O5 | Agent inbox + live reload | **Partly**: live reload P2, inbox and steward P3 | §3c |
 | O6 | Tap-to-edit text, point-and-comment | **Adopted for P4** | §3c |
@@ -157,13 +157,13 @@ Inputs: the admin's decisions in chat (binding, and later messages overriding ea
 
 ### Round 2b (2026-10-23)
 
-Inputs: four decisions from the admin, the owner, made after round 2. They're binding, and where they conflict with round 2 they win.
+Inputs: four decisions from the admin, made after round 2. They're binding, and where they conflict with round 2 they win.
 
 **What changed.**
 - **Portability: no strong dependency on the current stack.** An audit found couplings to Cloudflare (tunnel, DNS, cache rules, the rate-limit rule, the fallback Worker, health checks, `cf-ray` ids, country/ASN on device approval), Authentik (the only `Authn`/`Directory` adapter, the admin `sub` pin, invites, recovery, groups, cloned flows),
   Gitea (secrets only in Gitea Actions, the deploy pipeline, the registry, Renovate), TrueNAS (the default host), Telegram/Hermes (the default alert notifier, a notify channel, a `[hermes]` config section) and the family hub (hardcoded in `frame-ancestors`), plus `example.com` written into normative text.
   Each one is now an adapter behind config with a generic default: the ingress contract with Caddy/nginx/Traefik examples (§3), `provision` provider plugins with a manual mode (§5c), generic OIDC with a claims re-read directory and native invites on local passkey accounts (§3a), an OCI image + compose file + env contract with `_FILE` secrets (§5b),
-  generic webhooks (§4), `[embed] frame_ancestors` (§2), and `<domain>` everywhere with example.com as the example deployment. New §5f has the table, and a **portability lane** runs the full e2e suite with Dex, Caddy and local exports, and no Cloudflare, Authentik or Gitea.
+  generic webhooks (§4), `[embed] frame_ancestors` (§2), and `<domain>` everywhere with no real domain in the text. New §5f has the table, and a **portability lane** runs the full e2e suite with Dex, Caddy and local exports, and no Cloudflare, Authentik or Gitea.
   Schema: `users` gains `auth_source` and `(idp_issuer, idp_sub)`, `groups` gains `source`, `admin_credentials` becomes `passkeys` with a `purpose`, sessions keep an encrypted IdP refresh token, `audit.cf_ray` becomes `request_id`.
   Tasks added: the ingress contract, built-in ACME (P5), the Cloudflare adapter, the Authentik adapter, the portability lane, and native invites with local accounts. Re-scoped: the OIDC client, the directory, `provision`, Health, the deliverable and the Authentik provisioner work. Decisions 22–24.
 - **The link to post is the part's own host.** `https://<name>-part.<domain>/` serves a trusted, unsandboxed wrapper with the Stockroom chrome, framing the sandboxed content at `/c/<cap>/` on the same host. With no cap, the wrapper sends the browser to `/grant`, which returns with the cap in a `#pf=` fragment.
@@ -179,7 +179,7 @@ Inputs: four decisions from the admin, the owner, made after round 2. They're bi
 
 ### Round 2c (2026-10-23)
 
-Inputs: seven decisions from the admin, the owner, made after round 2b, plus one later override from him that removes the approval workflow. They're binding, and where they conflict with earlier rounds they win. Round 2b (portability adapters, the part host as the link, data snapshots on by default, notifications cut) was already in place and is unchanged.
+Inputs: seven decisions from the admin, made after round 2b, plus one later override from them that removes the approval workflow. They're binding, and where they conflict with earlier rounds they win. Round 2b (portability adapters, the part host as the link, data snapshots on by default, notifications cut) was already in place and is unchanged.
 
 **What changed.**
 - **Backends in v1** (new §3f, phase P2a). A part is a page plus, optionally, containers: a Dockerfile built by the server, a registry image from an allowlist (pinned by digest), or an uploaded `docker save` tarball. Services use a documented compose subset; anything else fails the build by name.
@@ -211,12 +211,12 @@ Inputs: seven decisions from the admin, the owner, made after round 2b, plus one
 
 ### Slice 1 freeze (2026-10-23)
 
-Inputs: the admin's request to freeze the first shippable slice and write the agent contract, and his Telegram decision.
+Inputs: The admin's request to freeze the first shippable slice and write the agent contract, and their Telegram decision.
 
 **What changed.**
 - New section "Slice 1: what ships first" after "How to read this plan": scope, the 59 tasks by area, what's after, what moved, decisions for the slice, and the definition of done. A Slice 1 milestone in the task graph.
 - **Splits along the slice line** (each remainder named "after Slice 1"): the kind renderers (`svg` and `code` after); tier (a) cards (the titled public card after); the workspace UI (search, diff, old-version preview, comments rail, agent activity, inward rungs, Move to Family, Ask for access and install after); Health (the ops-alert webhook after); the OAuth token service (authorization code, CIMD, DCR and manual clients after); the agent read path (notes, symbols, `render: "text"` and `part_find` after); the event log (`part_watch`, event SSE and webhooks after); deep links (`group`, `everyone` and `admin` after).
-- **Moved to where they're needed**: service identities from the device grant to family hub embedding; the `/_rt` `db.*` ops from shared data to `claude.use`; the runner's compose service from the deliverable to the runner; Ask for access from `/grant` to the post-slice workspace UI; `family` and `system` creation made explicit in `provision`; the MCP server no longer waits on comments, the event feed or agent sharing, which add their tools when they land; the §7 suite no longer waits on the Cloudflare adapter, whose §7 lines run with that adapter; the janitor and the retention test no longer wait on the Insights store or the log pipeline, which plug their jobs in.
+- **Moved to where they're needed**: service identities from the device grant to family-hub embedding; the `/_rt` `db.*` ops from shared data to `claude.use`; the runner's compose service from the deliverable to the runner; Ask for access from `/grant` to the post-slice workspace UI; `family` and `system` creation made explicit in `provision`; the MCP server no longer waits on comments, the event feed or agent sharing, which add their tools when they land; the §7 suite no longer waits on the Cloudflare adapter, whose §7 lines run with that adapter; the janitor and the retention test no longer wait on the Insights store or the log pipeline, which plug their jobs in.
 - **Telegram**: the open item is decided (§2, §6 P1, the real-device pass); the person-bound fallback is rejected.
 - **`docs/agent-contract.md`** written (the canonical agent-facing doc, served as `/skill.md`); §4b points to it and adds the registry-match test; §4 gains the Slice 1 op field table.
 - 120 tasks and 8 milestones, acyclic, no orphans. Critical path to Slice 1: 15 steps.
@@ -288,7 +288,7 @@ Inputs: a brief with two changes, under the admin's rules: tasks live only in be
   - the field-table entries and the contract note in §4.
 - **Grounding** (checked 2026-10-23): OSV's per-ecosystem `all.zip`, `ecosystems.txt` and `modified_id.csv`; the licences, which vary by source; `querybatch`, with no auth and currently no rate limits; the Syft + Grype and Trivy SBOM workflows. The dump sizes and the matching speed are unmeasured, hence the spike.
 - **Tasks are out of the markdown.**
-  - **Checked before removal.** Before §6a was removed, every row's acceptance test (121 tasks and 8 milestones) was checked against its bead. 122 matched word for word, and six differed only in writing "the admin" as "the admin". One, the Insights UI's "a non-admin gets 403", was missing: that bead's acceptance criteria said 404 (and its own notes said 403). The row's test was appended to that bead's acceptance criteria.
+  - **Checked before removal.** Before §6a was removed, every row's acceptance test (121 tasks and 8 milestones) was checked against its bead. 122 matched word for word, and six differed only in how they named the admin. One, the Insights UI's "a non-admin gets 403", was missing: that bead's acceptance criteria said 404 (and its own notes said 403). The row's test was appended to that bead's acceptance criteria.
   - **Rewritten:** §6a "Task graph" became "§6a Build order". "Slice 1: what ships first" is now by capability: the scope table without its Tasks column, the decisions, "after Slice 1" and the definition of done. "58 tasks", "What moved" and every task id are gone.
   - **Renamed:** every other task id and milestone id in the plan now names the feature or the phase. P0–P5 stay.
   - **Moved:** these change logs moved here, with task ids replaced by feature names. Decision 50.

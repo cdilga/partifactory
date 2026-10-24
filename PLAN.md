@@ -1,6 +1,6 @@
 # partifactory — plan
 
-> A home for the things the admin, his family and their agents make: pages, React tools,
+> A home for the things a household and its agents make: pages, React tools,
 > docs, decks, diagrams, plain text, and small apps with their own backends. Each one is a **part**, with its own host and a name that means something (`photofinder-part.example.com`), and that host is the link you post.
 > Every part runs sandboxed in an opaque origin with no cookies, every view is a grant, and every version is a manifest of hashes.
 > Any AI can find and use it, through MCP, an HTTPS JSON API, a CLI or a skill file, each with its own scoped, revocable identity.
@@ -11,8 +11,8 @@ by Lane Birmingham (birmo)**, MIT-licensed. It's a reimagining for a different s
 Any code or text adapted from it keeps Lane's MIT notice in `NOTICE` and gets a credit in the README.
 
 **Site config is private.** Everything specific to one deployment (IdP inventory, flow and stage names, group names, account facts, deploy target)
-lives in a separate private repo (`partifactory-site`). Secrets come from environment variables or files, whichever the host or CI supplies (§5b). This plan uses `example.com` as the **example deployment**: every hostname is config (`[domain]`), and example.com is public DNS anyway. Nothing else site-specific is here.
-People in the household are "a family member" here. the admin is named because he's the owner and the only admin.
+lives in a separate private repo (`partifactory-site`). Secrets come from environment variables or files, whichever the host or CI supplies (§5b). Every hostname is config (`[domain]`); examples use `<domain>` or `example.com`. Nothing site-specific is here, including names:
+the owner is "the admin" (the only admin), and everyone else in the household is "a family member".
 
 **Portable by design.** partifactory takes no hard dependency on the stack its first deployment happens to run (Cloudflare, Authentik, Gitea, TrueNAS, Telegram/Hermes, the family hub). Each of those is an **adapter behind config** with a generic, dependency-free default: a plain reverse proxy, generic OIDC, any CI or none, a folder for backups, a generic webhook.
 Where this plan describes Cloudflare or Authentik behaviour, it's describing the adapter. §5f has the table, and CI proves it by running the full e2e suite with none of them (the portability lane).
@@ -90,18 +90,18 @@ Adding anything to it takes a decision from the admin. Work that straddled the l
 - **Shipping extras**: nginx and Traefik example configs, arm64, SBOM, `cosign`, example CI workflows.
 - **Updates and advisories** (§3h): advisory matching against the OSV data, the chrome badge and the counts, `part_edit {update}` and the Update libraries button, auto-update; backend SBOMs come with P2a.
 - **Claude-compatibility extras** (P3): `claude.use` (`db`, `user`, `comments`, `artifact`), Tailwind and shadcn, viewer uploads, the agent inbox.
-- **family hub embedding and service identities**, family onboarding, phone editing (P4), and everything in P5.
+- **family-hub embedding and service identities**, family onboarding, phone editing (P4), and everything in P5.
 - **The bench** and the nginx/HAProxy comparison.
 
 **Definition of done.** Slice 1 is done when all of these hold:
-1. **`communal_pixel_editor` passes in CI on every PR** (on the e2e harness: Dex and Caddy with an internal-CA wildcard cert for `pf.test`. the admin's sign-in, step-up, share, roll back and freeze run on Chromium with the virtual authenticator, and the signed-out guest runs on a mobile WebKit profile): an agent connected by device code creates the board in one `part_create`, runs `part_check`, posts `https://pixel-part.<domain>/`; the admin does Share → Anyone with the link → Can contribute → Copy (4 interactions + 1 biometric); a signed-out browser paints and the admin's open tab shows it within 1 s; the admin rolls back one snapshot and freezes the link, and the guest's next write is refused.
+1. **`communal_pixel_editor` passes in CI on every PR** (on the e2e harness: Dex and Caddy with an internal-CA wildcard cert for `pf.test`. The admin's sign-in, step-up, share, roll back and freeze run on Chromium with the virtual authenticator, and the signed-out guest runs on a mobile WebKit profile): an agent connected by device code creates the board in one `part_create`, runs `part_check`, posts `https://pixel-part.<domain>/`; the admin does Share → Anyone with the link → Can contribute → Copy (4 interactions + 1 biometric); a signed-out browser paints and the admin's open tab shows it within 1 s; the admin rolls back one snapshot and freezes the link, and the guest's next write is refused.
 2. **The same flow passes on the device matrix** (decision 52): Playwright Chromium (mobile emulation), WebKit (mobile profile) and Firefox in CI, and Mobile Safari in the iOS Simulator, run locally on a Mac with its results attached as evidence.
 3. **Every acceptance test of the work in Slice 1 passes** (they live in its beads), including cross-surface conformance over MCP, HTTP, the CLI and `/skill.md` with device-code and personal tokens.
 4. **The §7 lines for what exists pass from outside**, the guest, agent and render-sidecar lines included. No agent token, scope or op can make a public link.
 5. **Export and import round-trip**: the nightly export imported into a fresh container brings back every part, version, data document and snapshot, and every cap minted before it is dead.
 6. **Every store that exists is capped** and passes its fill-past-cap case; the Health page shows each one, the backup layers and the disk budget; no `[unsafe]` key is set.
 7. **`/skill.md` is `docs/agent-contract.md`**, and the test that regenerates its op reference from the registry passes.
-8. **Not in the gate: real devices.** The by-hand run on the example deployment (a real agent, the admin on his phone, a signed-out phone on mobile data) and the Telegram passkey test sit in the human checks, which never block Slice 1 (decision 52). A failure there becomes a bug for the swarm.
+8. **Not in the gate: real devices.** The by-hand run on the example deployment (a real agent, the admin on their phone, a signed-out phone on mobile data) and the Telegram passkey test sit in the human checks, which never block Slice 1 (decision 52). A failure there becomes a bug for the swarm.
 
 ---
 
@@ -129,16 +129,16 @@ Tokens never expire, so you revoke them by hand. partifactory keeps "one token p
 
 What doesn't fit the admin's setup:
 
-| shartifacts assumes | the admin's reality | So partifactory… |
+| shartifacts assumes | The admin's reality | So partifactory… |
 | --- | --- | --- |
 | Trust comes from the **network** (LAN/tailnet IPs). Sign-in is optional | Everything comes in through a reverse proxy or tunnel (a **Cloudflare Tunnel** today), so every request comes from the proxy and IP trust means nothing | Trust comes from **identity**: an OIDC client of **any** provider (Authentik in the example deployment), a per-part policy engine and in-app invites (§3a) |
 | One owner password, "Who are you?" is a name picker | The IdP already knows the household | Real principals: people from the IdP, agents acting *on behalf of* one person, each with its own connection (§3b) |
 | Static all-powerful agent tokens, which can share publicly | Agents read untrusted web content and can be prompt-injected | **Scoped, consented, space-limited agent identities**. Agents act directly within their scopes, including sharing *inward* to people who already have accounts. They can never make public links or invite outsiders; for those they hand the person a deep link (§3b) |
 | Anyone on the LAN sees everything | Reachable from the internet, with per-person audiences | **Sharing is a security boundary.** Audiences per part and per space, with a live sentence saying who can see it (§3a) |
-| Opaque-origin `sandbox` iframes + postMessage bridge + hub-managed localStorage + HMAC app sessions, all on one host | `*.example.com` is covered by the free cert, and parts share a site with `auth`, `ha`, `git`, `hub` | **Each part gets its own hostname (`<name>-part.example.com`) *and* an opaque origin**. Every part document is served with CSP `sandbox` (no `allow-same-origin`). Part hosts never set or read cookies. The hostname scopes the CSP, the capability and the edge rules (§2) |
-| MCP is the only agent door | the admin wants any AI, on any surface, to be able to use it | **One operation registry** rendered as MCP, an HTTPS JSON API with OpenAPI, the `part` CLI and a downloadable skill file (§4b) |
+| Opaque-origin `sandbox` iframes + postMessage bridge + hub-managed localStorage + HMAC app sessions, all on one host | `*.example.com` is covered by the free cert, and parts share a site with the IdP, home automation, the forge and other household services | **Each part gets its own hostname (`<name>-part.example.com`) *and* an opaque origin**. Every part document is served with CSP `sandbox` (no `allow-same-origin`). Part hosts never set or read cookies. The hostname scopes the CSP, the capability and the edge rules (§2) |
+| MCP is the only agent door | The admin wants any AI, on any surface, to be able to use it | **One operation registry** rendered as MCP, an HTTPS JSON API with OpenAPI, the `part` CLI and a downloadable skill file (§4b) |
 | JSON-file-per-artifact holding every revision, a hand-written search index | — | **SQLite** (metadata, FTS5, comments, db docs, events, audit) + a **content-addressed blob store**, both under `/data` |
-| Full-stack apps with a Go runner sidecar + Landlock | the admin wants small apps with real backends ("Docker, whatever"), with guardrails | **Backends are in v1 (P2a), as containers.** A part is a page plus, optionally, containers it brings: a Dockerfile, a registry image or an uploaded image. Only a small runner sidecar holds the Docker/Podman Engine API, and it starts containers from one hardened template (§3f) |
+| Full-stack apps with a Go runner sidecar + Landlock | The admin wants small apps with real backends ("Docker, whatever"), with guardrails | **Backends are in v1 (P2a), as containers.** A part is a page plus, optionally, containers it brings: a Dockerfile, a registry image or an uploaded image. Only a small runner sidecar holds the Docker/Podman Engine API, and it starts containers from one hardened template (§3f) |
 | Every library vendored, offline | We want both: no third-party runtime loads, and no hand-maintained vendor list | **Mirror-on-build**: CDN URLs in a part are fetched once at build time, pinned by hash and served from our own blob host (§2) |
 
 ## 2. The core idea
@@ -460,7 +460,7 @@ The example deployment reuses its existing Authentik pattern (per-audience group
 | Personal (`~admin`, one per person) | first sign-in | only its owner | the owner, and agents the owner connected |
 | `family` | `provision` | `group:<household> → edit` | the household, and agents consented into it |
 | `system` | `provision` | everyone signed in → view | the admin (holds Jig, the design-system part) |
-| more | the admin (admin) | as set | as granted |
+| more | the admin | as set | as granted |
 
 - A part is in exactly one space. `part_create` without `space` uses the creator's personal space. An agent acting for a person defaults to that person's personal space.
 - **Effective access = max(part grants, space grants)**, inherited live. There's no per-part "restrict below the space" in v1.
@@ -479,7 +479,7 @@ Each part and each space has **grants** `{subject, role}`. Roles: `view` < `comm
 | Everyone signed in | `everyone-signed-in` | the admin | Shown with a live count ("15 people") so it's never vague |
 | **Public link** | `link:<id>` | **admin only**, once the part has a live version | No sign-in, unlisted, `noindex`, revocable, **no expiry by default**, open count and last opened. Two modes: **Can view** (default) and **Can contribute** (guests write the part's shared data, never its code; below). `comment` needs an explicit opt-in (spam and prompt-injection risk, §3c). Shown in amber as "the worst option" |
 
-A part's **owner** is the person it was made for (the person a creating agent acted for). the admin can change it. Owners and `manage` grantees share inward; nobody but the admin shares outward.
+A part's **owner** is the person it was made for (the person a creating agent acted for). The admin can change it. Owners and `manage` grantees share inward; nobody but the admin shares outward.
 There's no listed or indexable public mode. Effective access is the highest matching role. Every change goes to the `audit` table (who, actor, what, before → after).
 
 - *Why owners can share inward without the admin:* sharing a part with someone who already has an account can't leak beyond the household, and gating it made the common case slow.
@@ -517,7 +517,7 @@ A public link has two modes, chosen in the share sheet: **Can view** (the defaul
 - **Guest identity**: `POST /l/<token>/go` mints a cap with subject `link:<id>`, the `dw` claim and a random guest id `g`, shown as "Guest 4f2a". It lives where the cap lives (the wrapper's `sessionStorage`, the prelude's memory), so it's per tab, signed, and needs no cookie.
 - **Limits, on by default**: per-guest and per-IP rate limits on `/_rt` writes (60 a minute per guest, 300 per IP), and a shared-data cap per part (5 MiB) that returns `quota_exceeded` past it.
 - **Shared-data limits for everyone** (`window.storage`, §3c): a key is 1–512 bytes of UTF-8 with no control characters; a value is a string ≤ 256 KiB (the `data_docs` row cap); shared data ≤ 5 MiB per part; personal data ≤ 256 KiB per person per part (it's inlined as the `localStorage` seed). Writes: 60 a minute per guest and 300 per IP, 600 a minute per signed-in person per part. Reads: 600 requests a minute per viewer per part, where a `getMany` or a `list` page counts as one.
-- **Undo and control (the admin)**: switching a link to Can contribute takes a data snapshot first, so there's always a "before the guests" point. From the share sheet he can **roll back** to any data snapshot, **Reset data** (snapshotted first), or **Freeze** (back to Can view; it bumps the link's minter epoch, so open guest tabs lose write on their next request).
+- **Undo and control (the admin)**: switching a link to Can contribute takes a data snapshot first, so there's always a "before the guests" point. From the share sheet they can **roll back** to any data snapshot, **Reset data** (snapshotted first), or **Freeze** (back to Can view; it bumps the link's minter epoch, so open guest tabs lose write on their next request).
   Rolling back and resetting are also agent ops (`part_data` `snapshot_list`, `snapshot_restore`, `reset`, with `parts:write`): undoing vandalism stays inside the part, so it's an inward action. Freeze stays the admin's.
 - **Visibility**: guest writes are events (`data.changed`, actor `guest:<link>:<g>`), and the activity feed counts them ("14 guest edits today").
 - **Share-sheet copy**: "Anyone with the link can use it. Only you and people you add can change it."
@@ -541,7 +541,7 @@ The link handed out is always **partifactory's own** `parts.<domain>/i/<id>`. Op
    - A local account can later be **linked to an IdP identity** (sign in with OIDC once while signed in locally), so a household that adopts an IdP keeps everyone's history.
    - *Why in scope:* without it, a deployment with plain OIDC and no provisioner couldn't invite anyone, and invites would quietly depend on Authentik. `webauthn-rs` is already in the binary for step-up, so the added surface is registration, passkey sign-in and recovery for local accounts.
 2. **Add by email**: needs a provisioner (the IdP sends the email). Without one, the share sheet offers the invite link instead. partifactory doesn't send email.
-3. **Existing user**: pick and grant (an inward share, no the admin needed if it's the owner's own part). It shows up in their "Shared with me" and activity feed.
+3. **Existing user**: pick and grant (an inward share, the admin isn't needed if it's the owner's own part). It shows up in their "Shared with me" and activity feed.
 4. **New group**: "Make a group for this" creates a local `pf-<name>` group in partifactory's tables.
 
 **Adapter: the Authentik provisioner (the example deployment).** Authentik facts it's built on (checked 2026-10-23): invitations **can't set groups** (custom attributes become user attributes, groups come from the User Write stage), and there's **no use count**, only single-use or unlimited-until-expiry.
@@ -583,11 +583,11 @@ shared login stage at the admin's request, with the before-state in site config)
 **Share sheet**: one sheet, with the audience ladder as a segmented control, a live sentence saying exactly who can see the part now, "Move to Family", the public link and its mode (the admin), pending invites,
 the access-asks list (Add/Dismiss), agent-made grants labelled ("Hermes shared this with the Family group · Undo"), and copy buttons. It opens pre-filled from a deep link fragment (`#share=public`, `#share=invite`). It works on a phone (§4a.6).
 
-### Admin is the admin, and only the admin
+### One admin, and only one
 
 - **Pinned to the admin's immutable subject** in config (`[admin] subject = "oidc:<issuer>#<sub>"` or `"local:<id>"`), not a group. Being added to any IdP group (including the IdP's own admins) grants nothing here.
   A fresh deployment with no IdP bootstraps the admin with `partifactory admin bootstrap` on the host console, which prints a one-time link to register the admin's passkey as a local account.
-- **Step-up is native WebAuthn in partifactory**, not trust in IdP claims. the admin registers an admin passkey in partifactory itself (`webauthn-rs`).
+- **Step-up is native WebAuthn in partifactory**, not trust in IdP claims. The admin registers an admin passkey in partifactory itself (`webauthn-rs`).
   WebAuthn `rp.id` is `[domain] apex`, so one passkey serves the workspace and every part-host wrapper; assertions are accepted from the workspace origin and from every active, sandboxed part-host origin (the same set the chrome CORS admits). The share sheet verifies via `POST /api/chrome/v1/<part>/stepup`, which sets `sessions.stepup_at`.
   **Admin actions need a passkey assertion within 10 minutes**: public links (and switching one to Can contribute), `everyone-signed-in`, invites, add-by-email, groups, users, LAN allowlist entries for backends, agent consent into spaces the consenting person doesn't own, `unsandboxed`, renames.
   Household sharing never needs step-up. *Why one 10-minute window:* short enough that a stolen session can't administer, long enough for a batch of admin changes. (Round 1 said 30 in one table and 10 in another. It's 10.)
@@ -640,7 +640,7 @@ claude mcp add --transport http partifactory https://parts.example.com/mcp
 - **The consent sheet shows the redirect URI's host** (the spec says it MUST), with an extra warning for a localhost redirect from a CIMD client.
 - **CIMD fetches** use the mirror egress guard (§2): https only, private/loopback/link-local addresses refused after DNS resolution, ≤ 5 KiB, 3 s, no redirects.
 - **DCR** stays for Cursor and Gemini CLI, which don't do CIMD. It requires `application_type`, is rate-limited, and a registered client is inert until someone consents. Unconsented registrations expire after 1 hour.
-- **Manual clients**: the admin can register a client by hand in the admin area (client id + secret + redirect URI) for clients that need a pre-registered one, such as GPT Actions.
+- **Manual clients**: The admin can register a client by hand in the admin area (client id + secret + redirect URI) for clients that need a pre-registered one, such as GPT Actions.
 - **Tokens**: opaque random strings with prefixes (`pf_at_`, `pf_rt_`, `pf_pat_`), stored hashed, revocable instantly. Access tokens last 1 h. A refresh token is single use: each refresh returns a new access token and a new refresh token, and presenting a used one revokes the whole family.
   The refresh family lives until the connection's consented lifetime ends (30 days, 90 days by default, or 1 year, picked on the approval sheet); after that a person connects the agent again. A personal token lasts its own expiry (default 30 days, max 1 year) and never refreshes.
   - *Why not JWTs:* no key distribution or clock skew, and revocation is a single row. The cost is a DB read per API call, which is fine because `/api` and `/mcp` aren't the hot path.
@@ -705,7 +705,7 @@ Grants it made stay (they're the person's choices too), but the connection page 
 | --- | --- | --- |
 | Claude Code (Mac, other dev envs) | auth code + PKCE (CIMD, after Slice 1); in Slice 1 a personal token on MCP, or the `part` CLI with device code | `parts:*`, `data:*`, `comments:write` in `~admin` (+ `share:household` and `backends:deploy` if the admin ticks them) |
 | Hermes (VM, Telegram front door) | device code, **once per household member** | the same, in that person's space + `family`, with `share:household` |
-| family hub (`hub-api`) | device code once at setup, **service identity** | `parts:read`, `parts:write` in `family` |
+| Family hub (`hub-api`) | device code once at setup, **service identity** | `parts:read`, `parts:write` in `family` |
 | CI (provision/smoke tests), any CI system | a personal token in that CI's secret store (device code needs a person each time the family lapses) | `parts:read` + a test space |
 | A script or a function-calling app | personal agent token | as minted |
 
@@ -827,7 +827,7 @@ If live co-typing is wanted, `yrs` runs *inside one formatted-view session* (pre
 - **Later, additive**: embeddings for semantic search alongside FTS5 (P5). Nothing in v1 depends on them.
 
 **Versions and rollback, per part.**
-- Every version is immutable and labelled with who and when ("Hermes for the admin · 14:02", "the admin · yesterday"), plus the agent's edit message or an auto summary ("app.tsx +14 −3").
+- Every version is immutable and labelled with who and when ("Hermes for the admin · 14:02", "The admin · yesterday"), plus the agent's edit message or an auto summary ("app.tsx +14 −3").
 - **History**: the full ledger. **Diff** between any two versions: a file list with `+/−` counts and unified (or side-by-side) diffs; binary files show size changes and before/after thumbnails for images.
 - **Preview any old version**: the frame reloads with a cap pinned to that version (`v` claim). People with `view` can preview versions that were once live; drafts and never-live versions need `edit`.
 - **Restore** = a new version whose manifest equals the old one. It's non-destructive, shows "Restored as REV 13 · Undo", and goes through the build like any other version.
@@ -981,7 +981,7 @@ Parts are built once and then left alone, so something has to notice when a libr
   - the optional ops-alert webhook, only for a critical advisory on a backend or on a part with a contribute link (§4).
 - **Fix paths:**
   - **An agent:** `part_edit {rebuild: true, update: "patch" | "minor" | "latest"}`. It re-resolves the recorded libraries (and base-image tags) within that range and builds a new version, which goes live under the part's `live` setting (`after_check` runs `part_check` first, §3d).
-  - **the admin or an editor:** an **Update libraries** button in the part's chrome does the same in one tap (§4a.6, §4a.7). Undo is the normal restore.
+  - **The admin or an editor:** an **Update libraries** button in the part's chrome does the same in one tap (§4a.6, §4a.7). Undo is the normal restore.
   - **Ignore, with a reason:** by a person, or by an agent with `parts:write`. It's audited.
 - **Auto-update.** Site config `[advisories] auto_update = "never" | "patch"`, overridable per part.
   - **Provisional, pending the admin:** frontends default to `never`. Backends default to `patch`, only for an advisory with a known fix (`fixed_in`), through the `after_check` gate, with automatic rollback if the check fails (code only, best effort, like every backend rollback, §3f).
@@ -1284,7 +1284,7 @@ Numbers are tabular everywhere. Relative times ("3 min ago") carry an absolute `
 
 ### 4a.6 Screens
 
-Shared chrome: a **48 px top bar**: mark + wordmark (home), search (`/`), theme toggle, avatar menu (connected agents, sign out, sign out everywhere, admin for the admin).
+Shared chrome: a **48 px top bar**: mark + wordmark (home), search (`/`), theme toggle, avatar menu (connected agents, sign out, sign out everywhere, the admin page, for the admin).
 Keyboard: `/` search, `g p` parts. There's no `n`: agents make parts. "Paste HTML…" lives in the menu.
 
 **Gallery (`/`, "Parts")**
@@ -2802,7 +2802,7 @@ CREATE INDEX janitor_runs_store ON janitor_runs(store, at);
 
 ## 5f. Portability: what's core and what's an adapter
 
-the admin doesn't want partifactory to depend on the particular stack he runs today. So every coupling to it is an **adapter behind config**, and each concern has a **generic default with no vendor in it**.
+The admin doesn't want partifactory to depend on the particular stack it runs on today. So every coupling to it is an **adapter behind config**, and each concern has a **generic default with no vendor in it**.
 The core never imports an adapter's types, adapters are chosen in `site.toml`, and a deployment that configures none of them is a complete product.
 
 | Concern | Core contract | Default (no vendor) | Adapters | What breaks if absent |
@@ -2821,7 +2821,7 @@ The core never imports an adapter's types, adapters are chosen in `site.toml`, a
 | **Ops alerts** | One optional webhook (`[alerts] webhook_url`), off by default; the Health page always shows the same conditions | None: look at Health | ntfy, Hermes or anything else that accepts a JSON POST | You find out from the Health page instead |
 | **Maintenance page + uptime** | Static page in `deploy/proxy/`; `/healthz` | The proxy serves the page; any external probe | Cloudflare Worker fallback and health checks | A raw proxy error during an outage |
 | **Embedding** | `frame-ancestors` from `[embed] frame_ancestors`; `pf-embed.js` | Empty: only the part's own host and the workspace may frame it | The family hub is one entry in the list | Nothing; other sites just can't frame parts |
-| **Hostnames** | `[domain] apex, workspace_host, part_suffix`, used everywhere | Required config, no default | `example.com` is the example deployment | — |
+| **Hostnames** | `[domain] apex, workspace_host, part_suffix`, used everywhere | Required config, no default | The example deployment's domain lives in site config | — |
 | **Device-connect origin** | Optional country + network from proxy headers or a local GeoIP file | Omitted, shown as "origin unknown" | Cloudflare country header | The "different network" phishing banner can't fire; the request-age banner still does |
 | **Backends** | The runner's fixed API; containers from one template; the Docker Engine API (§3f) | Docker or Podman (its Docker-compatible API) on the same host | gVisor (`runsc`) as an optional runtime | With no runner, backend parts fail with `backends_unavailable`; frontends are unaffected |
 | **Advisory data** | `AdvisorySource` trait: OSV-format records for the ecosystems in use, matched against `build_deps` and stored SBOMs (§3h) | The OSV bulk dumps, downloaded daily, synced incrementally and matched locally | The OSV API (`querybatch`; sends package names and versions out) | With `source = "none"`: no advisories, and a warning on Health and in `doctor`. A stale DB turns Health amber; builds never block |
@@ -2930,7 +2930,7 @@ rate limits, quotas, health page with optional ops alerts, backups (consistent D
 the Insights store with request ids, traces and the log pipeline (§5g), the janitor, the disk budget and the retention test (§5h), the no-content-in-logs fuzz test,
 the **portability lane** (full e2e with Dex, Caddy and local exports, §5f), and the **nginx/HAProxy comparison on the real content path**.
 The simulated device matrix (decision 52). The real-device pass, including the 5-minute Telegram in-app-browser passkey test (§2), is a human check that blocks nothing.
-*Done when:* the admin opens a part on his phone at its own host link via SSO; the portability lane is green; a public link opens from mobile data with no login and unfurls as a card; the security checklist (§7) passes from outside; and the drill restores everything on a second OCI host in < 15 min.
+*Done when:* The admin opens a part on their phone at its own host link via SSO; the portability lane is green; a public link opens from mobile data with no login and unfurls as a card; the security checklist (§7) passes from outside; and the drill restores everything on a second OCI host in < 15 min.
 
 **P2 Agents + the household loop.** OAuth AS (device grant first, then auth code + PKCE + CIMD/DCR + manual clients), personal agent tokens, one connection per (agent, person) and service identities,
 MCP + discovery + the error contract + cross-surface conformance, `part_edit` with rebase, block ids, leases, notes, `part_get` full content and `render: "text"`, comments with provenance,
@@ -2941,9 +2941,9 @@ and Claude Code connects with one passkey tap + Allow and edits a week-old part 
 and the named e2e test **`communal_pixel_editor`** passes in CI:
 1. an agent is asked to make a communal pixel editor;
 2. it creates it in one call, `part_check`s it, and posts `pixel-part.<domain>`;
-3. the admin: Share → Anyone with the link → Can contribute → Copy;
+3. The admin: Share → Anyone with the link → Can contribute → Copy;
 4. a signed-out phone paints, and the admin's screen updates live;
-5. the admin rolls back one snapshot and freezes it.
+5. The admin rolls back one snapshot and freezes it.
 
 **P2a Backends.** The runner sidecar (Docker Engine API; Docker or Podman) with the hardened template and a network per part (egress on; LAN, host and other parts blocked), the compose subset, server builds with rootless BuildKit, registry and uploaded images, a container set per live version gated by its health check,
 scale to zero or always on, routing under the cap with the signed identity header (WebSocket and SSE), per-part volumes in exports, write-only secrets, the LAN allowlist (people only), `backends:deploy`, quotas, backend observability in Insights, runner retention, backend SBOMs and base-image digest checks (§3h), and the §7 Backends suite.
@@ -2951,16 +2951,16 @@ scale to zero or always on, routing under the cap with the signed identity heade
 
 **P2b Invites.** First the **default**: partifactory invite tokens (`/i/<id>`, counted uses), passkey invite links (single and "up to N") that create **local passkey accounts**, passkey sign-in for local accounts, "new passkey link" recovery, local `pf-*` groups, linking a local account to an IdP identity, pending-invite cleanup.
 Then the **Authentik provisioner**, starting with its permission gate (§3a), which decides how much of it ships: the `partifactory-invite` flow, add-by-email, IdP recovery links and IdP-side `pf-*` groups.
-*Done when:* the admin mints an invite link from the share sheet with no provisioner configured, a new person creates a passkey and lands on the part, and removing them locks them out at once;
+*Done when:* The admin mints an invite link from the share sheet with no provisioner configured, a new person creates a passkey and lands on the part, and removing them locks them out at once;
 and, with the Authentik provisioner on, an invited email address enrols the same way and removing them in the IdP locks them out within a minute.
 
 **P3 Claude compatibility.** `claude.use` (`db`, `user`, `comments`, `artifact` incl. self-publish; shared `window.storage` arrived in P2), Tailwind + shadcn (mechanism chosen on evidence: prebuilt utility CSS, the Tailwind v4 browser build mirrored as a shared blob, or build-time class extraction),
 viewer uploads (assets), and the agent inbox with stewards. The spec is shartifacts' compatibility matrix (credited).
 *Done when:* a page copied from a claude.ai artifact runs unchanged, including state persistence and self-editing, and a viewer's photo upload reaches the agent's inbox.
 
-**P4 Family + family hub + phone.** Family onboarding, embedding via `[embed] frame_ancestors` (the family hub, with its service identity), the Hermes `hub-family` profile, slides + Mermaid, the optional OTLP export adapter (screenshot thumbnails and preview cards moved right after Slice 1, decision 53),
+**P4 Family + hub + phone.** Family onboarding, embedding via `[embed] frame_ancestors` (the family hub, with its service identity), the Hermes `hub-family` profile, slides + Mermaid, the optional OTLP export adapter (screenshot thumbnails and preview cards moved right after Slice 1, decision 53),
 and tap-to-edit text and point-and-comment on phones. (Notifications for people were cut in round 2b, and approval queues in round 2c, §4.)
-*Done when:* a family member opens a family hub-embedded part, fixes a typo by tapping it on the phone, long-presses to ask Hermes for a change, and Hermes, watching the event log, tells them in its own chat when the fix lands.
+*Done when:* a family member opens a hub-embedded part, fixes a typo by tapping it on the phone, long-presses to ask Hermes for a change, and Hermes, watching the event log, tells them in its own chat when the fix lands.
 
 **P5 Later, only if needed.** WASM component backends as an optional alternative to containers, through the same grant model and routing; optional S3-compatible upload of scheduled exports; semantic search alongside FTS5; built-in ACME DNS-01 for hosts with no proxy.
 *Done when* (per item): WASM backends need an ADR naming a part that containers serve badly, and ship with the §7 Backends lines green; the S3 upload restores via `import --from s3://…` in the drill; semantic search beats FTS5 alone on a labelled query set; built-in ACME serves the portability lane with no proxy in front.
@@ -2995,7 +2995,7 @@ This section is the order the pieces depend on each other, and why. Read each ar
 - **P2a Backends:** the runner (after the deliverable) → backend builds → lifecycle → routing (after Can-contribute links and request ids) and data, secrets and permissions → the backend security suite and `communal_pixel_editor_backend`. Backend SBOMs and base-image checks come with the runner. The runner lane is shorter than the routing chain, so it can start as soon as the deliverable lands, beside the backend Insights pages.
 - **P2b Invites:** native invites and local accounts → the Authentik provisioner gate → Authentik invites → Authentik extras. Cleanup lists follow native invites.
 - **P3:** `claude.use` (after shared data, comments and `/grant`), Tailwind and shadcn (after `tsx`), viewer uploads, the agent inbox (after comments and the event log).
-- **P4:** family onboarding (after native invites), family hub embedding and service identities, slides and Mermaid (after block ids), phone editing, OTLP. **P5:** each item on its own, after what it extends.
+- **P4:** family onboarding (after native invites), family-hub embedding and service identities, slides and Mermaid (after block ids), phone editing, OTLP. **P5:** each item on its own, after what it extends.
 
 ## 7. Security checklist (run from outside the network, in CI against staging)
 
@@ -3075,13 +3075,13 @@ Every line runs against the example deployment's staging (Cloudflare + Authentik
 ## 8. Decisions
 
 **2026-10-22**
-1. **Hostnames**: `parts.<domain>` + `<name>-part.<domain>` via a `*.<domain>` wildcard, with semantic names. The domain and the part suffix are config; `example.com` is the example deployment (round 2b).
+1. **Hostnames**: `parts.<domain>` + `<name>-part.<domain>` via a `*.<domain>` wildcard, with semantic names. The domain and the part suffix are config, kept in site config (round 2b).
 2. **Stack**: Rust. Bend 2 considered and set aside.
 3. **Host**: any OCI host with compose; TrueNAS in the example deployment. The app knows nothing about TrueNAS/ZFS.
 4. **Code reuse**: fresh, with shartifacts as the reference spec, credited.
 5. **Docker**: for deploying partifactory only. Parts need no builds. *(Superseded in round 2c: parts may bring containers, and the server builds them; decisions 28 and 29.)*
 6. **Tunnel**: the example deployment uses its own Cloudflare tunnel `partifactory` (created 2026-10-22, routes configured, no DNS records yet). Since round 2b the tunnel is one ingress adapter; the default is any reverse proxy (decision 22).
-7. **Identity**: OIDC, swappable; Authentik in the example deployment. In-app grants and invites. Admin pinned to the admin with native passkey step-up. Round 2b makes generic OIDC the baseline and Authentik an optional extra (decision 23).
+7. **Identity**: OIDC, swappable; Authentik in the example deployment. In-app grants and invites. Admin pinned to one subject with native passkey step-up. Round 2b makes generic OIDC the baseline and Authentik an optional extra (decision 23).
 8. **Agents**: OAuth 2.1 per the MCP spec, with partifactory as a federating authorization server. Per-agent consented, scoped, audience-bound tokens.
 9. **Source of truth**: private Gitea repo + passive public GitHub mirror. Site config in a separate private repo. Round 2b: secrets come from env vars or files, from any CI or none; Gitea Actions is one example workflow (decision 22).
 
@@ -3114,7 +3114,7 @@ Every line runs against the example deployment's staging (Cloudflare + Authentik
 28. **Backends in v1, as containers** (P2a): a part is a page plus, optionally, containers from a Dockerfile, a registry image or an uploaded image, described by a small compose subset. One container set per live version, health-gated, scale to zero by default. Routed under the cap at `/c/<cap>/api/*` with a signed identity header. Only a runner sidecar holds the Docker Engine API (Docker or Podman), and it starts containers from one hardened template on a per-part network: egress on, LAN, host and other parts blocked.
 29. **The server builds by default**: frontends in the binary, backends with rootless BuildKit in the runner. Prebuilt files or images are optional. The build method is recorded on every build.
 30. **`text` is a first-class kind**: shown as is, with line-anchored comments and edits.
-31. **Public links can be "Can contribute"**: guests are web consumers only. They write shared data and call the backend as `role: guest`; they never change code, files or versions, and have no tokens. the admin can roll back, reset or freeze. The communal pixel editor is the named acceptance test for P2, and its backend variant for P2a.
+31. **Public links can be "Can contribute"**: guests are web consumers only. They write shared data and call the backend as `role: guest`; they never change code, files or versions, and have no tokens. The admin can roll back, reset or freeze. The communal pixel editor is the named acceptance test for P2, and its backend variant for P2a.
 32. **Insights**: admin-only analytics and observability in the workspace, in a separate `insights.db`, with no content in logs or analytics, request ids everywhere, tail-sampled traces, a Debug tab per part, a log viewer, Prometheus metrics and an optional OTLP adapter.
 33. **Disk safety and safe defaults**: every growing store has a cap, a retention rule, rotation, an export path and a metric, on by default and run by one janitor. A global disk budget refuses new writes at 95 % but never reads or deletes. Every protection is on by default, and turning one off takes an explicit `[unsafe]` key that shows on Health and in `doctor`.
 34. **No approval workflow.** Agents act directly within their consented scopes: create, edit, check, share inward, deploy backends, set secrets. Secrets are write-only and per part. People-only actions (public links, invites, groups, LAN allowlist entries, admin) happen in the UI, reached from a `part_link_for` deep link the agent hands over. "Ask for access" stays, as a person-to-person list in the share sheet. Device-code connect stays: it's sign-in.
