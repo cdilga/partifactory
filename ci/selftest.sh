@@ -47,11 +47,12 @@ if git -C "$repo" push -q "$bare" HEAD:refs/heads/main 2>/dev/null; then
 fi
 echo "selftest: gitleaks ok (CI scan and pre-push hook both refuse the planted token)"
 
-# 3. Disk hygiene on a fixture target/.
+# 3. Disk hygiene on a fixture target/. Random bytes, because compressing filesystems (ZFS on
+# the CI runners) store zeros in almost no space and du would see nothing to clean.
 t="$tmp/target"
 mkdir -p "$t/debug/deps" "$t/debug/incremental/old-abc" "$t/debug/incremental/new-def" "$t/e2e-logs"
-dd if=/dev/zero of="$t/debug/deps/libold.rlib" bs=1024 count=3072 2>/dev/null
-dd if=/dev/zero of="$t/debug/incremental/old-abc/x" bs=1024 count=1024 2>/dev/null
+head -c 3145728 /dev/urandom > "$t/debug/deps/libold.rlib"
+head -c 1048576 /dev/urandom > "$t/debug/incremental/old-abc/x"
 echo new > "$t/debug/deps/libnew.rlib"
 echo new > "$t/debug/incremental/new-def/x"
 touch -t 202001010000 "$t/debug/deps/libold.rlib" "$t/debug/incremental/old-abc"
