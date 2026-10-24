@@ -1,0 +1,10 @@
+[package]
+name = "pf-oauth"
+description = "The agent token service: device grant, personal agent tokens, refresh and revocation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true

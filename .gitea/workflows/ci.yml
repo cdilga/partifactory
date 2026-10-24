@@ -1,0 +1,80 @@
+# The repo's own CI. Every job is one ci/*.sh script, so a laptop runs exactly what CI runs.
+# Runners are chosen by the generic labels `rust` and `browser`; the forge is incidental.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "advisories or renovate (blank runs the PR checks)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "17 3 * * *" # nightly advisories on main
+    - cron: "41 4 * * 1" # weekly Renovate
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  checks:
+    if: github.event_name != 'schedule' && (github.event_name != 'workflow_dispatch' || inputs.job == '')
+    runs-on: rust
+    strategy:
+      fail-fast: false
+      matrix:
+        script: [fmt, clippy, test, deny, audit, gitleaks, check-boundaries, env-docs, selftest]
+    name: ${{ matrix.script }}
+    steps:
+      - name: checkout (full history, for gitleaks)
+        run: |
+          git init -q .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git -c http.extraHeader="Authorization: token ${{ github.token }}" fetch -q origin "+${GITHUB_SHA}:refs/remotes/origin/ci"
+          git -c http.extraHeader="Authorization: token ${{ github.token }}" fetch -q origin
+          git checkout -q "${GITHUB_SHA}"
+      - name: tools
+        run: ci/install-tools.sh "${{ matrix.script }}"
+      - name: run
+        env:
+          NEXTEST_PROFILE: ci
+        run: ci/${{ matrix.script }}.sh
+      - name: clean
+        if: always()
+        run: PF_CLEAN_NO_DOCKER=1 scripts/clean-build.sh --apply || true
+
+  advisories:
+    if: (github.event_name == 'schedule' && github.event.schedule == '17 3 * * *') || (github.event_name == 'workflow_dispatch' && inputs.job == 'advisories')
+    runs-on: rust
+    steps:
+      - name: checkout
+        run: |
+          git init -q .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git -c http.extraHeader="Authorization: token ${{ github.token }}" fetch -q --depth=1 origin "${GITHUB_SHA}"
+          git checkout -q FETCH_HEAD
+      - run: ci/install-tools.sh advisories
+      - run: ci/advisories.sh
+      - if: always()
+        run: PF_CLEAN_NO_DOCKER=1 scripts/clean-build.sh --apply || true
+
+  renovate:
+    # Inert until the admin adds the RENOVATE_TOKEN repo secret (a human check).
+    if: (github.event_name == 'schedule' && github.event.schedule == '41 4 * * 1') || (github.event_name == 'workflow_dispatch' && inputs.job == 'renovate')
+    runs-on: rust
+    container:
+      image: renovate/renovate:41@sha256:e998e1218fe572e23278d8808186a310784f7cb2ac8055307183ffc51d3a59e5
+    steps:
+      - name: renovate
+        env:
+          RENOVATE_TOKEN: ${{ secrets.RENOVATE_TOKEN }}
+          RENOVATE_PLATFORM: gitea
+          RENOVATE_ENDPOINT: ${{ github.server_url }}/api/v1
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+        run: |
+          if [ -z "$RENOVATE_TOKEN" ]; then echo "renovate: RENOVATE_TOKEN not set; skipping"; exit 0; fi
+          renovate

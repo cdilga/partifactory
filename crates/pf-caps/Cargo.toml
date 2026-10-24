@@ -1,0 +1,10 @@
+[package]
+name = "pf-caps"
+description = "Capability tokens: compact HMAC-signed path caps with versioned keys and boot epochs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "pf-cli"
+description = "The part CLI: the op registry over HTTPS, with device-code sign-in"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+clap.workspace = true
+
+[lints]
+workspace = true

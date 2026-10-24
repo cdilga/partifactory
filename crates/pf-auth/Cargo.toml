@@ -1,0 +1,10 @@
+[package]
+name = "pf-auth"
+description = "People sign-in: generic OIDC, sessions, the claims directory and admin step-up"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true

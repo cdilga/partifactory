@@ -1,0 +1,10 @@
+[package]
+name = "pf-build"
+description = "The build child protocol and the Slice 1 kinds (`html`, `markdown`, `text`, `files`), mirror-on-build"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true

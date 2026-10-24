@@ -1,0 +1,29 @@
+[package]
+name = "partifactory"
+description = "partifactory: one static binary; `part` is its CLI alias"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "partifactory"
+path = "src/main.rs"
+
+[features]
+# Dev-only subcommands and fixtures (`partifactory dev …`). Never in release builds.
+dev = []
+
+[dependencies]
+clap.workspace = true
+pf-cli = { path = "../pf-cli" }
+pf-config = { path = "../pf-config" }
+pf-obs = { path = "../pf-obs" }
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

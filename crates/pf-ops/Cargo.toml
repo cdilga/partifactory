@@ -1,0 +1,10 @@
+[package]
+name = "pf-ops"
+description = "The operation registry: one typed definition per op, shared by every surface (§4b)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true

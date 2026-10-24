@@ -1,0 +1,10 @@
+[package]
+name = "pf-provision"
+description = "`partifactory provision`: idempotent create-if-missing setup from `site"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true

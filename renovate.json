@@ -1,0 +1,48 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":disableDependencyDashboard"],
+  "platform": "gitea",
+  "enabledManagers": ["cargo", "dockerfile", "docker-compose", "github-actions", "custom.regex"],
+  "rangeStrategy": "pin",
+  "lockFileMaintenance": { "enabled": true, "schedule": ["before 6am on monday"] },
+  "vulnerabilityAlerts": { "enabled": true, "labels": ["security"] },
+  "packageRules": [
+    {
+      "description": "Dockerfile and compose base images are pinned by digest.",
+      "matchManagers": ["dockerfile", "docker-compose"],
+      "pinDigests": true
+    },
+    {
+      "description": "Workflow actions are pinned by digest.",
+      "matchManagers": ["github-actions"],
+      "pinDigests": true
+    },
+    {
+      "description": "oxc and rolldown are 0.x Rust APIs, pinned exactly and vendored: never automerged, always reviewed with the golden compile corpus.",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["/^oxc/", "/^rolldown/"],
+      "rangeStrategy": "pin",
+      "automerge": false,
+      "groupName": "oxc and rolldown",
+      "labels": ["compiler-upgrade"]
+    },
+    {
+      "description": "Patch updates of ordinary crates may automerge once CI is green.",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["patch"],
+      "matchPackageNames": ["!/^oxc/", "!/^rolldown/"],
+      "automerge": true
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "The Rust toolchain pin.",
+      "managerFilePatterns": ["/^rust-toolchain\\.toml$/"],
+      "matchStrings": ["channel = \"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""],
+      "depNameTemplate": "rust",
+      "datasourceTemplate": "docker",
+      "packageNameTemplate": "rust"
+    }
+  ]
+}

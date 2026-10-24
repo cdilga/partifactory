@@ -1,0 +1,17 @@
+# gitleaks config: the default rules plus partifactory's own token shapes.
+# Runs in CI (ci/gitleaks.sh) and before every push (scripts/install-hooks.sh).
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "partifactory-token"
+description = "partifactory access, refresh or personal agent token"
+regex = '''\bpf_(at|rt|pat)_[A-Za-z0-9_-]{20,}'''
+keywords = ["pf_at_", "pf_rt_", "pf_pat_"]
+
+# The only allowed token-shaped values are the documented test fixtures: the literal word
+# TESTFIXTURE followed by zeros, e.g. pf_pat_TESTFIXTURE0000000000000000.
+[[rules.allowlists]]
+regexTarget = "match"
+regexes = ['''\bpf_(at|rt|pat)_TESTFIXTURE0+\b''']

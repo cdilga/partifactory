@@ -1,0 +1,10 @@
+[package]
+name = "pf-api"
+description = "The HTTPS JSON API adapter over the op registry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true

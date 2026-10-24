@@ -1,0 +1,10 @@
+[package]
+name = "pf-blobs"
+description = "The content-addressed blob store (`BlobStore`), a local directory under `/data/blobs` in v1"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true

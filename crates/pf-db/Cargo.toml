@@ -1,0 +1,10 @@
+[package]
+name = "pf-db"
+description = "SQLite storage: the schema, migrations, the read pool and the single writer task (§5e)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true

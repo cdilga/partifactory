@@ -1,0 +1,10 @@
+[package]
+name = "pf-runner"
+description = "The backend runner sidecar (P2a)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true

@@ -1,0 +1,10 @@
+[package]
+name = "pf-backup"
+description = "Export and import: consistent DB copies, the nightly export, import with the boot-epoch bump"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true

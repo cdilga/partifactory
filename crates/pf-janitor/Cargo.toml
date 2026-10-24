@@ -1,0 +1,10 @@
+[package]
+name = "pf-janitor"
+description = "The janitor: every prune, GC, rotation and checkpoint job, on a schedule (§5h)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true

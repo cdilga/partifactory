@@ -1,0 +1,10 @@
+[package]
+name = "pf-serve"
+description = "The HTTP listeners: workspace, content (part hosts, `/_rt`) and ops"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true

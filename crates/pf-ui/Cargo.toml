@@ -1,0 +1,10 @@
+[package]
+name = "pf-ui"
+description = "The workspace UI (Stockroom): the shell, the trusted wrapper and the share sheet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true

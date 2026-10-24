@@ -1,0 +1,10 @@
+[package]
+name = "pf-render"
+description = "The render sidecar client for `part_check`: screenshots, actions and the after_check gate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
