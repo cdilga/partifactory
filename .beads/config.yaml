@@ -2,3 +2,4 @@
 # issue_prefix: partifactory
 # default_priority: 2
 # default_type: task
+actor: admin
