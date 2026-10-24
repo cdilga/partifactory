@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>partifactory: parts, made by you and your agents</title>
+<meta name="description" content="A self-hosted home for the pages, tools, docs and small apps a household and its agents make. Every part gets its own sandboxed host and a link that means something.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light;
+    --paper: #f4f3ee; --raised: #fbfbf8; --sunk: #e9e8e1; --rule: #d6d4ca; --rule-strong: #8e8b80;
+    --ink: #191b1d; --ink-2: #3a3d41; --ink-3: #5c5f64;
+    --tag: #ecdcae; --on-tag: #3b3015;
+    --signal: #1c6a47; --on-signal: #fff; --signal-text: #1c6a47; --signal-wash: #dbeae1; --on-wash: #14503a;
+    --public: #f0b43c; --on-public: #1f1606; --public-text: #8a5200; --public-wash: #fbecc8;
+    --agent: #1f5d8c; --agent-wash: #dde8f2;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --label: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --paper: #121416; --raised: #1a1d20; --sunk: #0d0f10; --rule: #2b2f34; --rule-strong: #6b7078;
+      --ink: #ecebe6; --ink-2: #c8c7c0; --ink-3: #9b9da1;
+      --tag: #3e3722; --on-tag: #efe0b4;
+      --signal: #62c495; --on-signal: #0b1d14; --signal-text: #6fd0a1; --signal-wash: #173327; --on-wash: #a9e6c8;
+      --public: #eab040; --public-text: #f2c25e; --public-wash: #3a2e12;
+      --agent: #86bde6; --agent-wash: #16293a;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--paper); }
+  body { margin: 0; overflow-x: hidden; color: var(--ink); font: 400 16px/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
+  a { color: var(--signal-text); text-underline-offset: 3px; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+  code, .mono { font-family: var(--mono); font-size: 0.88em; font-variant-numeric: tabular-nums; }
+  code { background: var(--sunk); padding: 1px 5px; border-radius: 4px; }
+  .label { font: 600 11.5px/14px var(--label); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+
+  header.top { border-bottom: 1px solid var(--rule); }
+  header.top .wrap { display: flex; align-items: center; gap: 12px; height: 60px; }
+  .mark { width: 26px; height: 26px; color: var(--ink); }
+  .word { font: 600 21px/1 var(--label); letter-spacing: -0.01em; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 8px; border-radius: 999px;
+    font: 600 11.5px/14px var(--label); letter-spacing: .06em; text-transform: uppercase; }
+  .chip.public { background: var(--public); color: var(--on-public); margin-left: auto; }
+  .chip svg { width: 12px; height: 12px; }
+
+  .hero { padding: 72px 20px 40px; display: grid; grid-template-columns: 1.25fr 1fr; gap: 48px; align-items: center; }
+  .hero h1 { font: 600 clamp(36px, 6vw, 58px)/1.02 var(--label); letter-spacing: -0.02em; margin: 14px 0 18px; }
+  .hero p.lede { font-size: 19px; line-height: 1.55; color: var(--ink-2); margin: 0 0 26px; max-width: 34em; }
+  .tagrow { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tag { position: relative; background: var(--tag); color: var(--on-tag); font: 500 12.5px/16px var(--mono);
+    padding: 5px 10px 5px 12px; clip-path: polygon(6px 0, 100% 0, 100% 100%, 0 100%, 0 6px); }
+  .frame { position: relative; background: var(--raised); border: 1px solid var(--rule); padding: 22px; }
+  .frame::before, .frame::after, .frame > .t1, .frame > .t2 { content: ""; position: absolute; width: 12px; height: 12px; border-color: var(--rule-strong); border-style: solid; }
+  .frame::before { left: -7px; top: -7px; border-width: 1px 0 0 1px; }
+  .frame::after { right: -7px; bottom: -7px; border-width: 0 1px 1px 0; }
+  .frame > .t1 { right: -7px; top: -7px; border-width: 1px 1px 0 0; }
+  .frame > .t2 { left: -7px; bottom: -7px; border-width: 0 0 1px 1px; }
+  .url { font: 500 15px/1.3 var(--mono); padding: 10px 12px; background: var(--sunk); border-radius: 6px; overflow-wrap: anywhere; }
+  .url b { color: var(--signal-text); font-weight: 500; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin-top: 16px; font-size: 14px; }
+  .kv dt { font: 600 11.5px/22px var(--label); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+  .kv dd { margin: 0; color: var(--ink-2); }
+
+  section { padding: 56px 0; border-top: 1px solid var(--rule); }
+  section h2 { font: 600 30px/1.15 var(--label); letter-spacing: -0.01em; margin: 6px 0 14px; }
+  section > .wrap > p.intro { color: var(--ink-2); font-size: 17px; max-width: 42em; margin: 0 0 28px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .card { background: var(--raised); border: 1px solid var(--rule); padding: 18px 18px 16px;
+    clip-path: polygon(10px 0, 100% 0, 100% 100%, 0 100%, 0 10px); }
+  .card h3 { font: 600 17px/1.3 var(--sans); margin: 8px 0 6px; }
+  .card p { margin: 0; color: var(--ink-2); font-size: 15px; }
+  .bin { font: 500 11.5px/14px var(--mono); color: var(--ink-3); }
+
+  .flow { width: 100%; height: auto; display: block; }
+  .flow text { font-family: var(--mono); font-size: 12px; fill: var(--ink-2); }
+  .flow .box { fill: var(--raised); stroke: var(--rule-strong); }
+  .flow .sand { fill: var(--signal-wash); stroke: var(--signal); stroke-dasharray: 4 3; }
+  .flow .arrow { stroke: var(--ink-3); fill: none; marker-end: url(#ah); }
+  .flow .head { font-family: var(--label); font-weight: 600; font-size: 13px; fill: var(--ink); letter-spacing: .02em; }
+
+  pre { background: var(--sunk); border: 1px solid var(--rule); padding: 16px; overflow: auto; font: 13px/1.6 var(--mono); margin: 0; }
+  pre .c { color: var(--ink-3); }
+  .agent { color: var(--agent); }
+  .who { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .who .card { border-left: 3px solid var(--signal); }
+  .who .card.ag { border-left-color: var(--agent); }
+  ul.tight { margin: 8px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 15px; }
+  ul.tight li { margin: 4px 0; }
+
+  footer { border-top: 1px solid var(--rule); padding: 32px 0 48px; color: var(--ink-3); font-size: 14px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 28px; justify-content: space-between; }
+
+  @media (max-width: 820px) {
+    .hero { grid-template-columns: 1fr; padding-top: 44px; gap: 32px; }
+    .frame::after, .frame > .t1 { right: -4px; }
+    .grid3, .grid2, .who { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M5 2h14a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Zm2 4.5a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1H7Zm2 10a1 1 0 1 0 0 2h6a1 1 0 1 0 0-2H9Z"/></svg>
+  <span class="word">partifactory</span>
+  <span class="chip public" title="This page is open to anyone with the link">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm4.9 6.2h-2.1a10.8 10.8 0 0 0-.9-3.9 5.5 5.5 0 0 1 3 3.9ZM8 2.6c.6.7 1.2 2.3 1.4 4.6H6.6C6.8 4.9 7.4 3.3 8 2.6ZM6.1 3.3a10.8 10.8 0 0 0-.9 3.9H3.1a5.5 5.5 0 0 1 3-3.9ZM3.1 8.8h2.1c.1 1.5.4 2.8.9 3.9a5.5 5.5 0 0 1-3-3.9ZM8 13.4c-.6-.7-1.2-2.3-1.4-4.6h2.8c-.2 2.3-.8 3.9-1.4 4.6Zm1.9-.7c.5-1.1.8-2.4.9-3.9h2.1a5.5 5.5 0 0 1-3 3.9Z"/></svg>
+    Anyone with the link
+  </span>
+</div></header>
+
+<main>
+<div class="wrap hero">
+  <div>
+    <div class="label">A home for the things you make</div>
+    <h1>Parts, made by you and your agents.</h1>
+    <p class="lede">partifactory is a self-hosted place for the pages, tools, docs and small apps a household and its AI agents make.
+      Each one is a <strong>part</strong>: it gets its own sandboxed host, a name that means something, and every version kept forever.</p>
+    <div class="tagrow">
+      <span class="tag">P-0001</span><span class="tag">REV 1</span><span class="tag">HTML</span><span class="tag">ONE RUST BINARY</span>
+    </div>
+  </div>
+  <div class="frame"><i class="t1"></i><i class="t2"></i>
+    <div class="label">The link you post</div>
+    <div class="url" style="margin-top:8px">https://<b>photofinder</b>-part.example.com/</div>
+    <dl class="kv">
+      <dt>Follows</dt><dd>the live version, through every fix</dd>
+      <dt>Checks</dt><dd>who's opening it, every time it opens</dd>
+      <dt>Runs in</dt><dd>an opaque-origin sandbox with no cookies</dd>
+      <dt>Made by</dt><dd>a person, or an agent acting for one</dd>
+    </dl>
+  </div>
+</div>
+
+<section><div class="wrap">
+  <div class="label">01 · The idea</div>
+  <h2>One part, one host, one link</h2>
+  <p class="intro">Chat agents make useful things all day: a packing list, a chore chart, a dashboard, a little game. Usually they vanish into a transcript.
+    partifactory gives each one a permanent address, so the link an agent posts in chat keeps working, keeps improving, and keeps asking who's allowed in.</p>
+  <div class="grid3">
+    <div class="card"><span class="bin">VERSIONS</span><h3>Nothing is ever lost</h3>
+      <p>Every save is an immutable version: a manifest of content hashes. A one-line edit to a forty-file part stores one new blob. Restore any version; deleted parts sit in a 30-day bin.</p></div>
+    <div class="card"><span class="bin">KINDS</span><h3>Whatever the agent wrote</h3>
+      <p>HTML pages, Markdown docs, plain text and prebuilt bundles, with React and TSX next. CDN script tags are mirrored at build time, so a part never loads anything from a third party when it runs.</p></div>
+    <div class="card"><span class="bin">GRANTS</span><h3>Every view is a decision</h3>
+      <p>Parts start private to their maker. Share with people, groups or the whole household; only the admin can make a link that leaves the house, like the one you used to get here.</p></div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <div class="label">02 · Safety</div>
+  <h2>Agent-written code, kept in its drawer</h2>
+  <p class="intro">Code from an agent is untrusted by default. Every part runs the way Claude's own artifacts do: in a sandboxed document with an opaque origin.
+    It can't read cookies, can't reach other parts, and can only fetch its own files.</p>
+  <div class="frame" style="padding:18px 12px 8px"><i class="t1"></i><i class="t2"></i>
+  <svg class="flow" viewBox="0 0 960 250" role="img" aria-label="How a part opens: the browser loads the part host's wrapper, which gets a capability from the workspace, then frames the sandboxed content.">
+    <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="currentColor" style="color:var(--ink-3)"/></marker></defs>
+    <rect class="box" x="10" y="80" width="150" height="70" rx="6"/><text class="head" x="85" y="108" text-anchor="middle">Browser</text><text x="85" y="128" text-anchor="middle">opens the link</text>
+    <rect class="box" x="230" y="20" width="220" height="70" rx="6"/><text class="head" x="340" y="48" text-anchor="middle">name-part.example.com</text><text x="340" y="68" text-anchor="middle">trusted wrapper, no cookies</text>
+    <rect class="box" x="230" y="160" width="220" height="70" rx="6"/><text class="head" x="340" y="188" text-anchor="middle">parts.example.com/grant</text><text x="340" y="208" text-anchor="middle">session + policy → capability</text>
+    <rect class="sand" x="540" y="60" width="400" height="130" rx="6"/><text class="head" x="740" y="92" text-anchor="middle">/c/&lt;capability&gt;/  · sandboxed iframe</text>
+    <text x="740" y="118" text-anchor="middle">opaque origin · CSP keeps fetches on its own host</text>
+    <text x="740" y="140" text-anchor="middle">window.storage over /_rt · live data.changed events</text>
+    <text x="740" y="162" text-anchor="middle">capability is host-bound, windowed, revocable</text>
+    <path class="arrow" d="M160 105 C 195 90, 200 60, 228 55"/>
+    <path class="arrow" d="M300 92 L 300 158"/><text x="292" y="130" text-anchor="end">first open</text>
+    <path class="arrow" d="M380 158 L 380 94"/><text x="388" y="130">#pf=cap</text>
+    <path class="arrow" d="M450 55 C 495 55, 500 100, 538 110"/>
+  </svg>
+  </div>
+  <div class="grid3" style="margin-top:16px">
+    <div class="card"><span class="bin">CAPABILITIES</span><h3>Access lives in the path</h3><p>A signed, host-bound token in the URL carries each decided grant, so serving a file needs no database lookup. Revoking access bumps an epoch and takes effect at once.</p></div>
+    <div class="card"><span class="bin">NO COOKIES</span><h3>Part hosts never see one</h3><p>Sessions live only on the workspace host. A part can't steal them, can't toss cookies onto the domain, and can't script its wrapper.</p></div>
+    <div class="card"><span class="bin">SAFE DEFAULTS</span><h3>Set up once, left alone</h3><p>Secure headers, rate limits, quotas, nightly exports and a cap on every store that grows are all on by default. Turning one off takes an explicit <code>[unsafe]</code> key.</p></div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <div class="label">03 · Agents</div>
+  <h2>Any AI can find it and use it</h2>
+  <p class="intro">Tell an agent nothing but the address, and it can discover everything else. The same operations are offered over MCP, an HTTPS JSON API, a <code>part</code> CLI and a skill file, and every agent connects with its own scoped, revocable identity.</p>
+  <div class="grid2">
+    <pre><span class="c"># an agent makes a part and posts its link</span>
+<span class="agent">part_create</span> {
+  "name": "chores",
+  "kind": "html",
+  "content": "&lt;!doctype html&gt;…",
+  "live": "after_check",
+  "request_id": "01JD…"
+}
+<span class="c">→ { "url": "https://chores-part.example.com/",</span>
+<span class="c">    "head": 1, "live": 1 }</span></pre>
+    <div class="who">
+      <div class="card ag"><span class="bin">AGENTS ACT</span><h3>Directly, within scope</h3>
+        <ul class="tight"><li>create, edit and check parts</li><li>read and fix shared data</li><li>roll back a bad write</li></ul></div>
+      <div class="card"><span class="bin">PEOPLE DECIDE</span><h3>What leaves the house</h3>
+        <ul class="tight"><li>public links</li><li>inviting new people</li><li>admin, with a passkey</li></ul></div>
+    </div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <div class="label">04 · Shared data</div>
+  <h2>Pages that remember, and update live</h2>
+  <p class="intro">A part's page gets <code>window.storage</code>, the same API Claude's artifacts use, with personal and shared data. When anyone else writes, every open copy hears about it within a second, so a chore chart, a guestbook or a multiplayer game needs no backend at all.</p>
+  <div class="grid2">
+    <pre><span class="c">// save for everyone, then hear everyone else</span>
+await window.storage.set("px:3:4", "#e4572e", true);
+
+window.partifactory.on("data.changed", async e =&gt; {
+  const r = await window.storage.get(e.key, true);
+  paint(e.key, r &amp;&amp; r.value);
+});</pre>
+    <div class="card"><span class="bin">TRY IT</span><h3>Bloom, a garden war with no server</h3>
+      <p>Every player's seeds are one shared key. Each browser replays the same moves through the same deterministic simulation, so the board needs no game server: partifactory's live data events carry the move log between players. Snapshots of shared data are on by default, so a vandal's work is one tap to undo.</p></div>
+  </div>
+</div></section>
+
+<section><div class="wrap">
+  <div class="label">05 · Built like an appliance</div>
+  <h2>One binary, one folder</h2>
+  <div class="grid3">
+    <div class="card"><span class="bin">RUST</span><h3>A single static binary</h3><p>Every asset embedded, served from a ~20 MB image. Builds run in a child process, so a compiler panic costs one build, not the server.</p></div>
+    <div class="card"><span class="bin">/data</span><h3>Back up one folder</h3><p>SQLite in WAL mode plus content-addressed blobs. A nightly export is portable to any host, and imports bump an epoch so old access can't come back.</p></div>
+    <div class="card"><span class="bin">PORTABLE</span><h3>No vendor lock-in</h3><p>Any OIDC provider, any reverse proxy, any CI or none. The first deployment's tunnel and identity provider are adapters behind config.</p></div>
+  </div>
+</div></section>
+</main>
+
+<footer><div class="wrap">
+  <span>This page is itself a part, served by partifactory on a public link.</span>
+  <span>Inspired by <a href="https://github.com/LaneBirmingham/shartifacts" target="_blank" rel="noopener">shartifacts</a> by Lane Birmingham. MIT licensed.</span>
+</div></footer>
+<script>window.partifactory && window.partifactory.ready && window.partifactory.ready();</script>
+</body>
+</html>

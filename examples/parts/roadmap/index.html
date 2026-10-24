@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What should partifactory do next?</title>
+<script>if (!window.storage) document.write('<script src="../dev-shim.js"><\/script>');</script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light;
+    --paper: #f4f3ee; --raised: #fbfbf8; --sunk: #e9e8e1; --rule: #d6d4ca; --rule-strong: #8e8b80;
+    --ink: #191b1d; --ink-2: #3a3d41; --ink-3: #5c5f64;
+    --tag: #ecdcae; --on-tag: #3b3015;
+    --signal: #1c6a47; --on-signal: #fff; --signal-text: #1c6a47; --signal-wash: #dbeae1; --on-wash: #14503a;
+    --agent: #1f5d8c; --agent-wash: #dde8f2; --danger: #b02a20;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --label: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --paper: #121416; --raised: #1a1d20; --sunk: #0d0f10; --rule: #2b2f34; --rule-strong: #6b7078;
+      --ink: #ecebe6; --ink-2: #c8c7c0; --ink-3: #9b9da1; --tag: #3e3722; --on-tag: #efe0b4;
+      --signal: #62c495; --on-signal: #0b1d14; --signal-text: #6fd0a1; --signal-wash: #173327; --on-wash: #a9e6c8;
+      --agent: #86bde6; --agent-wash: #16293a; --danger: #ff8b80;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--paper); }
+  body { margin: 0; color: var(--ink); font: 400 15px/1.55 var(--sans); }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 36px 20px 64px; }
+  .label { font: 600 11.5px/14px var(--label); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+  h1 { font: 600 34px/1.1 var(--label); letter-spacing: -0.01em; margin: 8px 0 10px; }
+  .lede { color: var(--ink-2); font-size: 16.5px; margin: 0 0 8px; }
+  .who { color: var(--ink-3); font-size: 13px; margin: 0 0 26px; }
+  .who b { color: var(--ink-2); font-weight: 600; }
+  .item { background: var(--raised); border: 1px solid var(--rule); margin: 0 0 14px; padding: 16px 18px 12px;
+    clip-path: polygon(10px 0, 100% 0, 100% 100%, 0 100%, 0 10px); }
+  .head { display: flex; gap: 12px; align-items: flex-start; }
+  .head .txt { flex: 1; }
+  .bin { font: 500 11.5px/14px var(--mono); background: var(--tag); color: var(--on-tag); padding: 2px 7px;
+    clip-path: polygon(5px 0, 100% 0, 100% 100%, 0 100%, 0 5px); display: inline-block; }
+  .item h2 { font: 600 17px/1.3 var(--sans); margin: 7px 0 4px; }
+  .item p.desc { margin: 0; color: var(--ink-2); }
+  .vote { flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 56px;
+    border: 1px solid var(--rule-strong); background: var(--raised); color: var(--ink); border-radius: 8px; padding: 6px 8px;
+    font: 600 15px/1 var(--sans); cursor: pointer; font-variant-numeric: tabular-nums; }
+  .vote small { font: 500 10.5px/1.2 var(--label); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin-top: 3px; }
+  .vote.on { background: var(--signal); border-color: var(--signal); color: var(--on-signal); }
+  .vote.on small { color: var(--on-signal); }
+  .vote:disabled { opacity: .5; cursor: default; }
+  .thread { margin-top: 12px; border-top: 1px solid var(--rule); padding-top: 8px; }
+  .c { padding: 7px 0; display: grid; grid-template-columns: 28px 1fr; gap: 10px; }
+  .av { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font: 600 12px/1 var(--label); color: #fff; }
+  .c .meta { font-size: 12.5px; color: var(--ink-3); }
+  .c .meta b { color: var(--ink); font-weight: 600; margin-right: 6px; }
+  .c .meta .agent { color: var(--agent); font-weight: 600; }
+  .c .body { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
+  .c.new { animation: flash 1.6s ease-out; }
+  @keyframes flash { from { background: var(--signal-wash); } to { background: transparent; } }
+  form { display: flex; gap: 8px; margin-top: 8px; }
+  textarea { flex: 1; resize: vertical; min-height: 38px; max-height: 200px; font: inherit; color: var(--ink); background: var(--sunk);
+    border: 1px solid var(--rule-strong); border-radius: 8px; padding: 8px 10px; }
+  textarea:focus, .vote:focus-visible, button:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+  button.send { background: var(--signal); color: var(--on-signal); border: 0; border-radius: 8px; padding: 0 14px; font: 600 14px/1 var(--sans); cursor: pointer; }
+  button.send:disabled { opacity: .5; cursor: default; }
+  .empty { color: var(--ink-3); font-size: 13px; padding: 4px 0; }
+  .note { color: var(--danger); font-size: 13px; min-height: 18px; }
+  footer { color: var(--ink-3); font-size: 12.5px; margin-top: 26px; border-top: 1px solid var(--rule); padding-top: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="label">Household · roadmap review</div>
+  <h1>What should partifactory do next?</h1>
+  <p class="lede">Slice 1 is the core: parts, sharing, public links and live shared data. Here's what's queued after it.
+    Vote for what you'd use, and say why in the thread. Agents read this page too, so be specific.</p>
+  <p class="who" id="who">Loading…</p>
+  <div id="items"></div>
+  <p class="note" id="note"></p>
+  <footer>Only people in the household can open this page. Your name comes from your sign-in, and every comment is kept with the page's history.</footer>
+</div>
+
+<script>
+"use strict";
+const ITEMS = [
+  { id: "tsx", bin: "KIND", title: "React (TSX) parts, compiled on the server", desc: "Agents send App.tsx and partifactory bundles it, with React, charts and icons from one shared library set." },
+  { id: "previews", bin: "SHARING", title: "Link previews that show what a part is", desc: "A titled card and an automatic screenshot when a public link is pasted into chat, plus an optional short clip." },
+  { id: "comments", bin: "AGENTS", title: "Comments on any part that agents act on", desc: "Leave a note on a line or a block; your agent picks it up and makes the fix." },
+  { id: "family", bin: "SPACES", title: "A Family space everyone can see into", desc: "Move a part to Family and the whole household has it, including people who join later." },
+  { id: "backends", bin: "APPS", title: "Small apps with their own backends", desc: "A part can bring a container (a database, a scraper, a bot), sandboxed and capped." },
+  { id: "phone", bin: "MOBILE", title: "Editing from a phone", desc: "Fix a typo or a list item without a laptop, with the formatted editor." },
+];
+const $ = id => document.getElementById(id);
+let me = { name: "you", kind: "person" };
+const comments = new Map();   // item -> Map(key -> {text, by, at})
+const votes = new Map();      // item -> Set(voter)
+let canWrite = true;
+
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "anon";
+const hue = s => [...String(s)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % 360;
+const ago = t => { if (!t) return ""; const s = Math.max(1, Math.round((Date.now() - t) / 1000));
+  return s < 60 ? "just now" : s < 3600 ? Math.round(s / 60) + " min ago" : s < 86400 ? Math.round(s / 3600) + " h ago" : new Date(t).toLocaleDateString(); };
+
+function ingest(key, value, meta) {
+  if (key.startsWith("c:")) {
+    const [, item] = key.split(":");
+    let v; try { v = JSON.parse(value); } catch { return; }
+    if (!v || typeof v.text !== "string") return;
+    if (!comments.has(item)) comments.set(item, new Map());
+    // The author is the server's record of who wrote the key, never what the value claims.
+    const by = (meta && meta.by) || { kind: "person", name: "someone" };
+    comments.get(item).set(key, { text: v.text.slice(0, 2000), by, at: (meta && meta.updated_at) || v.at || 0 });
+  } else if (key.startsWith("v:")) {
+    const [, item, voter] = key.split(":");
+    if (!votes.has(item)) votes.set(item, new Set());
+    value ? votes.get(item).add(voter) : votes.get(item).delete(voter);
+  }
+}
+
+function render(fresh) {
+  // Keep half-written comments and focus when someone else's post re-renders the board.
+  const drafts = new Map([...document.querySelectorAll("form[data-form]")].map(f => [f.dataset.form, f.querySelector("textarea").value]));
+  const focused = document.activeElement && document.activeElement.closest && document.activeElement.closest("form[data-form]");
+  const focusId = focused && focused.dataset.form, caret = focused && document.activeElement.selectionStart;
+  renderInner(fresh);
+  for (const [id, text] of drafts) { const ta = document.querySelector(`form[data-form="${id}"] textarea`); if (ta) ta.value = text; }
+  if (focusId) { const ta = document.querySelector(`form[data-form="${focusId}"] textarea`); if (ta) { ta.focus(); try { ta.setSelectionRange(caret, caret); } catch {} } }
+}
+
+function renderInner(fresh) {
+  const myVoter = slug(me.name);
+  $("items").innerHTML = ITEMS.map(it => {
+    const vs = votes.get(it.id) || new Set(), on = vs.has(myVoter);
+    const cs = [...(comments.get(it.id) || new Map()).entries()].sort((a, b) => a[0] < b[0] ? -1 : 1);
+    const thread = cs.length ? cs.map(([k, c]) => `
+      <div class="c${k === fresh ? " new" : ""}">
+        <div class="av" style="background:hsl(${hue(c.by.name)} 45% 42%)">${esc((c.by.name || "?").trim()[0] || "?").toUpperCase()}</div>
+        <div><div class="meta"><b>${esc(c.by.name)}</b>${c.by.kind === "agent" ? '<span class="agent">agent</span> · ' : ""}<time>${esc(ago(c.at))}</time></div>
+        <div class="body">${esc(c.text)}</div></div>
+      </div>`).join("") : '<div class="empty">No comments yet.</div>';
+    return `<article class="item" data-id="${it.id}">
+      <div class="head"><div class="txt"><span class="bin">${it.bin}</span><h2>${esc(it.title)}</h2><p class="desc">${esc(it.desc)}</p></div>
+        <button class="vote${on ? " on" : ""}" data-vote="${it.id}" ${canWrite ? "" : "disabled"} aria-pressed="${on}">${vs.size}<small>${on ? "voted" : "+1"}</small></button></div>
+      <div class="thread">${thread}
+        <form data-form="${it.id}"><textarea placeholder="Add to the thread…" maxlength="2000" ${canWrite ? "" : "disabled"}></textarea>
+        <button class="send" ${canWrite ? "" : "disabled"}>Post</button></form></div>
+    </article>`;
+  }).join("");
+}
+
+async function loadAll() {
+  for (const prefix of ["c:", "v:"]) {
+    let cursor = null;
+    do {
+      const page = await window.storage.list(prefix, true, { values: true, meta: true, cursor });
+      for (const k of page.keys) ingest(k, page.values[k], page.meta && page.meta[k]);
+      cursor = page.next_cursor;
+    } while (cursor);
+  }
+}
+
+function fail(err) {
+  if (err && err.code === "forbidden_view_only") { canWrite = false; $("note").textContent = "This page is read-only for you."; render(); }
+  else $("note").textContent = "That didn't save: " + ((err && err.message) || "network error") + ". Try again.";
+}
+
+document.addEventListener("submit", async e => {
+  e.preventDefault();
+  const form = e.target, item = form.dataset.form, ta = form.querySelector("textarea"), text = ta.value.trim();
+  if (!text) return;
+  const key = `c:${item}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 6)}`;
+  form.querySelector("button").disabled = true;
+  try {
+    await window.storage.set(key, JSON.stringify({ text, at: Date.now() }), true);
+    ingest(key, JSON.stringify({ text }), { by: me, updated_at: Date.now() });
+    ta.value = ""; $("note").textContent = ""; render(key);
+  } catch (err) { fail(err); form.querySelector("button").disabled = false; }
+});
+
+document.addEventListener("click", async e => {
+  const b = e.target.closest("[data-vote]");
+  if (!b) return;
+  const item = b.dataset.vote, voter = slug(me.name), key = `v:${item}:${voter}`;
+  const on = (votes.get(item) || new Set()).has(voter);
+  ingest(key, on ? null : "1"); render();
+  try { on ? await window.storage.delete(key, true) : await window.storage.set(key, "1", true); }
+  catch (err) { ingest(key, on ? "1" : null); render(); fail(err); }
+});
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && e.target.matches("textarea")) e.target.form.requestSubmit();
+});
+
+window.partifactory.on("data.changed", async e => {
+  if (e.op === "delete") { ingest(e.key, null); render(); return; }
+  const r = await window.storage.get(e.key, true);
+  if (r) { ingest(e.key, r.value, { by: r.by || e.by, updated_at: r.updated_at || Date.now() }); render(e.key); }
+});
+
+(async () => {
+  try { const u = window.partifactory.user && await window.partifactory.user(); if (u && u.name) me = u; } catch {}
+  $("who").innerHTML = `Signed in as <b>${esc(me.name)}</b>.`;
+  try { await loadAll(); } catch (err) { $("note").textContent = "Couldn't load the board: " + ((err && err.message) || "network error"); }
+  render();
+  window.partifactory.ready();
+  setInterval(() => render(), 60000);   // keep the "min ago" labels honest
+})();
+</script>
+</body>
+</html>
