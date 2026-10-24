@@ -30,13 +30,23 @@ jobs:
         script: [fmt, clippy, test, deny, audit, gitleaks, check-boundaries, env-docs, selftest]
     name: ${{ matrix.script }}
     steps:
-      - name: checkout (full history, for gitleaks)
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0 # gitleaks scans the history
+      - name: toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: 1.97.1
+          components: clippy, rustfmt
+      - name: cache dirs
+        # The shared runners mount a persistent /cargo-cache; keep our builds in our own corner of it.
         run: |
-          git init -q .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          git -c http.extraHeader="Authorization: token ${{ github.token }}" fetch -q origin "+${GITHUB_SHA}:refs/remotes/origin/ci"
-          git -c http.extraHeader="Authorization: token ${{ github.token }}" fetch -q origin
-          git checkout -q "${GITHUB_SHA}"
+          if [ -d /cargo-cache ]; then
+            echo "CARGO_HOME=/cargo-cache/partifactory/cargo" >> "$GITHUB_ENV"
+            echo "CARGO_TARGET_DIR=/cargo-cache/partifactory/target" >> "$GITHUB_ENV"
+            mkdir -p /cargo-cache/partifactory/cargo/bin
+            echo "/cargo-cache/partifactory/cargo/bin" >> "$GITHUB_PATH"
+          fi
       - name: tools
         run: ci/install-tools.sh "${{ matrix.script }}"
       - name: run
@@ -53,37 +63,10 @@ jobs:
     if: github.event_name != 'schedule' && (github.event_name != 'workflow_dispatch' || inputs.job == '')
     runs-on: browser
     steps:
-      - name: checkout
-        run: |
-          git init -q .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          git -c http.extraHeader="Authorization: token ${{ github.token }}" fetch -q --depth=1 origin "${GITHUB_SHA}"
-          git checkout -q FETCH_HEAD
-      - name: run
-        run: ci/spike.sh
-      - name: results
-        if: always()
-        uses: actions/upload-artifact@v3
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
-          name: sandbox-spike
-          path: |
-            target/sandbox-spike/results.jsonl
-            target/sandbox-spike/results.md
-            target/sandbox-spike/screens/
-      - name: clean
-        if: always()
-        run: docker rm --force $(docker ps -aq --filter label=pf.spike=1) 2>/dev/null || true
-
-  advisories:
-    if: (github.event_name == 'schedule' && github.event.schedule == '17 3 * * *') || (github.event_name == 'workflow_dispatch' && inputs.job == 'advisories')
-    runs-on: rust
-    steps:
-      - name: checkout
-        run: |
-          git init -q .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          git -c http.extraHeader="Authorization: token ${{ github.token }}" fetch -q --depth=1 origin "${GITHUB_SHA}"
-          git checkout -q FETCH_HEAD
+          toolchain: 1.97.1
       - run: ci/install-tools.sh advisories
       - run: ci/advisories.sh
       - if: always()

@@ -11,7 +11,7 @@ set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 min_free_gb="${PF_DISK_MIN_FREE_GB:-20}"
 max_target_gb="${PF_TARGET_MAX_GB:-30}"
-target="${PF_TARGET_DIR:-$repo/target}"
+target="${PF_TARGET_DIR:-${CARGO_TARGET_DIR:-$repo/target}}"
 disk_path="${PF_DISK_PATH:-$repo}"
 
 free_kb="$(df -Pk "$disk_path" | awk 'NR==2 {print $4}')"

@@ -12,7 +12,7 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-target="${PF_TARGET_DIR:-$repo/target}"
+target="${PF_TARGET_DIR:-${CARGO_TARGET_DIR:-$repo/target}}"
 days="${PF_CLEAN_DAYS:-2}"
 apply=0
 [ "${1:-}" = "--apply" ] && apply=1
