@@ -23,7 +23,7 @@ env:
 jobs:
   checks:
     if: github.event_name != 'schedule' && (github.event_name != 'workflow_dispatch' || inputs.job == '')
-    runs-on: rust
+    runs-on: [rust, rust-truenas] # triton's disk is full; prefer the truenas pool
     strategy:
       fail-fast: false
       matrix:
@@ -61,7 +61,7 @@ jobs:
     # pf-6qma: the opaque-origin sandbox rig on the five Playwright projects (throwaway; the
     # part host bead keeps what it needs as regression fixtures).
     if: github.event_name != 'schedule' && (github.event_name != 'workflow_dispatch' || inputs.job == '')
-    runs-on: browser
+    runs-on: [browser, rust-truenas]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: run
@@ -81,7 +81,7 @@ jobs:
 
   advisories:
     if: (github.event_name == 'schedule' && github.event.schedule == '17 3 * * *') || (github.event_name == 'workflow_dispatch' && inputs.job == 'advisories')
-    runs-on: rust
+    runs-on: [rust, rust-truenas] # triton's disk is full; prefer the truenas pool
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
@@ -95,7 +95,7 @@ jobs:
   renovate:
     # Inert until the admin adds the RENOVATE_TOKEN repo secret (a human check).
     if: (github.event_name == 'schedule' && github.event.schedule == '41 4 * * 1') || (github.event_name == 'workflow_dispatch' && inputs.job == 'renovate')
-    runs-on: rust
+    runs-on: [rust, rust-truenas] # triton's disk is full; prefer the truenas pool
     container:
       image: renovate/renovate:41@sha256:e998e1218fe572e23278d8808186a310784f7cb2ac8055307183ffc51d3a59e5
     steps:
