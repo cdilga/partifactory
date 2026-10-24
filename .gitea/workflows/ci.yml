@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        script: [fmt, clippy, test, deny, audit, gitleaks, check-boundaries, env-docs, selftest, store-durability]
+        script: [fmt, clippy, test, deny, audit, gitleaks, check-boundaries, env-docs, selftest, store-durability, spikes]
     name: ${{ matrix.script }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
