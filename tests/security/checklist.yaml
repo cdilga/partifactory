@@ -37,7 +37,7 @@
           "kind": "playwright",
           "file": "tests/security/sandbox_cookies.spec.ts",
           "test": "SEC sandbox cookie writes are inert and Lax sibling canaries receive no cookies",
-          "proves": "Real opaque sandbox GET/POST reaches sibling canary without Lax cookie; workspace GET/POST blocked by observed connect-src violations.",
+          "proves": "Actual host-only workspace session stays private; real sibling service Lax-cookie positive control succeeds, while sandbox GET/POST/native Image toward that service and workspace are blocked by observed CSP violations and the canary records zero requests. Allowed cookie-free blob requests carry no workspace or service cookies.",
           "projects": [
             "chromium-desktop",
             "chromium-mobile",
@@ -56,7 +56,7 @@
           "kind": "playwright",
           "file": "tests/security/sandbox_cookies.spec.ts",
           "test": "SEC sandbox cookie writes are inert and Lax sibling canaries receive no cookies",
-          "proves": "Real opaque sandbox GET/POST reaches sibling canary without Lax cookie; workspace GET/POST blocked by observed connect-src violations.",
+          "proves": "Actual host-only workspace session stays private; real sibling service Lax-cookie positive control succeeds, while sandbox GET/POST/native Image toward that service and workspace are blocked by observed CSP violations and the canary records zero requests. Allowed cookie-free blob requests carry no workspace or service cookies.",
           "projects": [
             "chromium-desktop",
             "chromium-mobile",

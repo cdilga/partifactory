@@ -10,13 +10,17 @@ test('SEC sandbox cookie writes are inert and Lax sibling canaries receive no co
   const own = content.origin;
   const blob = process.env.PF_SECURITY_CANARY_ORIGIN ?? `https://blobs-part.${content.hostname.split('.').slice(1).join('.')}`;
   const nonce = `sec-${info.project.name}-${Date.now()}`;
+  const sibling = `https://dex.${content.hostname.split('.').slice(1).join('.')}`;
+  await signIn(page);
+  const sessionCookies = await context.cookies('https://parts.pf.test');
+  expect(sessionCookies.some(c => c.name === '__Host-pf_session' && c.secure && c.sameSite === 'Lax')).toBe(true);
   const workspace = process.env.PF_BASE_URL ?? 'https://parts.pf.test';
   await context.addCookies([
-    { name: 'sec_lax_probe', value: nonce, url: blob, secure: true, sameSite: 'Lax' },
+    { name: 'sec_lax_probe', value: nonce, url: sibling, secure: true, sameSite: 'Lax' },
     { name: 'sec_workspace_lax', value: nonce, url: workspace, secure: true, sameSite: 'Lax' },
   ]);
   // This control proves the canary actually observes cookies in a non-sandboxed context.
-  const control = await context.request.get(`${blob}/__sec_canary?control=${nonce}`);
+  const control = await context.request.get(`${sibling}/__sec_canary?nonce=control-${nonce}`);
   expect(control.status()).toBe(200);
   expect(await control.json()).toMatchObject({ cookie_present: true, method: 'GET' });
 
@@ -27,7 +31,7 @@ test('SEC sandbox cookie writes are inert and Lax sibling canaries receive no co
   const frame = page.frames().find(f => f.url().includes('/c/'))!;
   await frame.waitForLoadState();
   expect(page.url()).toBe(`${own}/`);
-  const result = await frame.evaluate(async ({ blob, nonce, workspace }) => {
+  const result = await frame.evaluate(async ({ blob, nonce, workspace, sibling }) => {
     const write = 'sec_cookie_write=' + nonce + '; Secure; SameSite=None; Path=/';
     try { document.cookie = write; } catch { /* opaque origins may throw */ }
     try { await (window as any).cookieStore?.set({ name: 'sec_cookie_store', value: nonce, secure: true, sameSite: 'none' }); } catch { /* unavailable or rejected */ }
@@ -45,15 +49,30 @@ test('SEC sandbox cookie writes are inert and Lax sibling canaries receive no co
     }
     const violations: string[] = [];
     const violation = (event: SecurityPolicyViolationEvent) => {
-      if (event.effectiveDirective === 'connect-src') violations.push(event.blockedURI);
+      if (['connect-src', 'img-src'].includes(event.effectiveDirective)) violations.push(event.blockedURI);
     };
     document.addEventListener('securitypolicyviolation', violation);
-    const workspaceRequests = [];
-    for (const method of ['GET', 'POST']) {
-      try {
-        await fetch(`${workspace}/__sec_canary?nonce=${nonce}`, { method, credentials: 'include' });
-        workspaceRequests.push('transmitted');
-      } catch { workspaceRequests.push('blocked'); }
+    const deniedRequests = [];
+    for (const target of [workspace, sibling]) {
+      for (const method of ['GET', 'POST']) {
+        try {
+          await fetch(`${target}/__sec_canary?nonce=${nonce}`, { method, credentials: 'include' });
+          deniedRequests.push('transmitted');
+        } catch { deniedRequests.push('blocked'); }
+      }
+    }
+    // Use native elements as well as fetch: a JavaScript credential wrapper would not prove
+    // the security property. Images are governed by img-src rather than connect-src.
+    for (const target of [workspace, sibling]) {
+      const image = document.createElement('img');
+      const result = await new Promise(resolve => {
+        image.onload = () => resolve('transmitted');
+        image.onerror = () => resolve('blocked');
+        image.src = `${target}/__sec_canary?nonce=${nonce}&image=1`;
+        document.body.appendChild(image);
+      });
+      deniedRequests.push(result);
+      image.remove();
     }
     // CSP violation delivery is queued after fetch rejection.
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -64,8 +83,8 @@ test('SEC sandbox cookie writes are inert and Lax sibling canaries receive no co
     try { Object.getOwnPropertyDescriptor(Document.prototype, 'cookie')!.get!.call(document); }
     catch (error) { nativeCookieBlocked = (error as DOMException).name === 'SecurityError'; }
     return { cookie, storage: localStorage.getItem(key), parentDocumentBlocked, parentStorageBlocked,
-      origin: window.origin, reports, workspaceRequests, violations, nativeCookieBlocked };
-  }, { blob, nonce, workspace });
+      origin: window.origin, reports, deniedRequests, violations, nativeCookieBlocked };
+  }, { blob, nonce, workspace, sibling });
   // PLAN §2 deliberately supplies an inert in-memory cookie string for compatibility.
   // Its readback is not a browser cookie; the native accessor and real jar remain unavailable.
   expect(result).toMatchObject({ cookie: `sec_cookie_write=${nonce}`, nativeCookieBlocked: true,
@@ -74,8 +93,11 @@ test('SEC sandbox cookie writes are inert and Lax sibling canaries receive no co
     { status: 200, method: 'GET', cookie_present: false, origin: 'null' },
     { status: 200, method: 'POST', cookie_present: false, origin: 'null' },
   ]);
-  expect(result.workspaceRequests).toEqual(['blocked', 'blocked']);
-  expect(result.violations.filter(url => url.startsWith(workspace))).toHaveLength(2);
+  expect(result.deniedRequests).toEqual(Array(6).fill('blocked'));
+  expect(result.violations.filter(url => url.startsWith(workspace))).toHaveLength(3);
+  expect(result.violations.filter(url => url.startsWith(sibling))).toHaveLength(3);
+  const reached = await context.request.get(`${sibling}/__sec_canary/observations?nonce=${nonce}`);
+  expect(await reached.json()).toEqual({ count: 0, methods: [] });
   expect((await context.cookies(own)).some(c => ['sec_cookie_write', 'sec_cookie_store'].includes(c.name))).toBe(false);
   await frame.goto(fixture.notes.url);
   expect(await frame.evaluate(() => document.cookie)).toBe('');

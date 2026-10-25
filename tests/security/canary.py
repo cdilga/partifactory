@@ -3,6 +3,11 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import threading
+from urllib.parse import parse_qs, urlsplit
+
+observations = {}
+lock = threading.Lock()
 
 
 class Canary(BaseHTTPRequestHandler):
@@ -10,7 +15,8 @@ class Canary(BaseHTTPRequestHandler):
         pass
 
     def check(self):
-        if not self.path.startswith("/__sec_canary"):
+        parsed = urlsplit(self.path)
+        if parsed.path not in ("/__sec_canary", "/__sec_canary/observations"):
             self.send_error(404)
             return
         size = int(self.headers.get("Content-Length", "0"))
@@ -18,8 +24,18 @@ class Canary(BaseHTTPRequestHandler):
             self.send_error(413)
             return
         self.rfile.read(size)
-        data = json.dumps({"cookie_present": bool(self.headers.get("Cookie")),
-                           "method": self.command, "origin": self.headers.get("Origin")}).encode()
+        nonce = parse_qs(parsed.query).get("nonce", [""])[0]
+        key = (self.headers.get("Host", ""), nonce)
+        with lock:
+            if parsed.path == "/__sec_canary/observations":
+                methods = list(observations.get(key, []))
+                value = {"count": len(methods), "methods": methods}
+            else:
+                if nonce:
+                    observations.setdefault(key, []).append(self.command)
+                value = {"cookie_present": bool(self.headers.get("Cookie")),
+                         "method": self.command, "origin": self.headers.get("Origin")}
+        data = json.dumps(value).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "null")

@@ -4,7 +4,14 @@
 
 dex.{$PF_APEX:pf.test} {
 	import pf_proxy
-	reverse_proxy dex:5556
+	# A real sibling service with its own Lax cookie. The part CSP must block this
+	# destination before any request reaches it; the counter supplies server-side proof.
+	handle /__sec_canary* {
+		reverse_proxy security-canary:8080
+	}
+	handle {
+		reverse_proxy dex:5556
+	}
 }
 
 dex2.{$PF_APEX:pf.test} {
