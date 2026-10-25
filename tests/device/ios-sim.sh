@@ -26,6 +26,9 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 h="$repo/tests/e2e/harness"
 spec="${1:-self-test}"
 if [ "$spec" = device-pass ]; then exec "$repo/tests/device/ios-device-pass.sh"; fi
+if [[ "$spec" = pixel-guest || "$spec" = contribute-guest ]]; then
+  exec "$repo/tests/device/ios-pixel-guest.sh" "$spec"
+fi
 page="${2:-/_dev/selftest}"
 [ "$spec" = self-test ] && page=/_dev/selftest
 

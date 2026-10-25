@@ -40,6 +40,7 @@ final class SimulatorDeviceTests: XCTestCase {
     }
 
     func testMobileSafariMatrix() throws {
+        try XCTSkipIf(environment["PF_DEVICE_PIXEL"] != nil, "Separate pixel guest lane")
         continueAfterFailure = false
         safari.launch()
         // Guest is first, before this fresh dedicated simulator signs in to the workspace.
@@ -71,5 +72,24 @@ final class SimulatorDeviceTests: XCTestCase {
         reload.tap()
         content()
         try report("part_root_reload")
+    }
+
+    func testMobileSafariPixelGuest() throws {
+        try XCTSkipIf(environment["PF_DEVICE_PIXEL"] == nil, "Explicit pixel guest lane only")
+        continueAfterFailure = false
+        safari.launch()
+        // This device was just created; no workspace login or cookies are installed.
+        try open("pixel")
+        let paint = safari.webViews.buttons["Paint communal pixel"].firstMatch
+        XCTAssertTrue(paint.waitForExistence(timeout: 90))
+        paint.tap()
+        XCTAssertTrue(safari.webViews.staticTexts["Paint accepted"].firstMatch.waitForExistence(timeout: 30))
+        try report("pixel_paint")
+        // This accessible name appears only after Chromium's real Freeze response.
+        let frozen = safari.webViews.buttons["Paint frozen pixel"].firstMatch
+        XCTAssertTrue(frozen.waitForExistence(timeout: 45))
+        frozen.tap()
+        XCTAssertTrue(safari.webViews.staticTexts["PfError: frozen pixel reverted"].firstMatch.waitForExistence(timeout: 30))
+        try report("pixel_freeze")
     }
 }
