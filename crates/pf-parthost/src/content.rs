@@ -152,6 +152,9 @@ pub async fn serve(s: PartHost, req: Request) -> Response {
     }
     let live = match s.live(&c.h, c.v.as_deref()).await {
         Ok(Some(l)) if l.part_id == c.p => l,
+        Ok(None) if c.v.is_none() && c.s != "render" => {
+            return drafting(&s, &cap, &c, req.method() == http::Method::HEAD).await;
+        }
         Ok(_) => return StatusCode::NOT_FOUND.into_response(),
         Err(e) => return error(e),
     };
@@ -305,4 +308,39 @@ pub async fn serve(s: PartHost, req: Request) -> Response {
         );
     }
     response
+}
+
+/// A v0/busy part still hosts its prelude so the trusted wrapper receives the first live event.
+/// This contains only platform copy: the wrapper obtains the permitted title through summary.
+async fn drafting(s: &PartHost, cap: &str, c: &Claims, head: bool) -> Response {
+    let part = c.p.clone();
+    let name = c.h.clone();
+    let isolation=s.read(move|db|{
+        use pf_db::rusqlite::OptionalExtension;
+        Ok(db.query_row("SELECT isolation='unsandboxed' FROM parts WHERE id=?1 AND name=?2 AND deleted_at IS NULL",pf_db::rusqlite::params![part,name],|r|r.get::<_,bool>(0)).optional()?)
+    }).await;
+    let unsandboxed = match isolation {
+        Ok(Some(v)) => v,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(e) => return error(e),
+    };
+    let boot = match template::boot(s, cap, c).await {
+        Ok(b) => b,
+        Err(e) => return error(e),
+    };
+    let source = "<html lang=\"en\"><meta charset=\"utf-8\"><title>being made…</title><body><p>being made…</p><script>partifactory.ready()</script></body></html>";
+    let mut r = axum::response::Html(if head {
+        String::new()
+    } else {
+        template::html(s, source, cap, &boot)
+    })
+    .into_response();
+    r.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    r.headers_mut().insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_str(&headers::canonical_csp(s.config(), &c.h, unsandboxed)).unwrap(),
+    );
+    tracing::info!(event="content.drafting",part_id=%c.p,outcome="ok");
+    r
 }

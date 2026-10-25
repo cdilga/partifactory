@@ -78,14 +78,14 @@ window.pfShareChrome = function (part, WS) {
   var drafting=el('section',null,document.body);drafting.id='pf-drafting';drafting.hidden=true;
   var draftTitle=el('h1',part,drafting);el('p','being made…',drafting);el('p','Your agent is getting this part ready.',drafting);
   var priorScroll=0;window.addEventListener('message',function(e){var f=document.getElementById('pf-frame');if(!f||e.source!==f.contentWindow||!e.data)return;if(e.data.type==='pf:scroll'){var y=Number(e.data.y)||0;bar.classList.toggle('pf-bar-hidden',y>priorScroll&&y>48);priorScroll=y;}});
-  function updateSummary() {
+  function updateSummary(fromVersion) {
     return api('/summary').then(function(j){summary=j;title.textContent=j.title||part;draftTitle.textContent=j.title||part;document.title=(j.title||part)+' · partifactory';
       kind.textContent=String(j.kind||'').toUpperCase();revision.textContent=j.live===null?'DRAFT':'REV '+j.live;
       var features=j.features||{};shareButton.hidden=!features.share;copy.hidden=!features.copy_link;standalone.hidden=!features.open_standalone;
       shareButton.onclick=features.unsandboxed?function(){location.href=WS+'/p/'+encodeURIComponent(part)+'/share';}:share;
       var f=document.getElementById('pf-frame');if(f)standalone.href=f.src;
       var wasDraft=!drafting.hidden;drafting.hidden=j.live!==null;
-      if(f&&wasDraft&&j.live!==null){f.classList.add('pf-switching');f.onload=function(){f.classList.remove('pf-switching');};f.src=f.src;}
+      if(f&&wasDraft&&j.live!==null&&!fromVersion){f.classList.add('pf-switching');f.onload=function(){f.classList.remove('pf-switching');};f.src=f.src;}
       render();if(j.live===null)setTimeout(updateSummary,1000);
     }).catch(function(){shareButton.hidden=true;});
   }
@@ -172,12 +172,13 @@ window.pfShareChrome = function (part, WS) {
     if(!H.hasAttribute('data-pf-unsandboxed')) f.setAttribute('sandbox','allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-top-navigation-by-user-activation');
     f.src = '/c/' + cap + (publicLink ? '/' : L.pathname + L.search) + L.hash;
     document.body.appendChild(f);
+    if(!publicLink){var ticks=document.createElement("div");ticks.id="pf-registration";ticks.setAttribute("aria-hidden","true");document.body.appendChild(ticks);}
     var regranting = false;
     window.addEventListener('message', function (e) {
       if (e.source !== f.contentWindow || !e.data || typeof e.data !== 'object') return;
       var t = e.data.type;
       if (t === 'pf:ready') H.setAttribute('data-pf-ready', '1');
-      if (t === 'pf:version') { if(window.__pfRefreshSummary)window.__pfRefreshSummary(); f.classList.add('pf-switching'); f.onload = function () { f.classList.remove('pf-switching'); f.onload = null; }; f.src = f.src; }
+      if (t === 'pf:version') { if(window.__pfRefreshSummary)window.__pfRefreshSummary(true); f.classList.add('pf-switching'); f.onload = function () { f.classList.remove('pf-switching'); f.onload = null; }; f.src = f.src; }
       if (t === 'pf:regrant' && !regranting) {
         regranting = true;
         // The credentialed chrome API mints a new cap with no navigation; until it exists (or if

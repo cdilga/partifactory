@@ -82,3 +82,25 @@ test('signed-out root and cards are content-free and identical for crawlers',asy
   const png=await card.body();expect(png.readUInt32BE(16)).toBe(1200);expect(png.readUInt32BE(20)).toBe(630);expect(png.length).toBeLessThanOrEqual(150000);
   const manifest=await request.get(url+'_pf/manifest.webmanifest');expect(await manifest.json()).toMatchObject({id:'/',scope:'/'});
 });
+
+test('a drafting part receives its first live version through the sandbox prelude',async({page,request},info)=>{
+  test.skip(!['chromium-desktop','webkit-mobile'].includes(info.project.name));
+  const name='wrapper-draft-'+info.project.name;
+  const token=fs.readFileSync(process.env.PF_DEV_API_TOKEN_FILE??'/run/pf/run/secrets/api_token','utf8').trim();
+  const headers={Authorization:`Bearer ${token}`};
+  const call=async(op:string,data:unknown)=>request.post('/api/v1/'+op,{headers,data});
+  const created=await call('part_create',{name,title:'A part taking shape',kind:'html',request_id:name+'-create'});
+  expect(created.status()).toBe(200);expect(await created.json()).toMatchObject({head:0,live:null});
+  await signIn(page);const stream=page.waitForResponse(r=>r.url().includes('/_rt/events')&&r.status()===200);await page.goto('https://'+name+'-part.pf.test/');
+  await expect(page.locator('#pf-drafting')).toBeVisible();await expect(page.locator('#pf-drafting h1')).toHaveText('A part taking shape');
+  await expect(page.locator('html')).toHaveAttribute('data-pf-ready','1');await stream;
+  await page.evaluate(()=>{(window as any).__versionPosts=0;window.addEventListener('message',e=>{if(e.source===(document.getElementById('pf-frame') as HTMLIFrameElement).contentWindow&&e.data?.type==='pf:version')(window as any).__versionPosts++;});});
+  await expect.poll(async()=>{const frame=page.frames().find(f=>f.url().includes('/c/'));return frame?.evaluate(()=>!!(window as any).partifactory);}).toBe(true);
+  // A real build promotes version 1; the existing v0 document's event stream tells the wrapper.
+  const edit=await call('part_edit',{name,request_id:name+'-first-version',edits:[{op:'write',file:'index.html',content:'<!doctype html><h1>Ready for the household</h1>'}]});
+  expect(edit.status()).toBe(200);
+  await expect(page.frameLocator('#pf-frame').getByRole('heading',{name:'Ready for the household'})).toBeVisible();
+  await expect(page.locator('#pf-drafting')).toBeHidden();await expect(page.locator('.pf-revision')).toHaveText('REV 1');
+  await expect.poll(()=>page.evaluate(()=>(window as any).__versionPosts)).toBeGreaterThanOrEqual(1);
+  await call('part_edit',{name,request_id:name+'-delete',delete:true});
+});

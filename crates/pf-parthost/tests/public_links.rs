@@ -293,3 +293,42 @@ async fn nonexistent_hosts_do_not_get_a_wrapper_on_arbitrary_paths() {
         assert!(!text.contains("pf-frame"));
     }
 }
+
+#[tokio::test]
+async fn unbuilt_content_runs_the_platform_prelude_without_part_bytes() {
+    let (_db, host, router) = fixture().await;
+    let cap = pf_caps::mint(
+        &host.deps().keys,
+        &host.deps().epochs,
+        &pf_caps::Grant {
+            part_id: "p_pixel".into(),
+            host: "pixel".into(),
+            subject: "user:u_admin".into(),
+            role: 3,
+            minter: "sess:drafting".into(),
+            ..Default::default()
+        },
+        host.now(),
+    )
+    .unwrap();
+    let response = req(&router, &format!("/c/{cap}/"), "GET", "Mozilla").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["cache-control"], "no-store");
+    assert!(
+        response.headers()["content-security-policy"]
+            .to_str()
+            .unwrap()
+            .contains("sandbox allow-scripts")
+    );
+    let html = String::from_utf8(
+        to_bytes(response.into_body(), 65536)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(html.contains("being made…"));
+    assert!(html.contains("pf-boot"));
+    assert!(html.contains(&host.prelude_hash()));
+    assert!(!html.contains("Private title"));
+}
