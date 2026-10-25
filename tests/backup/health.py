@@ -24,6 +24,13 @@ def main():
     env = dict(os.environ, PF_RUN_DIR=str(run))
     logs = repo / "target/e2e-logs" / os.environ.get("PF_E2E_RUN", run.name)
     logs.mkdir(parents=True, exist_ok=True)
+    # Establish the real OIDC browser session before taking the provider down.
+    # This also makes the observer runnable on its own, without a prior full suite.
+    if not (run / "browser-auth/admin.json").is_file():
+        subprocess.run(compose + ["--profile", "browsers", "run", "--rm", "browsers",
+                                  "health_page.spec.ts", "--project", "chromium-desktop",
+                                  "--grep", "admin Health exposes"],
+                       cwd=repo, env=env, check=True)
     subprocess.run(compose + ["stop", "dex"], env=env, check=True, capture_output=True)
     try:
         deadline = time.monotonic() + 80
