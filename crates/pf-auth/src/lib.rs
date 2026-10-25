@@ -14,6 +14,13 @@ use pf_db::rusqlite::{OptionalExtension, params};
 use pf_db::{Db, DbError, ids};
 use sha2::{Digest, Sha256};
 
+mod admin;
+mod oidc;
+mod service;
+pub use admin::{ConsoleLogin, issue_console_login};
+mod webauthn;
+pub use service::{AuthService, RefreshTask, SessionActor, install};
+
 #[cfg(feature = "dev")]
 mod fixture;
 #[cfg(feature = "dev")]
@@ -53,6 +60,8 @@ pub enum AuthError {
     Directory(#[from] DirectoryError),
     #[error(transparent)]
     Db(#[from] DbError),
+    #[error(transparent)]
+    Model(#[from] pf_model::PfError),
 }
 
 impl From<pf_db::rusqlite::Error> for AuthError {
@@ -118,12 +127,30 @@ fn upsert_identity(
             |r| r.get(0),
         )
         .optional()?;
+    // Usernames are presentation, never an account-linking key. Distinct provider subjects may
+    // legitimately use the same name; retain separate users with a stable disambiguated slug.
+    let named: Option<String> = tx
+        .query_row(
+            "SELECT id FROM users WHERE username=?1",
+            [&id.username],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let username = if named.is_some() && named != existing {
+        format!(
+            "{}-{}",
+            id.username,
+            &service::hex(&secret_hash(&format!("{}#{}", id.issuer, id.sub)))[..12]
+        )
+    } else {
+        id.username.clone()
+    };
     let user_id = match existing {
         Some(uid) => {
             tx.execute(
-                "UPDATE users SET username = ?2, display_name = ?3, email = ?4, status = 'active', synced_at = ?5, last_seen_at = ?5
+                "UPDATE users SET username = ?2, display_name = ?3, email = ?4, synced_at = ?5, last_seen_at = ?5
                  WHERE id = ?1",
-                params![uid, id.username, id.display_name, id.email, now],
+                params![uid, username, id.display_name, id.email, now],
             )?;
             uid
         }
@@ -132,12 +159,13 @@ fn upsert_identity(
             tx.execute(
                 "INSERT INTO users (id, auth_source, idp_issuer, idp_sub, username, display_name, email, created_at, last_seen_at, synced_at)
                  VALUES (?1, 'oidc', ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7)",
-                params![uid, id.issuer, id.sub, id.username, id.display_name, id.email, now],
+                params![uid, id.issuer, id.sub, username, id.display_name, id.email, now],
             )?;
             uid
         }
     };
     set_claim_groups(tx, &user_id, &id.groups, now)?;
+    pf_model::spaces::ensure_personal(tx, &user_id, now)?;
     Ok(user_id)
 }
 
@@ -175,6 +203,8 @@ pub async fn create_session(db: &Db, id: &Identity, now: i64) -> Result<NewSessi
     let user_id = db
         .write(move |tx| {
             let uid = upsert_identity(tx, &id, now)?;
+            let active: bool = tx.query_row("SELECT status='active' FROM users WHERE id=?1",[&uid],|r|r.get(0))?;
+            if !active { return Err(AuthError::Directory(DirectoryError::Disabled)); }
             tx.execute(
                 "INSERT INTO sessions (id_hash, user_id, created_at, last_used_at, expires_at, idp_checked_at)
                  VALUES (?1, ?2, ?3, ?3, ?4, ?3)",
@@ -290,3 +320,6 @@ pub async fn groups_of(db: &Db, user_id: &str) -> Result<Vec<String>, AuthError>
     })
     .await
 }
+
+#[cfg(test)]
+mod tests;

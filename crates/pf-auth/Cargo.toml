@@ -8,16 +8,34 @@ publish = false
 
 [features]
 # The fixture directory (`StaticDirectory`, `TestSession`). Never in release builds.
-dev = ["dep:toml", "dep:serde"]
+dev = ["dep:toml"]
 
 [dependencies]
 getrandom = "0.3"
+axum = "0.8"
+base64 = "0.22"
+chacha20poly1305 = "0.10"
+http = "1"
+openidconnect = "4"
+pf-caps = { path = "../pf-caps" }
+pf-config = { path = "../pf-config" }
 pf-db = { path = "../pf-db" }
-serde = { workspace = true, optional = true }
+pf-model = { path = "../pf-model" }
+pf-policy = { path = "../pf-policy" }
+pf-serve = { path = "../pf-serve" }
+serde.workspace = true
+serde_json.workspace = true
 sha2 = "0.10"
 thiserror.workspace = true
+tokio = { version = "1", features = ["sync", "time"] }
 toml = { workspace = true, optional = true }
 tracing.workspace = true
+url = "2"
+webauthn-rs = "0.5"
+
+# Stable webauthn-rs uses OpenSSL; statically compile it for the scratch-image musl binary.
+[target.'cfg(target_env = "musl")'.dependencies]
+openssl = { version = "0.10", features = ["vendored"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }

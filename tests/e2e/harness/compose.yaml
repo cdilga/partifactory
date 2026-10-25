@@ -129,6 +129,9 @@ services:
     environment:
       PF_SITE_TOML: /run/pf/site.toml
       PF_DATA_DIR: /data
+      PF_DEV_API_TOKEN_FILE: /run/secrets/api_token
+      PF_DEV_IDENTITY: /run/pf/identity.toml
+      PF_IDP_CLIENT_SECRET_FILE: /run/secrets/idp_client_secret
       PF_SESSION_KEY_FILE: /run/secrets/session_key
       PF_CAP_HMAC_KEY_FILE: /run/secrets/cap_hmac_key
       PF_METRICS_TOKEN_FILE: /run/secrets/metrics_token
@@ -138,6 +141,7 @@ services:
     volumes:
       - ${PF_BIN:-/nonexistent}:/usr/local/bin/partifactory:ro
       - ${PF_RUN_DIR:?}/site.toml:/run/pf/site.toml:ro
+      - ${PF_RUN_DIR:?}/identity.toml:/run/pf/identity.toml:ro
       - ${PF_RUN_DIR:?}/certs/ca.pem:/run/pf/ca.pem:ro
       - ${PF_RUN_DIR:?}/secrets:/run/secrets:ro
       - pf-data:/data

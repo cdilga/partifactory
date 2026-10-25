@@ -1,6 +1,7 @@
 //! partifactory: one static binary with every asset embedded. Invoked as `part` (argv[0]),
 //! it is the CLI; the build worker is this same binary re-exec'd as `build-worker`.
 
+mod api;
 #[cfg(feature = "dev")]
 mod dev;
 mod store;
@@ -128,10 +129,10 @@ fn main() -> ExitCode {
         Command::Deploy => stub("deploy"),
         Command::Admin {
             command: AdminCommand::Bootstrap,
-        } => stub("admin bootstrap"),
+        } => admin_console(true),
         Command::Admin {
             command: AdminCommand::BreakGlass,
-        } => stub("admin break-glass"),
+        } => admin_console(false),
         Command::Bench => stub("bench"),
         Command::Logs => stub("logs"),
     }
@@ -145,7 +146,11 @@ fn stub(name: &str) -> ExitCode {
 /// The fixture identity (`PF_DEV_IDENTITY`, the static directory) belongs to dev builds only: a
 /// release build refuses to start with it, so a test login can never reach a deployment.
 fn refuse_dev_identity_in_release(env: &pf_config::Env) -> Result<(), ExitCode> {
-    if cfg!(feature = "dev") || !env.contains_key("PF_DEV_IDENTITY") {
+    if cfg!(feature = "dev")
+        || (!env.contains_key("PF_DEV_IDENTITY")
+            && !env.contains_key("PF_DEV_API_TOKEN")
+            && !env.contains_key("PF_DEV_API_TOKEN_FILE"))
+    {
         return Ok(());
     }
     tracing::error!(
@@ -204,7 +209,37 @@ fn serve() -> ExitCode {
         tracing::error!(event = "dev.socket", outcome = "error", error = %e, "cannot start the dev socket");
         return ExitCode::FAILURE;
     }
+    let auth = match pf_auth::AuthService::from_loaded(st.db.clone(), st.epochs.clone(), &loaded) {
+        Ok(auth) => auth,
+        Err(error) => {
+            tracing::error!(event = "auth.init", outcome = "error", %error);
+            return ExitCode::FAILURE;
+        }
+    };
+    let _maintenance = match store::start_maintenance(&st) {
+        Ok(task) => task,
+        Err(error) => {
+            tracing::error!(event="maintenance.start",outcome="error",%error);
+            return ExitCode::FAILURE;
+        }
+    };
+    let _directory = match auth.start_refresh() {
+        Ok(task) => task,
+        Err(error) => {
+            tracing::error!(event="directory.start",outcome="error",%error);
+            return ExitCode::FAILURE;
+        }
+    };
+    let api_auth = match api::authenticator(st.db.clone(), auth.workspace_origin(), &env) {
+        Ok(auth) => auth,
+        Err(error) => {
+            tracing::error!(event="api.init",outcome="error",%error);
+            return ExitCode::FAILURE;
+        }
+    };
     let result = pf_serve::run_blocking(&loaded, &env, |b| {
+        pf_api::install(b, pf_ops::Registry::new(st.parts.clone()), api_auth);
+        pf_auth::install(b, auth);
         pf_parthost::install(b, &st.host);
         let db = st.db.clone();
         b.ready_check("db", pf_serve::CheckKind::Required, move || {
@@ -262,6 +297,52 @@ fn config_check() -> ExitCode {
                 pf_config::report(d);
             }
             ExitCode::from(EXIT_CONFIG)
+        }
+    }
+}
+
+/// The host console is the authority for the short-lived offline recovery link.
+fn admin_console(bootstrap: bool) -> ExitCode {
+    pf_obs::init_json_logs();
+    let env = pf_config::process_env();
+    let loaded = match load_config(&env) {
+        Ok(loaded) => loaded,
+        Err(code) => return code,
+    };
+    let db = match pf_db::Db::open_main(store::data_dir(&env).join("partifactory.db")) {
+        Ok(db) => db,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let hosts = pf_serve::HostRules::new(
+        &loaded.site.domain.apex,
+        &loaded.site.domain.workspace_host,
+        &loaded.site.domain.part_suffix,
+    );
+    match pf_auth::issue_console_login(
+        &db,
+        &loaded.site.admin.subject,
+        &format!("https://{}", hosts.workspace_host()),
+        bootstrap,
+    ) {
+        Ok(login) => {
+            println!(
+                "One-time admin login (expires in 5 minutes):\n{}",
+                login.url
+            );
+            if bootstrap {
+                println!(
+                    "Keep this immutable admin pin in your offline site config:\n[admin]\nsubject = \"{}\"",
+                    login.subject
+                );
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
         }
     }
 }

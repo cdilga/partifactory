@@ -11,6 +11,7 @@ scope advertised) for the identity bead's second-provider test.
 Every static user's password is `password` (test only). Dex has no disabled state: a
 `disabled = true` user exists in Dex and partifactory's directory refuses them.
 """
+import base64
 import json
 import os
 import sys
@@ -23,6 +24,14 @@ PASSWORD_HASH = "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
 def q(s):
     # JSON strings are valid YAML scalars.
     return json.dumps(s)
+
+
+def dex_user_id(subject):
+    """Decode the fixture's canonical local-connector IDTokenSubject protobuf."""
+    raw = base64.urlsafe_b64decode(subject + "=" * (-len(subject) % 4))
+    if len(raw) < 3 or raw[0] != 10 or raw[2 + raw[1]:] != bytes([18, 5]) + b"local":
+        raise ValueError("fixture subject is not a canonical Dex local subject")
+    return raw[2:2 + raw[1]].decode()
 
 
 def render(issuer, client_id, redirect_hosts, users, with_groups):
@@ -59,7 +68,7 @@ def render(issuer, client_id, redirect_hosts, users, with_groups):
             f"    hash: {q(PASSWORD_HASH)}",
             f"    username: {q(u['username'])}",
             f"    name: {q(u.get('display_name', u['username']))}",
-            f"    userID: {q(u['sub'])}",
+            f"    userID: {q(dex_user_id(u['sub']))}",
         ]
         if with_groups and u.get("groups"):
             lines.append("    groups:")
@@ -80,6 +89,7 @@ def main():
                 sys.exit(f"gen-dex: user {u['username']} is in unknown group {g}")
     apex = os.environ.get("PF_APEX", "pf.test")
     redirects = [
+        "https://parts.pf.test/oidc/callback",
         "https://parts.pf.test/oauth/callback",
         "https://parts.pf.test/auth/callback",
         "https://parts.pf.test/_dev/callback",

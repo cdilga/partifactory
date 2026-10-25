@@ -2,6 +2,8 @@
 # `dev` feature only). The e2e harness's Dex config seeds the same people and groups, so a test
 # that signs in through Dex and one that uses this file see the same directory.
 #
+# Subjects match Dex's canonical local-connector subjects. gen-dex.py decodes them to
+# configured user IDs, so real OIDC and fixture sessions use the same immutable identity.
 # Role words only, never real names (AGENTS.md "Secrets and site config").
 
 issuer = "https://dex.pf.test/dex"
@@ -16,35 +18,35 @@ name = "adults"
 name = "kids"
 
 [[users]]
-sub = "fixture-admin"
+sub = "Cg1maXh0dXJlLWFkbWluEgVsb2NhbA"
 username = "admin"
 display_name = "The admin"
 email = "admin@example.com"
 groups = ["household", "adults"]
 
 [[users]]
-sub = "fixture-member-a"
+sub = "ChBmaXh0dXJlLW1lbWJlci1hEgVsb2NhbA"
 username = "member-a"
 display_name = "Member A"
 email = "member-a@example.com"
 groups = ["household", "adults"]
 
 [[users]]
-sub = "fixture-member-b"
+sub = "ChBmaXh0dXJlLW1lbWJlci1iEgVsb2NhbA"
 username = "member-b"
 display_name = "Member B"
 email = "member-b@example.com"
 groups = ["household", "kids"]
 
 [[users]]
-sub = "fixture-outsider"
+sub = "ChBmaXh0dXJlLW91dHNpZGVyEgVsb2NhbA"
 username = "outsider"
 display_name = "An outsider"
 email = "outsider@example.com"
 groups = []
 
 [[users]]
-sub = "fixture-disabled"
+sub = "ChBmaXh0dXJlLWRpc2FibGVkEgVsb2NhbA"
 username = "disabled"
 display_name = "A disabled user"
 email = "disabled@example.com"

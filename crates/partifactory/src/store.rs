@@ -5,7 +5,7 @@
 use pf_blobs::BlobStore;
 use pf_caps::EpochStore;
 use pf_db::Db;
-use pf_model::{GrantPolicy, PartService, ServiceConfig};
+use pf_model::{PartService, ServiceConfig};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -59,7 +59,7 @@ pub fn open(data_dir: &Path, loaded: &pf_config::Loaded) -> Result<Store, String
         db.clone(),
         blobs.clone(),
         cfg,
-        Arc::new(GrantPolicy),
+        Arc::new(pf_policy::Engine),
         epochs.clone(),
     );
     let host = pf_parthost::PartHost::new(
@@ -79,6 +79,7 @@ pub fn open(data_dir: &Path, loaded: &pf_config::Loaded) -> Result<Store, String
             site.embed.frame_ancestors.clone(),
         ),
     );
+    let host = host.with_data_events(parts.events.clone());
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -162,4 +163,49 @@ pub fn start_builds(
         .block_on(store.host.seed())
         .map_err(|e| e.to_string())?;
     Ok(engine)
+}
+
+/// Periodic shared-data snapshots. Owns its runtime and stops when `serve` exits.
+pub struct Maintenance {
+    stop: Option<tokio::sync::oneshot::Sender<()>>,
+    join: Option<std::thread::JoinHandle<()>>,
+}
+impl Drop for Maintenance {
+    fn drop(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
+}
+pub fn start_maintenance(store: &Store) -> Result<Maintenance, String> {
+    let parts = store.parts.clone();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let join = std::thread::Builder::new()
+        .name("pf-maintenance".into())
+        .spawn(move || {
+            runtime.block_on(async move {
+                let work = async {
+                    let mut interval = tokio::time::interval(Duration::from_secs(60));
+                    loop {
+                        interval.tick().await;
+                        if let Err(error) = parts.snapshot_tick().await {
+                            tracing::warn!(event="snapshot.tick",outcome="error",%error);
+                        }
+                    }
+                };
+                tokio::select! {_=work=>{},_=stopped=>{}}
+            });
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(Maintenance {
+        stop: Some(stop),
+        join: Some(join),
+    })
 }

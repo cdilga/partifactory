@@ -34,12 +34,18 @@ trap 'exit 130' INT TERM
 [ -x "$PF_BIN" ] || { echo "up.sh: no binary at $PF_BIN (cargo build -p partifactory --features dev)" >&2; exit 1; }
 
 "$h/ca.sh" "$run/certs" >/dev/null
-python3 "$h/gen-dex.py" "$repo/tests/fixtures/identity.toml" "$run/dex" >&2
+python3 - "$repo/tests/fixtures/identity.toml" "$run/identity.toml" "$PF_APEX" <<'PYFIX'
+import pathlib, sys
+pathlib.Path(sys.argv[2]).write_text(pathlib.Path(sys.argv[1]).read_text().replace("pf.test", sys.argv[3]))
+PYFIX
+python3 "$h/gen-dex.py" "$run/identity.toml" "$run/dex" >&2
+admin_sub="$(python3 -c 'import sys,tomllib; print(next(u["sub"] for u in tomllib.load(open(sys.argv[1],"rb"))["users"] if u["username"]=="admin"))' "$run/identity.toml")"
 chmod 644 "$run/dex/"*.yaml
 
-for s in session_key cap_hmac_key metrics_token; do
+for s in session_key cap_hmac_key metrics_token api_token; do
   openssl rand -hex 32 | tr -d '\n' > "$run/secrets/$s"
 done
+printf '%s' 'harness-client-secret' > "$run/secrets/idp_client_secret"
 chmod 644 "$run/secrets/"*
 
 if [ "$mode" = host ]; then
@@ -67,7 +73,18 @@ client_ip_header = "X-Forwarded-For"
 request_id_header = "X-Request-Id"
 trusted_proxies = $trusted
 
+[idp]
+issuer = "https://dex.$PF_APEX/dex"
+client_id = "partifactory"
+groups_claim = "groups"
+audience_group = "household"
+
+[admin]
+subject = "oidc:https://dex.$PF_APEX/dex#$admin_sub"
+
 [mirror.test_resolve]
+"dex.$PF_APEX" = "$mirror_addr"
+"dex2.$PF_APEX" = "$mirror_addr"
 "cdnjs.cloudflare.com" = "$mirror_addr"
 "cdn.jsdelivr.net" = "$mirror_addr"
 "unpkg.com" = "$mirror_addr"
@@ -78,6 +95,8 @@ EOF
 
 if [ "$mode" = host ]; then
   PF_SITE_TOML="$run/site.toml" PF_DATA_DIR="$run/data" \
+  PF_DEV_API_TOKEN_FILE="$run/secrets/api_token" PF_DEV_IDENTITY="$run/identity.toml" \
+  PF_IDP_CLIENT_SECRET_FILE="$run/secrets/idp_client_secret" \
   PF_SESSION_KEY_FILE="$run/secrets/session_key" \
   PF_CAP_HMAC_KEY_FILE="$run/secrets/cap_hmac_key" \
   PF_METRICS_TOKEN_FILE="$run/secrets/metrics_token" \
