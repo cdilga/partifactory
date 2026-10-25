@@ -29,6 +29,19 @@ pub(crate) fn authorize(s: &PartHost, req: &Request) -> Result<(String, Claims),
         .unwrap_or("");
     match pf_caps::verify(&s.deps().keys, &s.deps().epochs, cap, name, s.now()) {
         Ok(c) => {
+            if let Some(id) = c.s.strip_prefix("link:") {
+                let id = id.to_owned();
+                let now = s.now();
+                let live=s.deps().db.read_blocking(move |db| {
+                    db.query_row("SELECT EXISTS(SELECT 1 FROM public_links l JOIN parts p ON p.id=l.part_id WHERE l.id=?1 AND l.revoked_at IS NULL AND (l.expires_at IS NULL OR l.expires_at>?2) AND p.deleted_at IS NULL)",pf_db::rusqlite::params![id,now],|r|r.get::<_,bool>(0)).map_err(pf_db::DbError::from)
+                }).unwrap_or(false);
+                if !live {
+                    return Err(Box::new(StatusCode::NOT_FOUND.into_response()));
+                }
+                if let Some(r) = pf_links::web::limit_link(req, c.s.as_str()) {
+                    return Err(Box::new(r));
+                }
+            }
             tracing::info!(event = "cap.verify", outcome = "ok");
             Ok((cap.into(), c))
         }
@@ -42,6 +55,20 @@ pub(crate) fn authorize(s: &PartHost, req: &Request) -> Result<(String, Claims),
                 _ => "bad_mac",
             };
             tracing::info!(event = "cap.verify", outcome);
+            // A valid signature identifies a link even when the live epoch has moved on.
+            // Revoked/frozen public capabilities never lead to the signed-in grant flow.
+            if e.is_reauth()
+                && pf_caps::verify(
+                    &s.deps().keys,
+                    &pf_caps::EpochStore::default(),
+                    cap,
+                    name,
+                    s.now(),
+                )
+                .is_ok_and(|c| c.s.starts_with("link:"))
+            {
+                return Err(Box::new(StatusCode::NOT_FOUND.into_response()));
+            }
             if e.is_reauth() {
                 let navigation = req.method() == http::Method::GET
                     && req
@@ -103,13 +130,26 @@ pub async fn bare_cap(s: PartHost, req: Request) -> Response {
 }
 
 pub async fn serve(s: PartHost, req: Request) -> Response {
-    if req.method() != http::Method::GET && req.method() != http::Method::HEAD {
-        return StatusCode::METHOD_NOT_ALLOWED.into_response();
-    }
     let (cap, c) = match authorize(&s, &req) {
         Ok(v) => v,
         Err(r) => return *r,
     };
+    let guest_path = req
+        .uri()
+        .path()
+        .strip_prefix(&format!("/c/{cap}/"))
+        .unwrap_or("");
+    let guest_path = percent_encoding::percent_decode_str(guest_path).decode_utf8_lossy();
+    if c.s.starts_with("link:") && matches!(guest_path.split('/').next(), Some("api" | "mcp")) {
+        tracing::info!(event="rt.op",principal=%c.s,outcome="forbidden");
+        return error(pf_model::PfError::new(
+            "forbidden",
+            "guest capabilities only access shared data",
+        ));
+    }
+    if req.method() != http::Method::GET && req.method() != http::Method::HEAD {
+        return StatusCode::METHOD_NOT_ALLOWED.into_response();
+    }
     let live = match s.live(&c.h, c.v.as_deref()).await {
         Ok(Some(l)) if l.part_id == c.p => l,
         Ok(_) => return StatusCode::NOT_FOUND.into_response(),

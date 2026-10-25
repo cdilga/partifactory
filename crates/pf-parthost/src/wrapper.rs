@@ -86,26 +86,92 @@ pub async fn blob(s: PartHost, req: Request) -> Response {
 }
 
 pub async fn page(s: PartHost, req: Request) -> Response {
-    if req.uri().path() != "/" && req.uri().path() != "/_pf/" {
+    let req = if req.method() == http::Method::POST && req.uri().path().starts_with("/l/") {
+        let (parts, body) = req.into_parts();
+        match axum::body::to_bytes(body, 1024).await {
+            Ok(bytes) => Request::from_parts(parts, Body::from(bytes)),
+            Err(_) => return StatusCode::PAYLOAD_TOO_LARGE.into_response(),
+        }
+    } else {
+        req
+    };
+    let Some(p) = req.extensions().get::<pf_serve::PartHost>() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let name = p.0.clone();
+    let mut is_link = false;
+    let public;
+    if let Some(rest) = req.uri().path().strip_prefix("/l/") {
+        let (token, action) = rest.split_once('/').unwrap_or((rest, ""));
+        if !matches!(action, "" | "go") {
+            return StatusCode::NOT_FOUND.into_response();
+        }
+        let links = s.links();
+        let link = match links.lookup(token, &name, s.now()).await {
+            Err(e) => {
+                return if e.code == "link_expired" {
+                    pf_serve::error_page(StatusCode::GONE, "LINK EXPIRED")
+                } else {
+                    StatusCode::NOT_FOUND.into_response()
+                };
+            }
+            Ok(l) => l,
+        };
+        if let Some(r) = pf_links::web::limit_link(&req, &format!("link:{}", link.id)) {
+            return r;
+        }
+        if action == "go" {
+            if req.method() != http::Method::POST {
+                return StatusCode::METHOD_NOT_ALLOWED.into_response();
+            }
+            if req
+                .headers()
+                .get(header::ORIGIN)
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|o| o != s.config().part_origin(&name))
+            {
+                return StatusCode::FORBIDDEN.into_response();
+            }
+            return match links.go(token, &name, s.now()).await {
+                Ok(cap) => {
+                    let mut r = axum::Json(serde_json::json!({"cap": cap})).into_response();
+                    r.headers_mut().insert(
+                        header::CACHE_CONTROL,
+                        http::HeaderValue::from_static("no-store"),
+                    );
+                    r
+                }
+                Err(e) => error(e),
+            };
+        }
+        is_link = true;
+        public = true;
+    } else if req.uri().path() != "/" && req.uri().path() != "/_pf/" {
         return pf_serve::error_page(StatusCode::NOT_FOUND, "Nothing here.");
+    } else {
+        public = s.links().active(&name, s.now()).await.unwrap_or(false);
     }
     if req.method() != http::Method::GET && req.method() != http::Method::HEAD {
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
-    let Some(p) = req.extensions().get::<pf_serve::PartHost>() else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
     let script = format!("{}/b/{}", s.config().blob_origin(), s.wrapper_hash());
+    let card = if public {
+        "Anyone with the link"
+    } else {
+        "Sign in to open this part"
+    };
+    let link_attr = if is_link { " data-pf-link=\"1\"" } else { "" };
     let body = format!(
-        "<!doctype html><html data-pf-part=\"{}\" data-pf-ws=\"{}\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>partifactory</title><script src=\"{script}\" defer></script></head><body></body></html>",
-        p.0,
+        "<!doctype html><html data-pf-part=\"{}\" data-pf-ws=\"{}\"{link_attr}><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex,nofollow\"><meta property=\"og:title\" content=\"partifactory\"><meta property=\"og:description\" content=\"{card}\"><title>partifactory</title><script src=\"{script}\" defer></script></head><body><div id=\"pf-card\">{card}</div></body></html>",
+        name,
         s.config().workspace_origin()
     );
     let csp = format!(
-        "default-src 'none'; script-src {}; style-src 'unsafe-inline'; frame-src {}; connect-src {}; base-uri 'none'; frame-ancestors 'none'",
+        "default-src 'none'; script-src {}; style-src 'unsafe-inline'; frame-src {}; connect-src {} {}; base-uri 'none'; frame-ancestors 'none'",
         s.config().blob_origin(),
-        s.config().part_origin(&p.0),
-        s.config().workspace_origin()
+        s.config().part_origin(&name),
+        s.config().workspace_origin(),
+        s.config().part_origin(&name)
     );
     let mut r = axum::response::Html(if req.method() == http::Method::HEAD {
         String::new()
@@ -116,6 +182,10 @@ pub async fn page(s: PartHost, req: Request) -> Response {
     r.headers_mut().insert(
         header::CONTENT_SECURITY_POLICY,
         http::HeaderValue::from_str(&csp).unwrap(),
+    );
+    r.headers_mut().insert(
+        "x-robots-tag",
+        http::HeaderValue::from_static("noindex, nofollow"),
     );
     r.headers_mut().insert(
         header::CACHE_CONTROL,
