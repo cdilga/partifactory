@@ -360,6 +360,7 @@ fn wrapper_route(
 pub fn install(b: &mut ServerBuilder, host: &PartHost) {
     b.ext(host.clone());
     pf_links::web::install(b, &host.links());
+    pf_ui::install(b);
     b.rate_rule(pf_serve::RateRule::per_ip(
         "rt",
         "rt",

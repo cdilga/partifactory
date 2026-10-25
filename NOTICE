@@ -1,6 +1,10 @@
 partifactory
 Copyright (c) 2026 Chris Dilger
 
+IBM Plex Mono: Copyright © 2017 IBM Corp. with Reserved Font Name "Plex".
+Licensed under the SIL Open Font License 1.1. The full license is included at
+crates/pf-ui/assets/FONT-LICENSE.txt and served at /licenses/fonts.
+
 partifactory is inspired by shartifacts by Lane Birmingham (birmo),
 https://github.com/LaneBirmingham/shartifacts, released under the MIT License.
 Its design (MCP tool shapes, Claude artifact compatibility matrix, security

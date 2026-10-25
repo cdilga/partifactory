@@ -9,19 +9,30 @@ use pf_model::PfError;
 
 pub async fn seed(s: &PartHost) -> Result<(), PfError> {
     let mut seeds = Vec::new();
-    for (label, src) in [
-        (pf_prelude::PRELUDE_LABEL, pf_prelude::PRELUDE_JS),
-        (pf_prelude::WRAPPER_LABEL, pf_prelude::WRAPPER_JS),
+    let css = pf_ui::wrapper_css();
+    for (label, src, typ) in [
+        (
+            pf_prelude::PRELUDE_LABEL,
+            pf_prelude::PRELUDE_JS.as_bytes(),
+            "text/javascript; charset=utf-8",
+        ),
+        (
+            pf_prelude::WRAPPER_LABEL,
+            pf_prelude::WRAPPER_JS.as_bytes(),
+            "text/javascript; charset=utf-8",
+        ),
+        ("pf-wrapper.css", css.as_bytes(), "text/css; charset=utf-8"),
+        ("pf-wrapper-mono.woff2", pf_ui::MONO_FONT, "font/woff2"),
     ] {
-        let put = s.deps().blobs.put(src.as_bytes())?;
-        seeds.push((label.to_string(), put.hash, put.size as i64));
+        let put = s.deps().blobs.put(src)?;
+        seeds.push((label.to_string(), put.hash, put.size as i64, typ.to_owned()));
     }
     let now = s.now();
     let rows = seeds.clone();
     let (shared,css)=s.write(move |db|{
-        for (label,hash,size) in rows {
+        for (label,hash,size,typ) in rows {
             db.execute("INSERT INTO blobs(hash,size,created_at) VALUES(?1,?2,?3) ON CONFLICT DO NOTHING",pf_db::rusqlite::params![hash,size,now])?;
-            db.execute("INSERT INTO shared_blobs(hash,source,label,added_at,content_type) VALUES(?1,'seed',?2,?3,'text/javascript; charset=utf-8') ON CONFLICT(hash) DO UPDATE SET content_type=excluded.content_type",pf_db::rusqlite::params![hash,label,now])?;
+            db.execute("INSERT INTO shared_blobs(hash,source,label,added_at,content_type) VALUES(?1,'seed',?2,?3,?4) ON CONFLICT(hash) DO UPDATE SET content_type=excluded.content_type",pf_db::rusqlite::params![hash,label,now,typ])?;
         }
         let mut st=db.prepare("SELECT s.hash,s.label,s.content_type FROM shared_blobs s ORDER BY s.added_at DESC")?;
         let rows=st.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?.collect::<Result<Vec<_>,_>>()?;
@@ -56,12 +67,33 @@ pub async fn blob(s: PartHost, req: Request) -> Response {
     else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let b = match s.bytes(hash) {
+    let mut b = match s.bytes(hash) {
         Ok(b) => b,
         Err(e) => return error(e),
     };
+    let accepts_br = req
+        .headers()
+        .get(header::ACCEPT_ENCODING)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| {
+            v.split(',').any(|e| {
+                let mut p = e.trim().split(';');
+                p.next() == Some("br") && !p.any(|q| q.trim() == "q=0")
+            })
+        });
+    let compressed = if hash == s.wrapper_hash() {
+        Some(pf_prelude::WRAPPER_BR)
+    } else if hash == pf_blobs::sha256_hex(pf_ui::wrapper_css().as_bytes()) {
+        Some(pf_ui::WRAPPER_CSS_BR)
+    } else {
+        None
+    };
+    let use_br = accepts_br && compressed.is_some();
+    if use_br {
+        b = compressed.unwrap().to_vec().into();
+    }
     tracing::info!(event = "blobhost.serve", outcome = "ok");
-    let etag = format!("\"{hash}\"");
+    let etag = format!("\"{hash}{}\"", if use_br { "-br" } else { "" });
     let mut r = if req
         .headers()
         .get(header::IF_NONE_MATCH)
@@ -73,6 +105,16 @@ pub async fn blob(s: PartHost, req: Request) -> Response {
     } else {
         Body::from(b).into_response()
     };
+    if use_br {
+        r.headers_mut().insert(
+            header::CONTENT_ENCODING,
+            http::HeaderValue::from_static("br"),
+        );
+    }
+    r.headers_mut().insert(
+        header::VARY,
+        http::HeaderValue::from_static("Accept-Encoding"),
+    );
     r.headers_mut().insert(
         header::CACHE_CONTROL,
         http::HeaderValue::from_static("public, max-age=31536000, immutable"),
@@ -99,6 +141,32 @@ pub async fn page(s: PartHost, req: Request) -> Response {
         return StatusCode::NOT_FOUND.into_response();
     };
     let name = p.0.clone();
+    let active = s
+        .deps()
+        .db
+        .read({
+            let name = name.clone();
+            move |db| {
+                db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM parts WHERE name=?1 AND deleted_at IS NULL)",
+                    [name],
+                    |r| r.get::<_, bool>(0),
+                )
+                .map_err(pf_db::DbError::from)
+            }
+        })
+        .await;
+    match active {
+        Ok(true) => {}
+        Ok(false) => return pf_serve::error_page(StatusCode::NOT_FOUND, "Nothing here."),
+        Err(e) => return error(e.into()),
+    }
+    if req.uri().path() == "/_pf/manifest.webmanifest" {
+        return ([(header::CONTENT_TYPE,"application/manifest+json"),(header::CACHE_CONTROL,"public, max-age=3600")],r#"{"id":"/","scope":"/","start_url":"/","name":"partifactory","short_name":"part","display":"standalone","icons":[{"src":"/_pf/icon.svg","sizes":"any","type":"image/svg+xml"}]}"#).into_response();
+    }
+    if req.uri().path() == "/_pf/icon.svg" {
+        return ([(header::CONTENT_TYPE,"image/svg+xml"),(header::CACHE_CONTROL,"public, max-age=31536000, immutable")],r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="3" fill="#1c6a47"/><path d="M6 7h12v5H6zM9 17h6" fill="none" stroke="white" stroke-width="1.5"/></svg>"##).into_response();
+    }
     let mut is_link = false;
     let public;
     if let Some(rest) = req.uri().path().strip_prefix("/l/") {
@@ -146,7 +214,7 @@ pub async fn page(s: PartHost, req: Request) -> Response {
         }
         is_link = true;
         public = true;
-    } else if req.uri().path() != "/" && req.uri().path() != "/_pf/" {
+    } else if req.uri().path().starts_with("/_pf/") && req.uri().path() != "/_pf/" {
         return pf_serve::error_page(StatusCode::NOT_FOUND, "Nothing here.");
     } else {
         public = s.links().active(&name, s.now()).await.unwrap_or(false);
@@ -154,24 +222,49 @@ pub async fn page(s: PartHost, req: Request) -> Response {
     if req.method() != http::Method::GET && req.method() != http::Method::HEAD {
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
+    let unsandboxed = s
+        .live(&name, None)
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|live| live.unsandboxed);
+    let unsandboxed_attr = if unsandboxed {
+        " data-pf-unsandboxed=\"1\""
+    } else {
+        ""
+    };
     let script = format!("{}/b/{}", s.config().blob_origin(), s.wrapper_hash());
+    let css = format!(
+        "{}/b/{}",
+        s.config().blob_origin(),
+        pf_blobs::sha256_hex(pf_ui::wrapper_css().as_bytes())
+    );
     let card = if public {
         "Anyone with the link"
     } else {
-        "Sign in to open this part"
+        "Sign in to open"
     };
     let link_attr = if is_link { " data-pf-link=\"1\"" } else { "" };
+    let og = if public {
+        pf_ui::og::Card::Public
+    } else {
+        pf_ui::og::Card::Private
+    }
+    .tags(&s.config().workspace_origin());
     let body = format!(
-        "<!doctype html><html data-pf-part=\"{}\" data-pf-ws=\"{}\"{link_attr}><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex,nofollow\"><meta property=\"og:title\" content=\"partifactory\"><meta property=\"og:description\" content=\"{card}\"><title>partifactory</title><script src=\"{script}\" defer></script></head><body><div id=\"pf-card\">{card}</div></body></html>",
+        "<!doctype html><html data-pf-part=\"{}\" data-pf-ws=\"{}\"{link_attr}{unsandboxed_attr}><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex,nofollow\">{og}<link rel=\"stylesheet\" href=\"{css}\"><link rel=\"manifest\" href=\"/_pf/manifest.webmanifest\"><link rel=\"icon\" href=\"/_pf/icon.svg\"><title>partifactory</title><script src=\"{script}\" defer></script></head><body><div id=\"pf-card\">{card}</div><noscript>Sign in to open</noscript></body></html>",
         name,
         s.config().workspace_origin()
     );
     let csp = format!(
-        "default-src 'none'; script-src {}; style-src 'unsafe-inline'; frame-src {}; connect-src {} {}; base-uri 'none'; frame-ancestors 'none'",
+        "default-src 'none'; script-src {}; style-src {}; font-src {}; img-src 'self'; manifest-src 'self'; frame-src 'self'; connect-src {}{}; base-uri 'none'; frame-ancestors {} {}",
         s.config().blob_origin(),
-        s.config().part_origin(&name),
+        s.config().blob_origin(),
+        s.config().blob_origin(),
         s.config().workspace_origin(),
-        s.config().part_origin(&name)
+        if is_link { " 'self'" } else { "" },
+        s.config().workspace_origin(),
+        s.config().embedders.join(" ")
     );
     let mut r = axum::response::Html(if req.method() == http::Method::HEAD {
         String::new()
@@ -182,6 +275,15 @@ pub async fn page(s: PartHost, req: Request) -> Response {
     r.headers_mut().insert(
         header::CONTENT_SECURITY_POLICY,
         http::HeaderValue::from_str(&csp).unwrap(),
+    );
+    r.headers_mut().insert(
+        header::REFERRER_POLICY,
+        http::HeaderValue::from_static("no-referrer"),
+    );
+    tracing::info!(
+        event = "wrapper.serve",
+        audience = if public { "public" } else { "private" },
+        outcome = "ok"
     );
     r.headers_mut().insert(
         "x-robots-tag",

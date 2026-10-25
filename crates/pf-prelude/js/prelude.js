@@ -15,6 +15,15 @@
   var framed = false;
   try { framed = W.parent !== W; } catch (e) { framed = true; }
   var parentPost = function (msg) { if (framed) { try { W.parent.postMessage(msg, '*'); } catch (e) {} } };
+  var scrollPending = false;
+  W.addEventListener('scroll', function () {
+    if (scrollPending) return;
+    scrollPending = true;
+    W.requestAnimationFrame(function () {
+      scrollPending = false;
+      parentPost({ type: 'pf:scroll', y: W.scrollY || 0 });
+    });
+  }, { passive: true });
 
   // ------------------------------------------------------------------ boot snapshot (lazy)
   // The server puts <script type="application/json" id="pf-boot"> right after this tag, so it is

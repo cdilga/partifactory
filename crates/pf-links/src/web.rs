@@ -274,26 +274,49 @@ async fn admin_script() -> Response {
 /// independently check it again; a sibling part cannot change another part's links.
 async fn cors(req: axum::extract::Request, next: middleware::Next) -> Response {
     let origin = req.headers().get(header::ORIGIN).cloned();
-    let allowed = req
-        .extensions()
-        .get::<AppState>()
-        .and_then(|s| s.ext::<LinkService>())
-        .is_some_and(|svc| {
-            let name = req
-                .uri()
-                .path()
-                .strip_prefix("/api/chrome/v1/")
-                .and_then(|p| p.split('/').next());
-            origin
-                .as_ref()
-                .and_then(|v| v.to_str().ok())
-                .is_some_and(|o| {
-                    o == svc.workspace_origin
-                        || name.is_some_and(|n| {
-                            pf_serve::hosts::is_part_name(n) && o == (svc.part_origin)(n)
-                        })
-                })
-        });
+    let chrome = req.uri().path().strip_prefix("/api/chrome/v1/");
+    let allowed = if let Some(rest) = chrome {
+        let name = rest.split('/').next().unwrap_or("");
+        match req
+            .extensions()
+            .get::<AppState>()
+            .and_then(|s| s.ext::<pf_auth::AuthService>())
+        {
+            Some(auth) => auth.check_chrome_origin(req.headers(), name).await.is_ok(),
+            None => false,
+        }
+    } else {
+        false
+    };
+    let local_read = origin.is_none()
+        && req.method() == Method::GET
+        && req
+            .headers()
+            .get("sec-fetch-site")
+            .is_some_and(|v| v == "same-origin");
+    if chrome.is_some() && !allowed && !local_read {
+        tracing::info!(event = "chrome.cors", decision = "deny");
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    if req.method() == Method::OPTIONS {
+        let method = req
+            .headers()
+            .get(header::ACCESS_CONTROL_REQUEST_METHOD)
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or("");
+        let headers = req
+            .headers()
+            .get(header::ACCESS_CONTROL_REQUEST_HEADERS)
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or("");
+        if !matches!(method, "GET" | "POST")
+            || headers
+                .split(',')
+                .any(|h| !h.trim().is_empty() && !h.trim().eq_ignore_ascii_case("content-type"))
+        {
+            return StatusCode::FORBIDDEN.into_response();
+        }
+    }
     let mut r = if req.method() == Method::OPTIONS {
         if allowed {
             StatusCode::NO_CONTENT.into_response()
@@ -304,6 +327,10 @@ async fn cors(req: axum::extract::Request, next: middleware::Next) -> Response {
         next.run(req).await
     };
     if allowed {
+        r.headers_mut().insert(
+            header::ACCESS_CONTROL_MAX_AGE,
+            HeaderValue::from_static("600"),
+        );
         r.headers_mut()
             .insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin.unwrap());
         r.headers_mut().insert(
@@ -312,7 +339,7 @@ async fn cors(req: axum::extract::Request, next: middleware::Next) -> Response {
         );
         r.headers_mut().insert(
             header::ACCESS_CONTROL_ALLOW_METHODS,
-            HeaderValue::from_static("GET, POST, OPTIONS"),
+            HeaderValue::from_static("GET, POST"),
         );
         r.headers_mut().insert(
             header::ACCESS_CONTROL_ALLOW_HEADERS,
@@ -326,6 +353,22 @@ async fn cors(req: axum::extract::Request, next: middleware::Next) -> Response {
 async fn body_cap(req: axum::extract::Request, next: middleware::Next) -> Response {
     if req.method() != Method::POST {
         return next.run(req).await;
+    }
+    let site = req
+        .headers()
+        .get("sec-fetch-site")
+        .and_then(|h| h.to_str().ok());
+    let json = req
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|h| h.to_str().ok())
+        .is_some_and(|h| {
+            h.split(';')
+                .next()
+                .is_some_and(|t| t.trim().eq_ignore_ascii_case("application/json"))
+        });
+    if !matches!(site, Some("same-site" | "same-origin")) || !json {
+        return StatusCode::FORBIDDEN.into_response();
     }
     let (parts, body) = req.into_parts();
     match axum::body::to_bytes(body, 8192).await {

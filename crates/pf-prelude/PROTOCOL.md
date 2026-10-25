@@ -6,6 +6,7 @@ origin alone is never an identity check. Messages are objects with a `type` stri
 
 | Type | Direction | Meaning |
 | --- | --- | --- |
+| `pf:scroll` | document → wrapper | The current `y` scroll offset; the wrapper hides its phone bar while scrolling down. |
 | `pf:ready` | document → wrapper | The document's first `partifactory.ready()` call completed. |
 | `pf:regrant` | document → wrapper | A capability expired. Refresh through the credentialed workspace chrome API, then replace the frame's capability path. Fall back to a top-level `/grant` navigation if renewal fails. |
 | `pf:version` | document → wrapper | Reload the frame after a live version change. |

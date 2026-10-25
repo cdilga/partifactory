@@ -203,3 +203,95 @@ async fn expired_link_and_cross_origin_go() {
         .unwrap();
     assert_eq!(r.status(), StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn wrapper_headers_deep_paths_and_shared_assets_are_content_free() {
+    let (_db, host, router) = fixture().await;
+    let mut bodies = Vec::new();
+    for ua in ["Slackbot", "Mozilla/5.0"] {
+        let r = req(&router, "/deep/path?x=1", "GET", ua).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(r.headers()["referrer-policy"], "no-referrer");
+        assert!(!r.headers().contains_key("set-cookie"));
+        let csp = r.headers()["content-security-policy"].to_str().unwrap();
+        assert!(csp.contains("script-src https://blobs-part.pf.test"));
+        assert!(csp.contains("style-src https://blobs-part.pf.test"));
+        assert!(csp.contains("frame-src 'self'"));
+        assert!(!csp.contains("unsafe-inline"));
+        bodies.push(to_bytes(r.into_body(), 65536).await.unwrap());
+    }
+    assert_eq!(bodies[0], bodies[1]);
+    let html = String::from_utf8(bodies[0].to_vec()).unwrap();
+    assert!(!html.contains("Private title"));
+    assert!(!html.contains("v1."));
+    assert!(html.contains("Sign in to open"));
+    for card in [pf_ui::og::Card::Private] {
+        assert!(html.contains(&card.hash()));
+    }
+    let manifest = req(&router, "/_pf/manifest.webmanifest", "GET", "Mozilla").await;
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&to_bytes(manifest.into_body(), 4096).await.unwrap()).unwrap();
+    assert_eq!(manifest["id"], "/");
+    assert_eq!(manifest["scope"], "/");
+    for (bytes, typ) in [
+        (
+            pf_prelude::WRAPPER_JS.as_bytes(),
+            "text/javascript; charset=utf-8",
+        ),
+        (pf_ui::wrapper_css().as_bytes(), "text/css; charset=utf-8"),
+        (pf_ui::MONO_FONT, "font/woff2"),
+    ] {
+        let r = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/b/{}", pf_blobs::sha256_hex(bytes)))
+                    .header("host", "blobs-part.pf.test")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(r.headers()["content-type"], typ);
+        assert_eq!(
+            &to_bytes(r.into_body(), 1024 * 1024).await.unwrap()[..],
+            bytes
+        );
+    }
+    assert_eq!(host.links().list(None, host.now()).await.unwrap().len(), 0);
+}
+
+#[test]
+fn trusted_wrapper_stays_under_fifteen_kib_brotli() {
+    let n = pf_prelude::WRAPPER_BR.len() + pf_ui::WRAPPER_CSS_BR.len();
+    assert!(n <= 15 * 1024, "wrapper JS+CSS = {n} bytes brotli");
+}
+
+#[tokio::test]
+async fn nonexistent_hosts_do_not_get_a_wrapper_on_arbitrary_paths() {
+    let (_db, _host, router) = fixture().await;
+    for path in ["/", "/no-such-path", "/_pf/manifest.webmanifest"] {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header("host", "no-such-part.pf.test")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let text = String::from_utf8(
+            to_bytes(response.into_body(), 65536)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        assert!(text.contains("request-id"));
+        assert!(!text.contains("pf-frame"));
+    }
+}

@@ -1,0 +1,25 @@
+[package]
+name = "pf-ui-shell"
+description = "Shared Leptos Stockroom shell, rendered on the server and hydrated in the browser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+ssr = ["leptos/ssr"]
+hydrate = ["leptos/hydrate", "dep:wasm-bindgen", "dep:web-sys", "dep:console_error_panic_hook", "dep:wasm-bindgen-futures"]
+
+[dependencies]
+leptos = "=0.8.22"
+wasm-bindgen = { version = "=0.2.129", optional = true }
+web-sys = { version = "0.3", optional = true, features = ["Window", "Document", "Element", "HtmlElement", "Storage", "MediaQueryList", "Location", "RequestInit", "RequestMode", "Headers"] }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+
+[lints]
+workspace = true

@@ -59,7 +59,7 @@ test('native admin share, mobile guest paint, freeze, undo and revoke', async ({
     });
     expect(burst).toEqual({ok:60,failed:1});
     await expect.poll(()=>refusals.length).toBe(1);expect(Number(refusals[0])).toBeGreaterThan(0);
-    expect((await waitForLog({event:'ratelimit.trip'})).some(l=>l.outcome==='rate_limited')).toBe(true);
+    expect((await waitForLog({event:'ratelimit.trip'})).some(l=>l.route==='guest_write'&&l.outcome==='rate_limited')).toBe(true);
     await guest.reload();
     await expect(guestBoard.locator('#b')).toBeVisible();
     await page.getByRole('button', { name: 'Freeze', exact: true }).click();

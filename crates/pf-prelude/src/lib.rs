@@ -11,6 +11,7 @@ pub const PRELUDE_JS: &str = include_str!("../js/prelude.js");
 
 /// The part-host wrapper script, served as a shared blob.
 pub const WRAPPER_JS: &str = include_str!("../js/wrapper.js");
+pub const WRAPPER_BR: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/wrapper.js.br"));
 
 /// The `shared_blobs.label` of the prelude.
 pub const PRELUDE_LABEL: &str = "pf-prelude.js";

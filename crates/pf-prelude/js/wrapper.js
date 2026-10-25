@@ -1,7 +1,9 @@
 window.pfShareChrome = function (part, WS) {
   'use strict';
   var links = [], isAdmin = false, sheet, status, list, mode, expiry, audience;
-  var writers='viewers',guestEdits=0;
+  var unsandboxed=document.documentElement.hasAttribute('data-pf-unsandboxed');
+  if(unsandboxed){var bar=document.createElement('nav');bar.id='pf-bar';var back=document.createElement('a');back.href=WS+'/';back.textContent='‹ Parts';bar.appendChild(back);var shareLink=document.createElement('a');shareLink.href=WS+'/p/'+encodeURIComponent(part)+'/share';shareLink.textContent='Share';bar.appendChild(shareLink);document.body.appendChild(bar);return;}
+  var writers='viewers',guestEdits=0, summary=null;
   function el(tag, text, parent) { var e = document.createElement(tag); if (text) e.textContent = text; if (parent) parent.appendChild(e); return e; }
   function button(text, parent, action) { var b = el('button', text, parent); b.type = 'button'; b.onclick = action; return b; }
   function api(path, body) {
@@ -35,8 +37,9 @@ window.pfShareChrome = function (part, WS) {
   }
   function render() {
     list.replaceChildren();
-    audience.textContent = links.length ? '◉ Public link' : 'Only me';
-    audience.className = links.length ? 'pf-audience pf-public' : 'pf-audience';
+    var pub=links.length || summary && summary.audience==='public';
+    audience.textContent = pub ? '◉ Public link' : summary && summary.audience==='shared' ? 'Shared with you' : 'Only me';
+    audience.className = pub ? 'pf-audience pf-public' : 'pf-audience';
     document.getElementById('pf-public-rung').hidden = !isAdmin;
     if (!isAdmin) { options.hidden = true; el('p', 'Only the admin can make a public link.', list); return; }
     el('p',guestEdits+' guest edits today',list);
@@ -60,11 +63,34 @@ window.pfShareChrome = function (part, WS) {
     }).catch(report);
   }
   function share() { sheet.showModal(); refresh(); }
-  var style = el('style', null, document.head);
-  style.textContent = ':root{color-scheme:light dark;--pf-bg:#fff;--pf-fg:#20221f;--pf-line:#d0d4cc;--pf-amber:#724300;--pf-amber-bg:#fff0c2;--pf-danger:#9e2525}@media(prefers-color-scheme:dark){:root{--pf-bg:#1c211c;--pf-fg:#f0f3ec;--pf-line:#596154;--pf-amber:#ffdc8b;--pf-amber-bg:#493811;--pf-danger:#ffb4ac}}body{margin:0;background:var(--pf-bg);color:var(--pf-fg);font:15px system-ui,sans-serif}#pf-bar{height:48px;box-sizing:border-box;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--pf-line)}button,select{font:inherit;color:inherit;background:var(--pf-bg);border:1px solid var(--pf-line);border-radius:8px;padding:9px 14px;cursor:pointer}button:focus-visible,select:focus-visible{outline:3px solid #4d7bca;outline-offset:2px}button:disabled{opacity:.55;cursor:default}.pf-audience{margin-left:auto;font-size:13px}.pf-public{background:var(--pf-amber-bg);color:var(--pf-amber);padding:5px 9px;border-radius:20px}.pf-danger{color:var(--pf-danger)}#pf-share{box-sizing:border-box;width:min(480px,calc(100% - 24px));max-height:90dvh;overflow:auto;border:1px solid var(--pf-line);border-radius:16px;padding:24px;background:var(--pf-bg);color:var(--pf-fg)}#pf-share::backdrop{background:#0008}#pf-share h2{margin:0 0 18px}#pf-share header{display:flex;justify-content:space-between;align-items:start}#pf-share section{border-top:1px solid var(--pf-line);padding:8px 0}#pf-share button{margin:4px 4px 4px 0}#pf-share label{display:block;margin:14px 0}#pf-share select{display:block;width:100%;margin-top:6px}#pf-status{min-height:24px;font-size:14px;margin-top:16px}#pf-public-rung{color:var(--pf-amber);background:var(--pf-amber-bg)}@media(max-width:520px){#pf-share{width:100%;max-width:none;margin:auto 0 0;border-radius:18px 18px 0 0;padding:22px;max-height:88dvh}#pf-bar{padding:0 10px}}';
   var bar = el('nav', null, document.body); bar.id = 'pf-bar'; bar.setAttribute('aria-label', 'Part controls');
-  el('strong', 'partifactory', bar); audience = el('span', 'Only me', bar); audience.className = 'pf-audience';
-  button('Share', bar, share);
+  var back=el('a','‹ Parts',bar);back.href=WS+'/';back.className='pf-back';
+  var kind=el('span','',bar);kind.className='pf-kind';
+  var title=el('strong',part,bar);title.className='pf-title';
+  var nameLabel=el('span',part,bar);nameLabel.className='pf-name';
+  var revision=el('span','',bar);revision.className='pf-revision';
+  audience = el('span', 'Only me', bar); audience.className = 'pf-audience';
+  var shareButton=button('Share',bar,share);shareButton.hidden=true;
+  var more=el('details',null,bar);more.className='pf-more';var toggle=el('summary','⋯',more);toggle.setAttribute('aria-label','More part actions');
+  var actions=el('div',null,more);actions.className='pf-actions';
+  var copy=button('Copy link',actions,function(){navigator.clipboard.writeText(location.origin+'/').then(function(){more.open=false;});});copy.hidden=true;
+  var standalone=el('a','Open standalone',actions);standalone.hidden=true;standalone.target='_blank';standalone.rel='noopener';
+  var drafting=el('section',null,document.body);drafting.id='pf-drafting';drafting.hidden=true;
+  var draftTitle=el('h1',part,drafting);el('p','being made…',drafting);el('p','Your agent is getting this part ready.',drafting);
+  var priorScroll=0;window.addEventListener('message',function(e){var f=document.getElementById('pf-frame');if(!f||e.source!==f.contentWindow||!e.data)return;if(e.data.type==='pf:scroll'){var y=Number(e.data.y)||0;bar.classList.toggle('pf-bar-hidden',y>priorScroll&&y>48);priorScroll=y;}});
+  function updateSummary() {
+    return api('/summary').then(function(j){summary=j;title.textContent=j.title||part;draftTitle.textContent=j.title||part;document.title=(j.title||part)+' · partifactory';
+      kind.textContent=String(j.kind||'').toUpperCase();revision.textContent=j.live===null?'DRAFT':'REV '+j.live;
+      var features=j.features||{};shareButton.hidden=!features.share;copy.hidden=!features.copy_link;standalone.hidden=!features.open_standalone;
+      shareButton.onclick=features.unsandboxed?function(){location.href=WS+'/p/'+encodeURIComponent(part)+'/share';}:share;
+      var f=document.getElementById('pf-frame');if(f)standalone.href=f.src;
+      var wasDraft=!drafting.hidden;drafting.hidden=j.live!==null;
+      if(f&&wasDraft&&j.live!==null){f.classList.add('pf-switching');f.onload=function(){f.classList.remove('pf-switching');};f.src=f.src;}
+      render();if(j.live===null)setTimeout(updateSummary,1000);
+    }).catch(function(){shareButton.hidden=true;});
+  }
+  window.__pfRefreshSummary=updateSummary;
+  updateSummary();
   sheet = el('dialog', null, document.body); sheet.id = 'pf-share'; sheet.setAttribute('aria-labelledby', 'pf-share-title');
   var head = el('header', null, sheet); el('h2', 'Share', head).id = 'pf-share-title'; button('Close', head, function () { sheet.close(); });
   el('p', 'Choose who can open this part.', sheet);
@@ -80,7 +106,7 @@ window.pfShareChrome = function (part, WS) {
   button('Copy link', options, function () {
     mutation('/links', { name: part, mode: mode.value, expires_days: expiry.value ? Number(expiry.value) : null }).then(function (j) {
       status.replaceChildren();
-      var field = el('input', null, status); field.value = j.url; field.readOnly = true; field.setAttribute('aria-label', 'Public link'); field.style.width = '100%'; field.select();
+      var field = el('input', null, status); field.value = j.url; field.readOnly = true; field.setAttribute('aria-label', 'Public link'); field.className='pf-link-value'; field.select();
       if (navigator.clipboard) navigator.clipboard.writeText(j.url).catch(function () {});
       refresh();
     }).catch(report);
@@ -101,6 +127,8 @@ window.pfShareChrome = function (part, WS) {
   var part = H.getAttribute('data-pf-part');
   var WS = H.getAttribute('data-pf-ws');
   var publicLink = H.hasAttribute('data-pf-link');
+  var workspaceShare=document.querySelector('[data-pf-workspace-share]');
+  if(workspaceShare){part=workspaceShare.getAttribute('data-pf-workspace-share');WS=location.origin;window.pfShareChrome(part,WS);document.getElementById('pf-share').showModal();return;}
   var K = 'pf:' + part;
   function store(k, v) { try { if (v === null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); } catch (e) {} }
   function load(k) { try { return sessionStorage.getItem(k); } catch (e) { return null; } }
@@ -141,7 +169,7 @@ window.pfShareChrome = function (part, WS) {
     f.id = 'pf-frame';
     f.title = document.title || part;
     f.setAttribute('allow', 'clipboard-write *; fullscreen *; web-share *');
-    f.style.cssText = 'position:fixed;inset:' + (publicLink ? '0' : '48px 0 0') + ';width:100%;height:' + (publicLink ? '100%' : 'calc(100% - 48px)') + ';border:0;display:block;transition:opacity .2s';
+    if(!H.hasAttribute('data-pf-unsandboxed')) f.setAttribute('sandbox','allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads allow-top-navigation-by-user-activation');
     f.src = '/c/' + cap + (publicLink ? '/' : L.pathname + L.search) + L.hash;
     document.body.appendChild(f);
     var regranting = false;
@@ -149,7 +177,7 @@ window.pfShareChrome = function (part, WS) {
       if (e.source !== f.contentWindow || !e.data || typeof e.data !== 'object') return;
       var t = e.data.type;
       if (t === 'pf:ready') H.setAttribute('data-pf-ready', '1');
-      if (t === 'pf:version') { f.style.opacity = '0'; f.onload = function () { f.style.opacity = '1'; f.onload = null; }; f.src = f.src; }
+      if (t === 'pf:version') { if(window.__pfRefreshSummary)window.__pfRefreshSummary(); f.classList.add('pf-switching'); f.onload = function () { f.classList.remove('pf-switching'); f.onload = null; }; f.src = f.src; }
       if (t === 'pf:regrant' && !regranting) {
         regranting = true;
         // The credentialed chrome API mints a new cap with no navigation; until it exists (or if

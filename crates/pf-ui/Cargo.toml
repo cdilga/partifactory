@@ -6,5 +6,39 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+dev = ["pf-auth/dev", "pf-serve/dev"]
+
+[dependencies]
+axum = "0.8"
+leptos = { version = "=0.8.22", features = ["ssr"] }
+leptos_axum = "=0.8.10"
+any_spawner = { version = "0.3", features = ["tokio"] }
+pf-ui-shell = { path = "../pf-ui-shell", features = ["ssr"] }
+http = "1"
+pf-auth = { path = "../pf-auth" }
+pf-blobs = { path = "../pf-blobs" }
+pf-db = { path = "../pf-db" }
+pf-model = { path = "../pf-model" }
+pf-prelude = { path = "../pf-prelude" }
+pf-obs = { path = "../pf-obs" }
+pf-serve = { path = "../pf-serve" }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+tracing.workspace = true
+
+[build-dependencies]
+brotli = "8"
+sha2 = "0.10"
+
+[dev-dependencies]
+pf-caps = { path = "../pf-caps" }
+pf-config = { path = "../pf-config" }
+brotli = "8"
+tokio = { version = "1", features = ["rt", "macros"] }
+tempfile.workspace = true
+tower = { version = "0.5", features = ["util"] }
+
 [lints]
 workspace = true

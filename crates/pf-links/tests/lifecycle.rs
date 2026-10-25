@@ -219,6 +219,7 @@ async fn http_admin_stepup_origin_and_bearer_wall() {
             .method("POST")
             .header("host", "parts.pf.test")
             .header("origin", origin)
+            .header("sec-fetch-site", "same-site")
             .header("content-type", "application/json");
         if let Some(c) = cookie {
             req = req.header("cookie", format!("__Host-pf_session={c}"));

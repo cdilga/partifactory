@@ -1,0 +1,112 @@
+:root {
+  color-scheme: light;
+  /* Surfaces */
+  --pf-paper:        #f4f3ee;  /* canvas: drafting paper */
+  --pf-raised:       #fbfbf8;  /* cards, sheets, bars */
+  --pf-sunk:         #e9e8e1;  /* wells, inputs at rest, code, skeletons */
+  --pf-rule:         #d6d4ca;  /* hairlines (decorative, not a boundary) */
+  --pf-rule-strong:  #8e8b80;  /* input borders, focusable outlines: 3:1 */
+  --pf-scrim:        rgb(20 22 24 / 40%);
+  /* Ink */
+  --pf-ink:          #191b1d;
+  --pf-ink-2:        #3a3d41;
+  --pf-ink-3:        #5c5f64;
+  /* The tag: labels, part numbers, bin codes */
+  --pf-tag:          #ecdcae;
+  --pf-on-tag:       #3b3015;
+  /* Signal: the one action colour (cutting-mat green) */
+  --pf-signal:       #1c6a47;
+  --pf-on-signal:    #ffffff;
+  --pf-signal-text:  #1c6a47;
+  --pf-signal-wash:  #dbeae1;
+  --pf-on-wash:      #14503a;
+  /* Public: amber is only ever "anyone with the link" */
+  --pf-public:       #f0b43c;
+  --pf-on-public:    #1f1606;
+  --pf-public-text:  #8a5200;
+  --pf-public-wash:  #fbecc8;
+  /* Agents: blueprint blue */
+  --pf-agent:        #1f5d8c;
+  --pf-agent-wash:   #dde8f2;
+  /* Status */
+  --pf-danger:       #b02a20;
+  --pf-danger-wash:  #f6dedb;
+  --pf-diff-add:     #d9ecdf;
+  --pf-diff-del:     #f5dcd8;
+  --pf-focus:        0 0 0 2px var(--pf-paper), 0 0 0 4px var(--pf-signal);
+}
+
+/* Applied under :root[data-theme="dark"], and under prefers-color-scheme: dark unless data-theme="light" */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --pf-paper:        #121416;
+  --pf-raised:       #1a1d20;
+  --pf-sunk:         #0d0f10;
+  --pf-rule:         #2b2f34;
+  --pf-rule-strong:  #6b7078;
+  --pf-scrim:        rgb(0 0 0 / 60%);
+  --pf-ink:          #ecebe6;
+  --pf-ink-2:        #c8c7c0;
+  --pf-ink-3:        #9b9da1;
+  --pf-tag:          #3e3722;
+  --pf-on-tag:       #efe0b4;
+  --pf-signal:       #62c495;  /* fill flips light, text on it flips dark */
+  --pf-on-signal:    #0b1d14;
+  --pf-signal-text:  #6fd0a1;
+  --pf-signal-wash:  #173327;
+  --pf-on-wash:      #a9e6c8;
+  --pf-public:       #eab040;
+  --pf-on-public:    #1f1606;
+  --pf-public-text:  #f2c25e;
+  --pf-public-wash:  #3a2e12;
+  --pf-agent:        #86bde6;
+  --pf-agent-wash:   #16293a;
+  --pf-danger:       #ff8b80;
+  --pf-danger-wash:  #3a1916;
+  --pf-diff-add:     #15301f;
+  --pf-diff-del:     #3a1b18;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  color-scheme: dark;
+  --pf-paper:        #121416;
+  --pf-raised:       #1a1d20;
+  --pf-sunk:         #0d0f10;
+  --pf-rule:         #2b2f34;
+  --pf-rule-strong:  #6b7078;
+  --pf-scrim:        rgb(0 0 0 / 60%);
+  --pf-ink:          #ecebe6;
+  --pf-ink-2:        #c8c7c0;
+  --pf-ink-3:        #9b9da1;
+  --pf-tag:          #3e3722;
+  --pf-on-tag:       #efe0b4;
+  --pf-signal:       #62c495;  /* fill flips light, text on it flips dark */
+  --pf-on-signal:    #0b1d14;
+  --pf-signal-text:  #6fd0a1;
+  --pf-signal-wash:  #173327;
+  --pf-on-wash:      #a9e6c8;
+  --pf-public:       #eab040;
+  --pf-on-public:    #1f1606;
+  --pf-public-text:  #f2c25e;
+  --pf-public-wash:  #3a2e12;
+  --pf-agent:        #86bde6;
+  --pf-agent-wash:   #16293a;
+  --pf-danger:       #ff8b80;
+  --pf-danger-wash:  #3a1916;
+  --pf-diff-add:     #15301f;
+  --pf-diff-del:     #3a1b18;
+} }
+:root {
+  --pf-s-1: 4px;  --pf-s-2: 8px;  --pf-s-3: 12px; --pf-s-4: 16px;
+  --pf-s-5: 24px; --pf-s-6: 32px; --pf-s-7: 48px; --pf-s-8: 64px;
+  --pf-r-1: 3px;   /* chips, tags, kbd */
+  --pf-r-2: 5px;   /* buttons, inputs */
+  --pf-r-3: 8px;   /* cards, sheets */
+  --pf-r-4: 14px;  /* phone bottom sheet top corners only */
+  --pf-notch: 6px; /* the tag notch: clip-path on the top-right corner */
+  --pf-e-1: 0 1px 0 var(--pf-rule);
+  --pf-e-2: 0 1px 2px rgb(16 18 20 / 6%), 0 4px 12px rgb(16 18 20 / 6%);
+  --pf-e-3: 0 12px 40px rgb(16 18 20 / 18%), 0 2px 6px rgb(16 18 20 / 8%);
+  --pf-ease: cubic-bezier(.2, .7, .2, 1);   /* "drawer slide" */
+  --pf-d-1: 120ms;  --pf-d-2: 200ms;  --pf-d-3: 320ms;
+}
+@media (prefers-reduced-motion: reduce) { :root { --pf-d-1: 0ms; --pf-d-2: 0ms; --pf-d-3: 0ms; } }

@@ -6,6 +6,9 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[build-dependencies]
+brotli = "8"
+
 [dev-dependencies]
 brotli = "8"
 
