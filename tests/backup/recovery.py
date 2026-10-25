@@ -57,6 +57,15 @@ def main():
     token = (run / "secrets/api_token").read_text().strip()
     seed = subprocess.run(["curl", "--silent", "--show-error", "--fail", "--cacert", str(run / "certs/ca.pem"), "--connect-to", f"parts.pf.test:443:127.0.0.1:{args.https_port}", "--header", "@-", "--header", "Content-Type: application/json", "--data-binary", json.dumps({"name": "notes", "action": "set", "doc_id": "recovery-drill", "data": "recovered", "request_id": "backup-drill-seed"}), "https://parts.pf.test/api/v1/part_data"], input=f"Authorization: Bearer {token}\n", text=True, capture_output=True, timeout=30)
     assert seed.returncode == 0, "real shared-data seed API failed"
+    # The generic parts fixture has no explicit audience grants. Add a redundant
+    # owner grant to this disposable dev fixture so the real export carries an
+    # audience label for the reviewed regrant workflow, without widening access.
+    with sqlite3.connect(run / "data/partifactory.db", timeout=30) as db:
+        db.execute(
+            "INSERT OR IGNORE INTO grants(target_kind,target_id,subject,role,created_by,created_at) "
+            "SELECT 'part',id,?,0,?,? FROM parts WHERE name='notes'",
+            ("user:" + session["user_id"], session["user_id"], int(time.time() * 1000)),
+        )
     archive = output / f"source-{time.time_ns()}.tar.zst"
     command(["export", "--output", str(archive)], log="export.jsonl")
     command(["export", "--include-secrets"], expected=2, log="secrets-rejected.txt")
@@ -83,7 +92,7 @@ def main():
         assert '"event":"import.boot_epoch_bump"' in (output / "import.jsonl").read_text()
         with sqlite3.connect(unpack / "db.sqlite") as before, sqlite3.connect(dest / "partifactory.db") as after:
             counts = {}
-            for table in ["parts", "versions", "version_files", "builds", "build_files", "part_notes", "part_tags", "names", "data_docs", "data_snapshots"]:
+            for table in ["parts", "versions", "version_files", "builds", "build_files", "part_notes", "part_tags", "names", "data_docs", "data_snapshots", "grants"]:
                 original = before.execute(f'SELECT * FROM "{table}"').fetchall()
                 actual = after.execute(f'SELECT * FROM "{table}"').fetchall()
                 assert sorted(original, key=repr) == sorted(actual, key=repr), table
@@ -113,7 +122,7 @@ def main():
             try:
                 connection.request("GET", path, headers=headers)
                 response = connection.getresponse()
-                return response.status, dict(response.getheaders()), response.read()
+                return response.status, {key.lower(): value for key, value in response.getheaders()}, response.read()
             finally:
                 connection.close()
 
@@ -140,8 +149,8 @@ def main():
                                            text=True, env=restore_env, timeout=30)
                 assert signed_in.returncode == 0, "restored server fresh sign-in failed"
                 session = json.loads(signed_in.stdout)
-                status, headers, _ = request(ports[0], "/grant?part=notes", cookie=True)
-                assert status == 302 and "/c/" in headers.get("location", ""), "fresh grant failed"
+                status, headers, _ = request(ports[0], "/grant?part=notes&mode=direct", cookie=True)
+                assert status == 303 and "/c/" in headers.get("location", ""), "fresh direct grant failed"
                 fresh = urlsplit(headers["location"])
                 assert request(ports[1], fresh.path, fresh.hostname)[0] == 200, "fresh cap failed"
                 assert request(ports[0], "/admin/health", cookie=True)[0] == 200
@@ -152,7 +161,7 @@ def main():
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait(timeout=5)
-        assert '"outcome":"stale_boot"' in (output / "restored-server.jsonl").read_text()
+        assert '"outcome":"stale_epoch"' in (output / "restored-server.jsonl").read_text()
         print("recovery: pre-export cap rejected; fresh /grant and restored Health returned 200")
 
         plan = json.loads(command(["import", "regrant", "--plan"], environment=restore_env, log="regrant-plan.json").stdout.splitlines()[-1])
