@@ -114,6 +114,14 @@ async fn missing_token_is_http_401_not_tool_result() {
         assert!(v.get("jsonrpc").is_none() && v.get("result").is_none(), "never a tool result: {v}");
         assert_eq!(v["error"]["code"], "unauthenticated");
     }
+    // The client can read a response before the access middleware has emitted its line.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let complete = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap()
+            .lines().any(|l| l.contains("\"event\":\"http.request\""));
+        if complete || tokio::time::Instant::now() >= deadline { break; }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
     let logs = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
     let line = logs.lines().find(|l| l.contains("\"event\":\"http.request\"")).expect("http.request log");
     let l: Value = serde_json::from_str(line).unwrap();

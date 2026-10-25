@@ -49,7 +49,8 @@ echo "selftest: gitleaks ok (CI scan and pre-push hook both refuse the planted t
 
 # 3. Disk hygiene on a fixture target/. Random bytes, because compressing filesystems (ZFS on
 # the CI runners) store zeros in almost no space and du would see nothing to clean.
-t="$tmp/target"
+mkdir -p "$here/target"
+t="$(mktemp -d "$here/target/clean-selftest.XXXXXX")"
 mkdir -p "$t/debug/deps" "$t/debug/incremental/old-abc" "$t/debug/incremental/new-def" "$t/e2e-logs"
 head -c 3145728 /dev/urandom > "$t/debug/deps/libold.rlib"
 head -c 1048576 /dev/urandom > "$t/debug/incremental/old-abc/x"
@@ -71,6 +72,16 @@ fi
 dry="$(PF_TARGET_DIR="$t" PF_CLEAN_NO_DOCKER=1 "$here/scripts/clean-build.sh")"
 echo "$dry" | grep -q "would remove: .*libold.rlib" || fail "clean-build dry run doesn't list the old artefact"
 [ -f "$t/debug/deps/libold.rlib" ] || fail "clean-build dry run removed something"
+# A cleanup may not remove even an old artefact while Cargo holds its profile lock.
+python3 - "$t" "$here" <<'PY'
+import fcntl, os, pathlib, subprocess, sys
+target, repo = map(pathlib.Path, sys.argv[1:])
+with (target / "debug/.cargo-lock").open("a+") as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    result = subprocess.run([str(repo / "scripts/clean-build.sh"), "--apply"], env={**os.environ, "PF_TARGET_DIR":str(target), "PF_CLEAN_NO_DOCKER":"1"}, capture_output=True, text=True, check=True)
+    assert "deferred" in result.stdout
+    assert (target / "debug/deps/libold.rlib").exists()
+PY
 PF_TARGET_DIR="$t" PF_CLEAN_NO_DOCKER=1 "$here/scripts/clean-build.sh" --apply >/dev/null
 [ ! -e "$t/debug/deps/libold.rlib" ] || fail "clean-build --apply kept the old artefact"
 [ ! -e "$t/debug/incremental/old-abc" ] || fail "clean-build --apply kept the old incremental dir"
@@ -79,3 +90,4 @@ PF_TARGET_DIR="$t" PF_CLEAN_NO_DOCKER=1 "$here/scripts/clean-build.sh" --apply >
 [ "$(ls "$t/e2e-logs" | wc -l | tr -d ' ')" = 5 ] || fail "clean-build kept more than 5 log runs"
 PF_TARGET_DIR="$t" PF_TARGET_MAX_GB=0.002 "$here/scripts/disk-guard.sh" >/dev/null || fail "target/ still over the cap after clean-build"
 echo "selftest: disk hygiene ok"
+rm -rf -- "$t"

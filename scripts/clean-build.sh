@@ -3,12 +3,12 @@
 # Dry run by default: lists what it would remove. `--apply` removes it.
 #
 # Age-based only, so nothing a running build is using goes away. Never runs `cargo clean`.
-# Outside the repo it touches only Docker objects labelled pf.harness=1, the Docker build
-# cache above 10 GB, and Playwright browser builds other than the pinned one.
+# Docker cleanup is limited to stopped harness objects. Filesystem cleanup stays in this repo.
 #
 #   PF_TARGET_DIR      target dir (default <repo>/target)
 #   PF_CLEAN_DAYS      age window for build artefacts (default 2)
 #   PF_CLEAN_NO_DOCKER skip the Docker steps when set (fixture tests)
+#   PF_CLEAN_INCREMENTAL drop completed incremental state while holding Cargo's locks
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -16,6 +16,31 @@ target="${PF_TARGET_DIR:-${CARGO_TARGET_DIR:-$repo/target}}"
 days="${PF_CLEAN_DAYS:-2}"
 apply=0
 [ "${1:-}" = "--apply" ] && apply=1
+
+# Directory mtimes do not indicate whether Cargo is using a dependency. Hold Cargo's own
+# profile locks throughout deletion, or defer immediately when a build has one open.
+if [ "$apply" -eq 1 ] && [ -z "${PF_CLEAN_LOCKED:-}" ]; then
+  exec python3 - "$repo" "$target" "$0" "$@" <<'PY'
+import fcntl, os, pathlib, subprocess, sys
+repo, target = (pathlib.Path(p).resolve() for p in sys.argv[1:3])
+if not target.is_relative_to(repo):
+    sys.exit("clean-build: target must be inside the repository")
+locks = []
+profiles = {target / "debug", target / "release"}
+if target.exists():
+    profiles.update(p.parent for p in target.rglob(".cargo-lock"))
+try:
+    for profile in sorted(profiles):
+        profile.mkdir(parents=True, exist_ok=True)
+        lock = (profile / ".cargo-lock").open("a+")
+        locks.append(lock)
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    print("clean-build: deferred; Cargo is using this target directory")
+    sys.exit(0)
+sys.exit(subprocess.call(["bash", *sys.argv[3:]], env={**os.environ, "PF_CLEAN_LOCKED": "1"}))
+PY
+fi
 
 act() { # act <description> <command...>
   local what="$1"; shift
@@ -41,6 +66,8 @@ if [ -d "$target" ]; then
 
   # 2. The same rule for any target dir (fixtures, other profiles): top-level artefacts in
   # deps/, build/, .fingerprint/ and examples/ last modified before the window.
+  # cargo-sweep tracks dependency use; a second mtime sweep would delete reused old files.
+  if [ "$target" != "$repo/target" ] || ! command -v cargo-sweep >/dev/null 2>&1; then
   for profile_dir in "$target"/*/ "$target"/*/*/; do
     for sub in deps build .fingerprint examples; do
       d="$profile_dir$sub"
@@ -50,11 +77,17 @@ if [ -d "$target" ]; then
       done < <(find "$d" -mindepth 1 -maxdepth 1 -mtime "+$((days - 1))" -print0)
     done
   done
+  fi
 
   # 3. Incremental dirs older than a day.
   while IFS= read -r -d '' d; do
     act "$d ($(size_of "$d"))" rm -rf -- "$d"
   done < <(find "$target" -mindepth 3 -maxdepth 3 -type d -path '*/incremental/*' -mtime +0 -print0 2>/dev/null)
+  if [ "${PF_CLEAN_INCREMENTAL:-0}" = 1 ]; then
+    while IFS= read -r -d '' d; do
+      act "$d ($(size_of "$d")), completed incremental state" rm -rf -- "$d"
+    done < <(find "$target" -mindepth 3 -maxdepth 4 -type d -path '*/incremental/*' -prune -print0 2>/dev/null)
+  fi
 
   # 4. Release and musl outputs whose gate is recorded (a gate run touches .pf-gate-recorded).
   for d in "$target/release" "$target"/*-musl; do
@@ -66,7 +99,8 @@ if [ -d "$target" ]; then
   # 5. Log dirs beyond the newest 5 runs.
   for logs in "$target/e2e-logs" "$target/test-logs"; do
     [ -d "$logs" ] || continue
-    ls -1t "$logs" | tail -n +6 | while IFS= read -r run; do
+    find "$logs" -mindepth 1 -maxdepth 1 -type d -name 'run-*' -print | sort -r | tail -n +6 | while IFS= read -r path; do
+      run="$(basename "$path")"
       act "$logs/$run" rm -rf -- "${logs:?}/$run"
     done
   done
@@ -74,24 +108,12 @@ fi
 
 # 6. Docker: harness objects and the build cache.
 if [ -z "${PF_CLEAN_NO_DOCKER:-}" ] && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-  ids="$(docker ps -aq --filter label=pf.harness=1)"
-  [ -n "$ids" ] && act "harness containers: $(echo "$ids" | wc -l | tr -d ' ')" docker rm -f $ids >/dev/null
+  ids="$(docker ps -aq --filter label=pf.harness=1 --filter status=exited)"
+  [ -n "$ids" ] && act "stopped harness containers: $(echo "$ids" | wc -l | tr -d ' ')" docker rm $ids >/dev/null
   vols="$(docker volume ls -q --filter label=pf.harness=1)"
   [ -n "$vols" ] && act "harness volumes: $(echo "$vols" | wc -l | tr -d ' ')" docker volume rm $vols >/dev/null
-  imgs="$(docker images -q --filter label=pf.harness=1 | sort -u)"
-  [ -n "$imgs" ] && act "harness images: $(echo "$imgs" | wc -l | tr -d ' ')" docker rmi -f $imgs >/dev/null
-  act "docker build cache above 10GB" docker builder prune -f --keep-storage 10GB >/dev/null
-fi
-
-# 7. Playwright browsers other than the pinned build (tests/e2e/playwright-version pins it).
-pin_file="$repo/tests/e2e/playwright-browsers"
-pw_cache="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/Library/Caches/ms-playwright}"
-[ -d "$pw_cache" ] || pw_cache="$HOME/.cache/ms-playwright"
-if [ -f "$pin_file" ] && [ -d "$pw_cache" ]; then
-  for b in "$pw_cache"/*/; do
-    name="$(basename "$b")"
-    grep -qx "$name" "$pin_file" || act "playwright $name ($(size_of "$b"))" rm -rf -- "$b"
-  done
+  imgs="$(docker images -q --filter label=pf.harness=1 --filter dangling=true | sort -u)"
+  [ -n "$imgs" ] && act "unused harness images: $(echo "$imgs" | wc -l | tr -d ' ')" docker rmi $imgs >/dev/null
 fi
 
 [ "$apply" -eq 1 ] || echo "(dry run: pass --apply to remove)"

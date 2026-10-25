@@ -21,6 +21,10 @@ gitleaks_install() {
 }
 
 case "$job" in
+  ui)
+    rustup target add wasm32-unknown-unknown
+    binstall wasm-bindgen-cli@0.2.129
+    command -v brotli >/dev/null 2>&1 || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq brotli >/dev/null; } ;;
   test) binstall cargo-nextest ;;
   deny) binstall cargo-deny ;;
   audit) binstall cargo-audit ;;

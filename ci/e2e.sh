@@ -41,13 +41,14 @@ teardown() {
     cp "$run"/caddy.log "$run"/dex.log "$logs/" 2>/dev/null || true
     if [ "$status" = 0 ]; then
       # Passing: keep only the summary and the results file.
-      find "$logs" -mindepth 1 ! -name 'results*.json' ! -name summary.txt -delete 2>/dev/null || true
+      find "$logs" -type f ! -name 'results*.json' ! -name summary.txt ! -name '*.png' ! -name report.json -delete 2>/dev/null || true
+      find "$logs" -depth -type d -empty -delete 2>/dev/null || true
       rm -rf "$run"
     fi
   fi
   # Newest 5 runs only, for both the artifacts and the run dirs.
   for d in "$repo/target/e2e-logs" "$repo/target/e2e-runs"; do
-    [ -d "$d" ] && ls -1dt "$d"/*/ 2>/dev/null | tail -n +6 | xargs rm -rf 2>/dev/null || true
+    [ -d "$d" ] && ls -1dt "$d"/run-*/ 2>/dev/null | tail -n +6 | xargs rm -rf 2>/dev/null || true
   done
   echo "e2e.sh: $( [ "$status" = 0 ] && echo PASS || echo "FAIL (artifacts in $logs)")"
   exit "$status"
@@ -114,16 +115,20 @@ pw="${PIPESTATUS[0]}"
 grep -E '^\s+[0-9]+ (passed|failed|skipped|flaky)' "$logs/playwright.txt" | tee -a "$summary" || true
 [ "$pw" = 0 ] || { note "FAIL playwright"; exit 1; }
 
+# Exercise native CLI device authorization and refresh through verified TLS without DNS edits.
+note "--- CLI device login"
+python3 "$repo/tests/device/cli-login.py" "$run" --binary "$PF_BIN" --https-port "$PF_HTTPS_PORT" 2>&1 | tee "$logs/cli-login.txt"
+
 # 4. Log assertions.
 note "--- logs"
 n_access="$(grep '"event":"http.request"' "$PF_SERVER_LOG" | grep '"request_id":"' | grep -c '"client_ip":"')"
-n_trip="$(grep -c '"event":"ratelimit.trip"' "$PF_SERVER_LOG" || true)"
+n_trip="$(grep '"event":"ratelimit.trip"' "$PF_SERVER_LOG" | grep -c '"route":"dev_self_test"' || true)"
 [ "$n_access" -gt 10 ] || { note "FAIL only $n_access access lines with request_id and client_ip"; exit 1; }
-[ "$n_trip" = 1 ] || { note "FAIL expected exactly one ratelimit.trip, got $n_trip"; exit 1; }
+[ "$n_trip" = 1 ] || { note "FAIL expected exactly one dev_self_test ratelimit.trip, got $n_trip"; exit 1; }
 if grep -E 'pf_(at|rt|pat)_[A-Za-z0-9]|/c/[A-Za-z0-9_-]{8,}' "$PF_SERVER_LOG" | grep -v '\[redacted\]\|\[cap\]' | grep -q .; then
   note "FAIL an unredacted token or cap in the server log"; exit 1
 fi
-note "ok   $n_access http.request lines with request_id + client_ip; 1 ratelimit.trip; no unredacted caps or tokens"
+note "ok   $n_access http.request lines with request_id + client_ip; 1 dev_self_test ratelimit.trip; accumulated feature rate gates checked by their tests; no unredacted caps or tokens"
 
 # 5. Origin down: the maintenance page.
 note "--- origin down"

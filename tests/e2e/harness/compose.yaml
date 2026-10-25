@@ -151,6 +151,8 @@ services:
       - "pixel-undo-webkit-mobile-part.pf.test:172.30.77.10"
       - "pixel-undo-firefox-desktop-part.pf.test:172.30.77.10"
       - "device-part.pf.test:172.30.77.10"
+      - "wrapper-draft-chromium-desktop-part.pf.test:172.30.77.10"
+      - "wrapper-draft-webkit-mobile-part.pf.test:172.30.77.10"
       - "markdown-part.pf.test:172.30.77.10"
       - "text-part.pf.test:172.30.77.10"
       - "bundle-part.pf.test:172.30.77.10"
