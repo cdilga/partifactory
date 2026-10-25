@@ -205,38 +205,50 @@ impl BackupService {
     }
     pub fn start(&self) -> Result<Maintenance> {
         let service = self.clone();
-        let (stop, stopped) = std::sync::mpsc::channel();
+        let (stop, mut stopped) = tokio::sync::oneshot::channel();
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;
         let thread = std::thread::Builder::new()
             .name("pf-backup".into())
             .spawn(move || {
-                loop {
-                    let auth = service
-                        .auth
-                        .read()
-                        .unwrap_or_else(|err| err.into_inner())
-                        .clone();
-                    if let Some(auth) = auth {
-                        let ok = runtime.block_on(auth.provider_reachable());
-                        service.idp_ok.store(ok, Ordering::Relaxed);
-                        if !ok {
-                            tracing::warn!(
-                                event = "health.check",
-                                name = "idp",
-                                outcome = "degraded"
-                            );
+                runtime.block_on(async move {
+                    loop {
+                        let auth = service
+                            .auth
+                            .read()
+                            .unwrap_or_else(|err| err.into_inner())
+                            .clone();
+                        if let Some(auth) = auth {
+                            let ok = auth.provider_reachable().await;
+                            service.idp_ok.store(ok, Ordering::Relaxed);
+                            if !ok {
+                                tracing::warn!(
+                                    event = "health.check",
+                                    name = "idp",
+                                    outcome = "degraded"
+                                );
+                            }
+                        }
+                        // AuthService shares its HTTP pool with request handlers. Its connection
+                        // drivers must keep being polled during both maintenance IO and the wait
+                        // between probes; blocking this runtime can strand a sign-in request.
+                        let tick_service = service.clone();
+                        if !matches!(
+                            tokio::task::spawn_blocking(
+                                move || tick_service.tick(pf_db::ids::now_ms())
+                            )
+                            .await,
+                            Ok(Ok(()))
+                        ) {
+                            tracing::warn!(event = "backup.tick", outcome = "error");
+                        }
+                        tokio::select! {
+                            _ = tokio::time::sleep(Duration::from_secs(60)) => {},
+                            _ = &mut stopped => break,
                         }
                     }
-                    if service.tick(pf_db::ids::now_ms()).is_err() {
-                        tracing::warn!(event = "backup.tick", outcome = "error");
-                    }
-                    match stopped.recv_timeout(Duration::from_secs(60)) {
-                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                        _ => break,
-                    }
-                }
+                })
             })?;
         Ok(Maintenance {
             stop: Some(stop),
@@ -245,7 +257,7 @@ impl BackupService {
     }
 }
 pub struct Maintenance {
-    stop: Option<std::sync::mpsc::Sender<()>>,
+    stop: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 impl Drop for Maintenance {

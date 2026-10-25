@@ -44,7 +44,7 @@ teardown() {
     cp "$run"/caddy.log "$run"/dex.log "$logs/" 2>/dev/null || true
     if [ "$status" = 0 ]; then
       # Passing: keep only the summary and the results file.
-      find "$logs" -type f ! -name 'results*.json' ! -name summary.txt ! -name '*.png' ! -name report.json ! -name proxy-runtime-log-gate.json -delete 2>/dev/null || true
+      find "$logs" -type f ! -name 'results*.json' ! -name summary.txt ! -name '*.png' ! -name report.json ! -name proxy-runtime-log-gate.json ! -name identity-pool-regression.txt -delete 2>/dev/null || true
       find "$logs" -depth -type d -empty -delete 2>/dev/null || true
       rm -rf "$run"
     fi
@@ -87,6 +87,15 @@ for attempt in 1 2 3; do
 done
 [ "$oidc_ready" = 1 ] || { note "FAIL application OIDC discovery did not become ready"; exit 1; }
 note "ok   application OIDC discovery reaches the real provider through verified TLS"
+
+# Exercise the actual backup health sampler and AuthService pool against this real Dex.
+# A sampler runtime which stops polling can strand later browser sign-in requests.
+SSL_CERT_FILE="$PF_CA" PF_LIVE_POOL_ISSUER="https://dex.pf.test:$PF_HTTPS_PORT/dex" \
+  PF_LIVE_POOL_ADDRESS="127.0.0.1:$PF_HTTPS_PORT" \
+  cargo test --workspace --features "$PF_FEATURES" --test live_identity_pool -- --ignored --nocapture \
+  2>&1 | tee "$logs/identity-pool-regression.txt"
+[ "${PIPESTATUS[0]}" = 0 ] || { note "FAIL live maintenance OIDC pool regression"; exit 1; }
+note "ok   actual maintenance health probe leaves shared and independent real OIDC connections responsive"
 
 # 1. Proxy smoke.
 note "--- proxy smoke"
