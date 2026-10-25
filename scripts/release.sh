@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # CI-independent release assets. Dry runs build the same bytes without publishing them.
 set -euo pipefail
+# A build can run while other agents edit this checkout. Bash otherwise reads
+# a script incrementally and can combine old/new bytes after a long command.
+# Execute one immutable in-memory snapshot, preserving this script's $0/path.
+if [ "${PF_INTERNAL_RELEASE_SNAPSHOT:-}" != 1 ]; then
+  export PF_INTERNAL_RELEASE_SNAPSHOT=1
+  exec bash -c "$(cat "$0")" "$0" "$@"
+fi
+unset PF_INTERNAL_RELEASE_SNAPSHOT
 cd "$(dirname "$0")/.."
 scripts/disk-guard.sh
 dry=0
@@ -38,44 +46,9 @@ docker buildx build --builder "$PF_OCI_BUILDER" "${PF_OCI_BUILD_ARGS[@]}" --plat
   --build-arg "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" \
   --label pf.harness=1 --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" \
   --tag "$image:$tag" --metadata-file "$out/build.json" "${outputs[@]}" .
-python3 - "$out" "$image" "$tag" "$dry" <<'PY'
-import gzip, hashlib, io, json, os, pathlib, sys, tarfile
-root=pathlib.Path(sys.argv[1]); image,tag,dry=sys.argv[2:]
-metadata=json.loads((root/'build.json').read_text())
-digest=metadata['containerimage.digest']
-if not digest.startswith('sha256:') or len(digest)!=71: raise SystemExit('invalid image digest')
-(root/'digest.txt').write_text(f'{image}@{digest}\n')
-with tarfile.open(root/'partifactory-linux-amd64.oci.tar') as archive:
-    def blob(d):
-        raw=archive.extractfile('blobs/sha256/'+d.split(':',1)[1]).read()
-        if hashlib.sha256(raw).hexdigest()!=d.split(':',1)[1]:
-            raise SystemExit('OCI blob checksum mismatch')
-        return raw
-    def manifest_for(d):
-        doc=json.loads(blob(d))
-        if 'layers' in doc: return doc
-        candidates=[x for x in doc.get('manifests',[]) if x.get('platform',{}).get('architecture')=='amd64' and x.get('platform',{}).get('os')=='linux']
-        if len(candidates)!=1: raise SystemExit('OCI index must contain exactly one Linux amd64 image')
-        return manifest_for(candidates[0]['digest'])
-    manifest=manifest_for(digest)
-    binary=None
-    for layer in manifest['layers']:
-        raw=blob(layer['digest'])
-        with tarfile.open(fileobj=io.BytesIO(raw),mode='r:*') as files:
-            for member in files:
-                if member.name.lstrip('./')=='partifactory' and member.isfile():
-                    binary=files.extractfile(member).read()
-    if binary is None: raise SystemExit('image contains no binary')
-with (root/'part-linux-amd64.tar.gz').open('wb') as out:
-    with gzip.GzipFile(fileobj=out,mode='wb',filename='',mtime=0) as zipped:
-        with tarfile.open(fileobj=zipped,mode='w') as asset:
-            member=tarfile.TarInfo('part'); member.mode=0o755; member.size=len(binary); member.mtime=0
-            asset.addfile(member,io.BytesIO(binary))
-(root/'RELEASE.json').write_text(json.dumps({'tag':tag,'image':f'{image}@{digest}','published':dry=='0','commit':os.environ['SOURCE_COMMIT']},indent=2)+'\n')
-files=sorted(p for p in root.iterdir() if p.is_file() and p.name not in ('SHA256SUMS','build.json'))
-(root/'SHA256SUMS').write_text(''.join(f'{hashlib.file_digest(p.open("rb"),"sha256").hexdigest()}  {p.name}\n' for p in files))
-print(f'Release assets: {root}; image {digest}; published={dry=="0"}')
-PY
+package_args=(--assets "$out" --image "$image" --tag "$tag")
+if [ "$dry" = 0 ]; then package_args+=(--published); fi
+python3 scripts/package-release.py "${package_args[@]}"
 if [ "$dry" = 0 ]; then
   # The forge is optional plumbing. The artifact set above is always available to a laptop.
   python3 - "$out" "$tag" <<'PY'
