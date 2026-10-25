@@ -7,6 +7,7 @@ The caller owns registry lifecycle, network exposure and exact-resource cleanup.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import http.client
 import json
@@ -37,6 +38,8 @@ def main():
     parser.add_argument("--pull", action="store_true")
     parser.add_argument("--host", help="Optional Docker endpoint or context for pull")
     parser.add_argument("--ca-cert", type=Path)
+    parser.add_argument("--credentials-file", type=Path,
+                        help="Private JSON username/password file for HTTPS registry Basic authentication")
     parser.add_argument("--output", type=Path, help="Write immutable image reference as well as stdout")
     args = parser.parse_args()
     require(bool(args.layout) != bool(args.registry), "choose --layout or --registry")
@@ -72,12 +75,23 @@ def main():
         (args.layout / "blobs" / "sha256").mkdir(parents=True, exist_ok=True)
     prefix = "/v2/" + (args.repository or "layout")
     context = ssl.create_default_context(cafile=str(args.ca_cert) if args.ca_cert else None)
+    request_headers = {"User-Agent": "partifactory-release"}
+    if args.credentials_file:
+        require(args.registry and parsed.scheme == "https", "registry credentials require HTTPS")
+        require(args.credentials_file.is_file() and args.credentials_file.stat().st_mode & 0o077 == 0,
+                "registry credentials file must be private (mode 600 or stricter)")
+        credentials = json.loads(args.credentials_file.read_text())
+        require(isinstance(credentials.get("username"), str) and credentials["username"]
+                and isinstance(credentials.get("password"), str) and credentials["password"]
+                and ":" not in credentials["username"], "invalid registry credentials")
+        encoded = base64.b64encode((credentials["username"] + ":" + credentials["password"]).encode()).decode()
+        request_headers["Authorization"] = "Basic " + encoded
 
     def request(method, path, body=None, headers=None, expected=(200,)):
         connection = (http.client.HTTPSConnection(parsed.hostname, parsed.port, timeout=120, context=context)
                       if parsed.scheme == "https" else http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=120))
         try:
-            connection.request(method, path, body=body, headers=headers or {})
+            connection.request(method, path, body=body, headers={**request_headers, **(headers or {})})
             response = connection.getresponse()
             data, outgoing = response.read(1024 * 1024), dict((k.lower(), v) for k, v in response.getheaders())
             require(response.status in expected, f"registry {method} failed with status {response.status}")
