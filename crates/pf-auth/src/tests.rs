@@ -242,7 +242,8 @@ async fn admin_pin_is_immutable_subject_and_break_glass_is_single_use() {
     assert!(
         auth.require_admin_session(&headers(&token), true)
             .await
-            .is_ok()
+            .is_err(),
+        "console recovery cannot stand in for a fresh native passkey assertion"
     );
     assert!(auth.recover(code).await.is_err());
     let count: i64 = auth

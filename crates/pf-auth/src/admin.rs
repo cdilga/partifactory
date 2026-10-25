@@ -96,7 +96,8 @@ impl AuthService {
             if subject!=pin{return Err(forbidden());}
             tx.execute("UPDATE users SET status='active' WHERE id=?1",[uid])?;
             tx.execute("DELETE FROM kv WHERE key=?1",[key])?;
-            tx.execute("INSERT INTO sessions(id_hash,user_id,created_at,last_used_at,expires_at,stepup_at,idp_checked_at) VALUES(?1,?2,?3,?3,?4,?3,?3)",params![session_hash,uid,now,now+crate::service::NO_REFRESH_TTL])?;
+            tx.execute("INSERT INTO sessions(id_hash,user_id,created_at,last_used_at,expires_at,idp_checked_at) VALUES(?1,?2,?3,?3,?4,?3)",params![session_hash,uid,now,now+crate::service::NO_REFRESH_TTL])?;
+            tx.execute("INSERT INTO kv(key,value) VALUES(?1,?2)",params![format!("admin.recovery:{}",hex(&session_hash)),(now+crate::service::FLOW_TTL).to_string()])?;
             tx.execute("INSERT INTO audit(at,user_id,actor,action,target_kind,target_id) VALUES(?1,?2,'break-glass','admin.break_glass.used','user',?2)",params![now,uid])?;
             Ok::<_,PfError>(())
         }).await?;

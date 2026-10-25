@@ -28,6 +28,28 @@ pub(crate) struct Pending {
 }
 
 impl AuthService {
+    /// Console recovery may enroll a replacement, but is not a native passkey assertion.
+    async fn may_enroll(&self, actor: &SessionActor) -> Result<bool, PfError> {
+        if actor.fresh_stepup(ids::now_ms()) {
+            return Ok(true);
+        }
+        let key = format!("admin.recovery:{}", actor.session_id);
+        let until = self
+            .0
+            .db
+            .read(move |c| {
+                use pf_db::rusqlite::OptionalExtension;
+                c.query_row("SELECT value FROM kv WHERE key=?1", [key], |r| {
+                    r.get::<_, String>(0)
+                })
+                .optional()
+                .map_err(PfError::from)
+            })
+            .await?;
+        Ok(until
+            .and_then(|v| v.parse::<i64>().ok())
+            .is_some_and(|until| until > ids::now_ms()))
+    }
     async fn webauthn(&self) -> Result<Webauthn, PfError> {
         let origin = Url::parse(&self.0.origin).map_err(internal)?;
         let mut builder = WebauthnBuilder::new(&self.0.apex, &origin)
@@ -190,7 +212,7 @@ async fn register_start(State(state): State<AppState>, headers: HeaderMap) -> Re
         auth.check_origin(&headers)?;
         let actor = auth.require_admin_session(&headers, false).await?;
         let keys = auth.passkeys(&actor.user_id).await?;
-        if !keys.is_empty() && !actor.fresh_stepup(ids::now_ms()) {
+        if !keys.is_empty() && !auth.may_enroll(&actor).await? {
             return Err(forbidden());
         }
         // Deterministic 128-bit user handle, independent of display name and IdP username.
@@ -220,7 +242,7 @@ async fn register_finish(
     let result=async {
         auth.check_origin(&headers)?;let actor=auth.require_admin_session(&headers,false).await?;
         // Recheck authorization at completion, since registration can outlive the step-up window.
-        if !auth.passkeys(&actor.user_id).await?.is_empty() && !actor.fresh_stepup(ids::now_ms()){return Err(forbidden());}
+        if !auth.passkeys(&actor.user_id).await?.is_empty() && !auth.may_enroll(&actor).await?{return Err(forbidden());}
         let Challenge::Register(state)=auth.take(&actor,&headers,&body.flow)? else{return Err(forbidden())};
         let credential=serde_json::from_value::<RegisterPublicKeyCredential>(body.credential).map_err(|_|forbidden())?;
         let key=auth.webauthn().await?.finish_passkey_registration(&credential,&state).map_err(|_|forbidden())?;
