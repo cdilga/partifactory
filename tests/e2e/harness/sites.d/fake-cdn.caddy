@@ -1,0 +1,12 @@
+# Fixture CDN reached only by the parent's dev-only exact-host DNS overrides.
+# Original Host/SNI and the run CA are verified normally.
+https://cdnjs.cloudflare.com, https://cdn.jsdelivr.net, https://unpkg.com, https://esm.sh, https://fonts.googleapis.com, https://fonts.gstatic.com {
+    tls /etc/caddy/certs/cert.pem /etc/caddy/certs/key.pem
+    header Cache-Control "no-store"
+    @floating path /widget@latest/main.js
+    redir @floating /widget@1.2.3/main.js 302
+    @outside path /off-allowlist.js
+    redir @outside https://evil.example.com/library.js 302
+    root * /srv/pf-cdn
+    file_server
+}

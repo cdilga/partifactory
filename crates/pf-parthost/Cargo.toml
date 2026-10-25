@@ -1,0 +1,39 @@
+[package]
+name = "pf-parthost"
+description = "The part host on the content listener: caps, /c/ content, entry templating, /_rt, the wrapper and the shared blob host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+dev = ["pf-serve/dev"]
+
+[dependencies]
+axum = "0.8"
+brotli = "8"
+bytes = "1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+http = "1"
+percent-encoding = "2"
+pf-blobs = { path = "../pf-blobs" }
+pf-caps = { path = "../pf-caps" }
+pf-db = { path = "../pf-db" }
+pf-model = { path = "../pf-model" }
+pf-obs = { path = "../pf-obs" }
+pf-prelude = { path = "../pf-prelude" }
+pf-serve = { path = "../pf-serve" }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+tracing.workspace = true
+
+[dev-dependencies]
+pf-auth = { path = "../pf-auth", features = ["dev"] }
+tempfile.workspace = true
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "macros"] }
+tower = { version = "0.5", features = ["util"] }
+
+[lints]
+workspace = true

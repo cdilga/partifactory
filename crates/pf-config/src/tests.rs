@@ -15,6 +15,23 @@ fn base_env() -> Env {
     .collect()
 }
 
+#[test]
+fn mirror_overrides_require_dev_and_validate_exact_hosts_and_addresses() {
+    let valid = "[mirror.test_resolve]\n\"unpkg.com\" = \"127.0.0.1:18444\"\n";
+    let result = load(valid, &base_env());
+    assert_eq!(result.is_ok(), cfg!(feature = "dev"));
+    for config in [
+        "[mirror.test_resolve]\n\"evil.example.com\" = \"127.0.0.1:18444\"\n",
+        "[mirror.test_resolve]\n\"unpkg.com\" = \"not-an-address\"\n",
+    ] {
+        assert!(
+            errs(load(config, &base_env()))
+                .iter()
+                .any(|d| matches!(d, Diag::Invalid { .. }))
+        );
+    }
+}
+
 fn errs(r: Result<Loaded, Vec<Diag>>) -> Vec<Diag> {
     match r {
         Ok(_) => panic!("expected errors"),

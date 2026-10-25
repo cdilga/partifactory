@@ -29,11 +29,18 @@ pub struct Migration {
 }
 
 /// The main database's migrations (`/data/partifactory.db`).
-pub const MAIN: &[Migration] = &[Migration {
-    version: 1,
-    name: "0001_schema_v1",
-    sql: include_str!("../migrations/0001_schema_v1.sql"),
-}];
+pub const MAIN: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "0001_schema_v1",
+        sql: include_str!("../migrations/0001_schema_v1.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "0002_shared_blob_type",
+        sql: include_str!("../migrations/0002_shared_blob_type.sql"),
+    },
+];
 
 /// The insights database's migrations (`/data/insights.db`, §5g).
 pub const INSIGHTS: &[Migration] = &[Migration {

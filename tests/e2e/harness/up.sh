@@ -47,9 +47,11 @@ if [ "$mode" = host ]; then
   trusted='["127.0.0.1", "::1"]'
   export PF_UPSTREAM_WORKSPACE="host.docker.internal:18080"
   export PF_UPSTREAM_CONTENT="host.docker.internal:18081"
+  mirror_addr="127.0.0.1:$PF_HTTPS_PORT"
   ops_url="http://127.0.0.1:19090"
 else
   trusted='["172.30.77.10"]'
+  mirror_addr="172.30.77.10:443"
   export PF_UPSTREAM_WORKSPACE="partifactory:8080"
   export PF_UPSTREAM_CONTENT="partifactory:8081"
   ops_url="http://127.0.0.1:19090"
@@ -64,6 +66,14 @@ apex = "$PF_APEX"
 client_ip_header = "X-Forwarded-For"
 request_id_header = "X-Request-Id"
 trusted_proxies = $trusted
+
+[mirror.test_resolve]
+"cdnjs.cloudflare.com" = "$mirror_addr"
+"cdn.jsdelivr.net" = "$mirror_addr"
+"unpkg.com" = "$mirror_addr"
+"esm.sh" = "$mirror_addr"
+"fonts.googleapis.com" = "$mirror_addr"
+"fonts.gstatic.com" = "$mirror_addr"
 EOF
 
 if [ "$mode" = host ]; then

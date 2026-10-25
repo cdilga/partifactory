@@ -103,6 +103,9 @@ grep -q '^HTTP/[0-9.]* 429' <<<"$hdrs" && grep -qi '^retry-after: [0-9]' <<<"$hd
   || { note "FAIL threshold + 1 did not return 429 + Retry-After"; exit 1; }
 note "ok   rate-limit self-test: 429 with $(grep -i '^retry-after' <<<"$hdrs" | tr -d '\r') at threshold + 1"
 
+# Build fixture pages through the running server, then mint their capabilities.
+python3 "$h/seed-part.py"
+
 # 3. Playwright, all four projects.
 note "--- playwright"
 docker compose -f "$h/compose.yaml" --profile browsers run --rm browsers --grep-invert @origin-down "$@" \

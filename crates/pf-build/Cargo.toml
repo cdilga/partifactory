@@ -6,5 +6,49 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+# Fault injection (`.pf/fault` in a part's files) and the `[mirror] test_resolve` override.
+# Dev builds only; never in a release.
+dev = []
+
+[dependencies]
+sha2 = "0.10"
+base64 = "0.22"
+brotli = "8"
+ciborium = "0.2.2"
+comrak = { version = "0.57", default-features = false }
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+lol_html = "3"
+pf-blobs = { path = "../pf-blobs" }
+pf-db = { path = "../pf-db" }
+pf-model = { path = "../pf-model" }
+pf-obs = { path = "../pf-obs" }
+prometheus = { version = "0.14", default-features = false }
+rlimit = "0.11"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+serde.workspace = true
+serde_bytes = "0.11"
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "time", "sync", "macros", "io-util"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+tracing.workspace = true
+url = "2.5"
+webpki-roots = "1"
+
+[dev-dependencies]
+pf-auth = { path = "../pf-auth", features = ["dev"] }
+pf-caps = { path = "../pf-caps" }
+proptest.workspace = true
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
+tempfile.workspace = true
+tracing-subscriber.workspace = true
+
 [lints]
 workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+seccompiler = "0.5"
+libc = "0.2"

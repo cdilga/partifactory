@@ -37,6 +37,9 @@ if [ -z "${PF_APEX:-}" ]; then
     export PF_APEX=localtest.me
   fi
 fi
+# The served part uses canonical HTTPS origins for its blob and runtime URLs.
+# Docker publishes 443 through its existing port helper; no host file or DNS settings change.
+export PF_HTTPS_PORT="${PF_HTTPS_PORT:-443}"
 
 out="$repo/target/e2e-logs/ios-sim/$spec"
 mkdir -p "$out"
@@ -104,7 +107,9 @@ printf '{"lane":"ios-sim","browser":"Mobile Safari (WebKit)","runtime":"%s","dev
 
 nonce="$(openssl rand -hex 8)"
 port="$PF_HTTPS_PORT"
-url="https://parts.$PF_APEX:$port$page?spec=$spec&nonce=$nonce"
+sep='?'
+[[ "$page" == *\?* ]] && sep='&'
+url="https://parts.$PF_APEX:$port$page${sep}spec=$spec&nonce=$nonce"
 echo "ios-sim: $device_name on $runtime_name opening $url"
 # On a cold Safari, openurl may time out even after handing the URL to the browser.
 # The page's collector POST, rather than this launch command, decides the outcome.
@@ -146,5 +151,11 @@ if [ -z "$got" ]; then
   exit 1
 fi
 echo "$got" > "$out/report.json"
+python3 - "$out/report.json" <<'PY'
+import json, sys
+report = json.load(open(sys.argv[1]))
+if report.get("pass") is False:
+    sys.exit("ios-sim: FAIL page assertions: " + json.dumps(report.get("checks", {})))
+PY
 echo "ios-sim: ok, the page reported: $got"
 echo "ios-sim: output in $out"

@@ -109,13 +109,33 @@ const SELFTEST: &str = r#"<!doctype html><html lang="en"><head><meta charset="ut
 <style>body{font:16px/1.5 ui-monospace,monospace;margin:2rem;background:#f4f1ea;color:#1d1b17}#s{font-size:2rem}</style></head>
 <body><h1>partifactory harness self-test</h1><p id="s">reporting…</p><pre id="d"></pre>
 <script>
-const spec = new URLSearchParams(location.search).get('spec') || 'self-test';
-const d = {spec, ua: navigator.userAgent, href: location.href, secure: isSecureContext,
+const params = new URLSearchParams(location.search);
+const spec = params.get('spec') || 'self-test';
+const href = new URL(location.href);
+href.searchParams.delete('frame');
+const d = {spec, ua: navigator.userAgent, href: href.href, secure: isSecureContext,
   cookies: navigator.cookieEnabled, w: innerWidth, h: innerHeight, dpr: devicePixelRatio, t: Date.now()};
+function report(result) {
+Object.assign(d, result);
 document.getElementById('d').textContent = JSON.stringify(d, null, 2);
 fetch('/_dev/report', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(d)})
   .then(r => { document.getElementById('s').textContent = r.ok ? 'REPORTED ✓' : 'report failed ' + r.status; })
   .catch(e => { document.getElementById('s').textContent = 'report failed ' + e; });
+}
+if (params.has('frame')) {
+  const url = new URL(params.get('frame'));
+  const apex = location.hostname.slice(location.hostname.indexOf('.') + 1);
+  if (url.protocol !== 'https:' || !url.hostname.endsWith('-part.' + apex) || !url.pathname.startsWith('/c/')) throw Error('invalid probe frame');
+  url.searchParams.set('nonce', params.get('nonce'));
+  const frame = document.createElement('iframe');
+  frame.title = 'Sandboxed part probe';
+  frame.style.cssText = 'width:100%;height:240px;border:1px solid #888';
+  window.addEventListener('message', e => {
+    if (e.source === frame.contentWindow && e.origin === 'null' && e.data && e.data.type === 'pf:harness') report(e.data.result);
+  });
+  frame.src = url.href;
+  document.body.appendChild(frame);
+} else report({});
 </script></body></html>"#;
 
 async fn selftest() -> Html<&'static str> {
@@ -127,7 +147,11 @@ async fn report(
     Extension(RequestId(rid)): Extension<RequestId>,
     Json(mut v): Json<serde_json::Value>,
 ) -> StatusCode {
-    tracing::info!(event = "harness.report", report = %v, outcome = "ok", "self-test page reported");
+    tracing::info!(
+        event = "harness.report",
+        outcome = "ok",
+        "self-test page reported"
+    );
     if let Some(o) = v.as_object_mut() {
         o.insert("request_id".into(), rid.into());
     }

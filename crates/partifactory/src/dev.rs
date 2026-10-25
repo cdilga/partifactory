@@ -37,6 +37,19 @@ pub struct DevArgs {
 
 #[derive(Subcommand)]
 enum DevCommand {
+    /// Send a dev-socket operation with JSON arguments read from stdin (harness fixtures).
+    Request { op: String },
+    /// Queue a rebuild of the current source version.
+    Build { name: String },
+    /// Read the newest build status of the current source version.
+    BuildStatus { name: String },
+    /// Mint a host-bound cap for a fixture person who can access this part.
+    Cap {
+        name: String,
+        /// Mint at this Unix millisecond time (expiry regression tests).
+        #[arg(long)]
+        at_ms: Option<i64>,
+    },
     /// Sign a fixture person in (tests/fixtures/identity.toml).
     SignIn { username: String },
     /// Create the part, or commit the files as its next version.
@@ -162,6 +175,17 @@ pub fn run(args: DevArgs) -> ExitCode {
         .clone()
         .unwrap_or_else(|| socket_path(&crate::store::data_dir(&env)));
     let (op, a) = match args.command {
+        DevCommand::Request { ref op } => {
+            match serde_json::from_reader::<_, Value>(std::io::stdin().lock()) {
+                Ok(value) => (op.as_str(), value),
+                Err(e) => {
+                    return fail(json!({"error":{"code":"invalid_input","message":e.to_string()}}));
+                }
+            }
+        }
+        DevCommand::Build { name } => ("build", json!({"name":name})),
+        DevCommand::BuildStatus { name } => ("build-status", json!({"name":name})),
+        DevCommand::Cap { name, at_ms } => ("cap", json!({"name":name,"at_ms":at_ms})),
         DevCommand::SignIn { username } => ("sign-in", json!({"username": username})),
         DevCommand::Put {
             name,
@@ -386,6 +410,70 @@ async fn handle(store: &Store, dir: &StaticDirectory, req: &Value) -> Result<Val
     let name = || s(args, "name");
     let request_id = args["request_id"].as_str();
     match op {
+        "build" | "build-status" => {
+            let n = name()?;
+            let principal = caller.principal.clone();
+            let policy = store.parts.policy.clone();
+            let now = store.host.now();
+            let enqueue = op == "build";
+            store
+                .db
+                .write(move |db| {
+                    let row = find_part(db, &n)?
+                        .filter(|p| p.deleted_at.is_none())
+                        .ok_or_else(|| PfError::not_found("part"))?;
+                    let role = policy
+                        .role(db, &principal, &row.id, now)?
+                        .ok_or_else(|| PfError::not_found("part"))?;
+                    if enqueue {
+                        if role < pf_model::spaces::EDIT {
+                            return Err(PfError::new("forbidden", "editor access required"));
+                        }
+                        let version = row.head_version_id.ok_or_else(|| {
+                            PfError::invalid("name", "part has no source version")
+                        })?;
+                        pf_model::builds::enqueue(db, &row.id, &version, &row.kind, now)?;
+                    }
+                    pf_model::builds::head_build(db, &row.id).map_err(PfError::from)
+                })
+                .await
+        }
+        "cap" => {
+            let n = name()?;
+            let principal = caller.principal.clone();
+            let policy = store.parts.policy.clone();
+            let now = store.host.now();
+            let (id, role) = store
+                .db
+                .read(move |db| -> Result<_, PfError> {
+                    let row = find_part(db, &n)?
+                        .filter(|p| p.deleted_at.is_none())
+                        .ok_or_else(|| PfError::not_found("part"))?;
+                    let role = policy
+                        .role(db, &principal, &row.id, now)?
+                        .ok_or_else(|| PfError::not_found("part"))?;
+                    Ok((row.id, role))
+                })
+                .await?;
+            let grant = pf_caps::Grant {
+                part_id: id,
+                host: name()?,
+                subject: caller.principal.key(),
+                role,
+                minter: format!("sess:dev-{}", caller.principal.user_id),
+                ..Default::default()
+            };
+            let cap = pf_caps::mint(
+                &store.host.deps().keys,
+                &store.epochs,
+                &grant,
+                args["at_ms"].as_i64().unwrap_or(now),
+            )
+            .map_err(|e| PfError::invalid("cap", e.to_string()))?;
+            Ok(
+                json!({"cap":cap,"url":format!("{}/c/{cap}/",store.host.config().part_origin(&grant.host))}),
+            )
+        }
         "put" => {
             let name = name()?;
             let files: BTreeMap<String, String> = serde_json::from_value(args["files"].clone())
@@ -420,6 +508,7 @@ async fn handle(store: &Store, dir: &StaticDirectory, req: &Value) -> Result<Val
                     CreateRequest {
                         title: Some(args["title"].as_str().unwrap_or(&name).to_string()),
                         name: Some(name),
+                        kind: args["kind"].as_str().map(Into::into),
                         files: Some(files),
                         request_id: request_id.map(Into::into),
                         ..Default::default()

@@ -225,6 +225,8 @@ pub struct Webhooks {
 #[serde(default, deny_unknown_fields)]
 pub struct Mirror {
     pub allowlist: Vec<String>,
+    /// Exact host -> socket overrides for the TLS fixture CDN. Refused outside dev builds.
+    pub test_resolve: BTreeMap<String, String>,
 }
 
 impl Default for Mirror {
@@ -238,6 +240,7 @@ impl Default for Mirror {
                 "fonts.googleapis.com".into(),
                 "fonts.gstatic.com".into(),
             ],
+            test_resolve: BTreeMap::new(),
         }
     }
 }

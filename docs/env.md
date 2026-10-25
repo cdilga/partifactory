@@ -63,6 +63,7 @@ Run `partifactory config check` to load the config exactly as `serve` would. It 
 | `ingress.request_id_header` | `PF_INGRESS_REQUEST_ID_HEADER` | string | `"X-Request-Id"` | The request-id header passed through from the proxy, or minted when absent. |
 | `ingress.trusted_proxies` | `PF_INGRESS_TRUSTED_PROXIES` | list (comma-separated in env) | `[]` | CIDRs whose `client_ip_header` and `request_id_header` are believed. |
 | `mirror.allowlist` | `PF_MIRROR_ALLOWLIST` | list (comma-separated in env) | `["cdnjs.cloudflare.com", "cdn.jsdelivr.net", "unpkg.com", "esm.sh", "fonts.googleapis.com", "fonts.gstatic.com"]` | CDN hosts that builds may mirror libraries from. |
+| `mirror.test_resolve` | `PF_MIRROR_TEST_RESOLVE` | table (PF_<TABLE>_<NAME> in env) | `{}` | Dev-only exact CDN hostname to socket-address overrides for the test harness. Refused by a production binary. |
 | `names.reserved` | `PF_NAMES_RESERVED` | list (comma-separated in env) | `[]` | Part names nobody may take. |
 | `render.enabled` | `PF_RENDER_ENABLED` | bool | `false` | Turn on the render sidecar for `part_check`. |
 | `unsafe` | `PF_UNSAFE` | table (PF_<TABLE>_<NAME> in env) | `{}` | Protections deliberately switched off, as `<name> = "off"`. Each one is reported as a warning. |

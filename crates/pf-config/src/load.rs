@@ -393,6 +393,22 @@ pub fn load(site_toml: &str, env: &Env) -> Result<Loaded, Vec<Diag>> {
 }
 
 fn cross_field(site: &SiteConfig, has_oidc: bool, has_runner: bool, diags: &mut Vec<Diag>) {
+    if !site.mirror.test_resolve.is_empty() {
+        if !cfg!(feature = "dev") {
+            diags.push(Diag::Invalid {
+                message: "`mirror.test_resolve` requires a dev-feature binary".into(),
+            });
+        }
+        for (host, address) in &site.mirror.test_resolve {
+            if !site.mirror.allowlist.contains(host)
+                || address.parse::<std::net::SocketAddr>().is_err()
+            {
+                diags.push(Diag::Invalid {
+                    message: "`mirror.test_resolve` requires an allowlisted hostname and a socket address".into(),
+                });
+            }
+        }
+    }
     if site.idp.is_set() && !has_oidc {
         diags.push(Diag::MissingSecret {
             var: "PF_IDP_CLIENT_SECRET".into(),

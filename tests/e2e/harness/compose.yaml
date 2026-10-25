@@ -39,6 +39,7 @@ services:
       PF_APEX: ${PF_APEX:-pf.test}
       PF_UPSTREAM_WORKSPACE: ${PF_UPSTREAM_WORKSPACE:-partifactory:8080}
       PF_UPSTREAM_CONTENT: ${PF_UPSTREAM_CONTENT:-partifactory:8081}
+      PF_CDN_UPSTREAM: ${PF_CDN_UPSTREAM:-unused}
     volumes:
       # The shipped config, unchanged; only the cert paths are this run's.
       - ../../../deploy/proxy/Caddyfile:/etc/caddy/Caddyfile:ro
@@ -46,6 +47,7 @@ services:
       - ${PF_RUN_DIR:?}/certs/cert.pem:/etc/caddy/certs/cert.pem:ro
       - ${PF_RUN_DIR:?}/certs/key.pem:/etc/caddy/certs/key.pem:ro
       - ./sites.d:/etc/caddy/sites.d:ro
+      - ./fake-cdn:/srv/pf-cdn:ro
     # Caddy's state is per run: tmpfs, not the image's anonymous volumes.
     tmpfs: [/data, /config]
     extra_hosts:
@@ -103,6 +105,11 @@ services:
     extra_hosts:
       - "parts.pf.test:172.30.77.10"
       - "notes-part.pf.test:172.30.77.10"
+      - "device-part.pf.test:172.30.77.10"
+      - "markdown-part.pf.test:172.30.77.10"
+      - "text-part.pf.test:172.30.77.10"
+      - "bundle-part.pf.test:172.30.77.10"
+      - "mirrored-part.pf.test:172.30.77.10"
       - "demo-part.pf.test:172.30.77.10"
       - "blobs-part.pf.test:172.30.77.10"
       - "forge.pf.test:172.30.77.10"

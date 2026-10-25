@@ -10,6 +10,9 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::process::ExitCode;
 
+#[global_allocator]
+static GLOBAL: cap::Cap<std::alloc::System> = cap::Cap::new(std::alloc::System, usize::MAX);
+
 /// Exit code for invalid config (`config check` and `serve`).
 const EXIT_CONFIG: u8 = 2;
 
@@ -104,7 +107,15 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Command::Serve => serve(),
-        Command::BuildWorker => stub("build-worker"),
+        Command::BuildWorker => {
+            if GLOBAL.set_limit(pf_build::child::MEM_CAP as usize).is_err() {
+                return ExitCode::FAILURE;
+            }
+            match pf_build::child::worker_main() {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(_) => ExitCode::FAILURE,
+            }
+        }
         Command::Runner => stub("runner"),
         Command::Export => stub("export"),
         Command::Import => stub("import"),
@@ -173,10 +184,18 @@ fn serve() -> ExitCode {
         Err(code) => return code,
     };
     let data_dir = store::data_dir(&env);
-    let st = match store::open(&data_dir, &loaded.site) {
+    let st = match store::open(&data_dir, &loaded) {
         Ok(s) => s,
         Err(e) => {
             tracing::error!(event = "store.open", outcome = "error", error = %e, "cannot open the store");
+            return ExitCode::FAILURE;
+        }
+    };
+    // Keep the engine alive until the HTTP listeners have stopped.
+    let _builds = match store::start_builds(&st, &loaded, &env) {
+        Ok(engine) => engine,
+        Err(error) => {
+            tracing::error!(event = "build.queue", outcome = "startup_error", %error);
             return ExitCode::FAILURE;
         }
     };
@@ -186,6 +205,7 @@ fn serve() -> ExitCode {
         return ExitCode::FAILURE;
     }
     let result = pf_serve::run_blocking(&loaded, &env, |b| {
+        pf_parthost::install(b, &st.host);
         let db = st.db.clone();
         b.ready_check("db", pf_serve::CheckKind::Required, move || {
             let db = db.clone();

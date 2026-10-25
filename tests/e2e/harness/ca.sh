@@ -20,7 +20,7 @@ cat > leaf.ext <<EOF
 basicConstraints=critical,CA:FALSE
 keyUsage=critical,digitalSignature
 extendedKeyUsage=serverAuth
-subjectAltName=DNS:*.${apex},DNS:${apex}
+subjectAltName=DNS:*.${apex},DNS:${apex},DNS:cdnjs.cloudflare.com,DNS:cdn.jsdelivr.net,DNS:unpkg.com,DNS:esm.sh,DNS:fonts.googleapis.com,DNS:fonts.gstatic.com
 EOF
 openssl x509 -req -in leaf.csr -CA ca.pem -CAkey ca.key -CAcreateserial \
   -out leaf.pem -days 2 -extfile leaf.ext 2>/dev/null

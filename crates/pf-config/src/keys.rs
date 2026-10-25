@@ -6,7 +6,7 @@ use crate::site::SiteConfig;
 use serde_json::Value;
 
 /// Tables whose keys are free-form (validated elsewhere, not by name).
-pub const FREE_FORM: &[&str] = &["unsafe", "idp.provisioner.flows"];
+pub const FREE_FORM: &[&str] = &["unsafe", "idp.provisioner.flows", "mirror.test_resolve"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyType {
@@ -235,6 +235,10 @@ pub const DOCS: &[(&str, &str)] = &[
     (
         "mirror.allowlist",
         "CDN hosts that builds may mirror libraries from.",
+    ),
+    (
+        "mirror.test_resolve",
+        "Dev-only exact CDN hostname to socket-address overrides for the test harness. Refused by a production binary.",
     ),
     (
         "render.enabled",
