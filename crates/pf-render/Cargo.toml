@@ -17,6 +17,7 @@ pf-blobs = { path = "../pf-blobs" }
 pf-build = { path = "../pf-build" }
 pf-caps = { path = "../pf-caps" }
 pf-db = { path = "../pf-db" }
+pf-janitor = { path = "../pf-janitor" }
 pf-model = { path = "../pf-model" }
 pf-ops = { path = "../pf-ops" }
 pf-obs = { path = "../pf-obs" }

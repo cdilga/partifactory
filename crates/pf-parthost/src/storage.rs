@@ -209,7 +209,9 @@ pub(crate) async fn dispatch(ctx: RtCtx, op: String, args: Value) -> RtResult {
                 )?;
                 events.extend(ev);
             }
-            let snapshot = if shared {
+            // Deletion must remain available when a store or the disk is full. A scheduled
+            // snapshot allocates a blob; let the next scheduled tick capture a delete-only batch.
+            let snapshot = if shared && incoming > 0 {
                 data::scheduled_snapshot(db, &blobs, &part, now)?
             } else {
                 None

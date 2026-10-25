@@ -450,7 +450,12 @@ impl RenderService {
             pf_model::version::record_blob(tx,&hash,bytes,now)?;
             let mut stored=stored;stored["screenshot_hash"]=json!(hash);
             tx.execute("UPDATE render_jobs SET status=?2,result=?3,finished_at=?4 WHERE id=?1",params![id,if passed{"ok"}else{"failed"},stored.to_string(),now])?;
-            if passed {tx.execute("INSERT INTO part_previews(part_id,version_id,source,poster_hash,state,updated_at) SELECT ?1,?2,'render',?3,'ready',?4 WHERE EXISTS(SELECT 1 FROM parts WHERE id=?1 AND live_version_id=?2) ON CONFLICT(part_id) DO UPDATE SET version_id=excluded.version_id,source=excluded.source,poster_hash=excluded.poster_hash,state=excluded.state,updated_at=excluded.updated_at",params![pid,vid,hash,now])?;}
+            if passed {
+                if !pf_janitor::stores::check_preview(tx, &pid, bytes)? {
+                    return Err(PfError::new("storage_full", "Preview storage is full").with("store", "previews"));
+                }
+                tx.execute("INSERT INTO part_previews(part_id,version_id,source,poster_hash,state,updated_at) SELECT ?1,?2,'render',?3,'ready',?4 WHERE EXISTS(SELECT 1 FROM parts WHERE id=?1 AND live_version_id=?2) ON CONFLICT(part_id) DO UPDATE SET version_id=excluded.version_id,source=excluded.source,poster_hash=excluded.poster_hash,state=excluded.state,updated_at=excluded.updated_at",params![pid,vid,hash,now])?;
+            }
             Ok::<_,PfError>(())
         }).await?;
         tracing::info!(
@@ -471,6 +476,10 @@ impl RenderService {
             if let Some((version,result))=candidate {
                 let result:Value=serde_json::from_str(&result).map_err(|e|PfError::internal(e.to_string()))?;
                 if let Some(hash)=result["screenshot_hash"].as_str() {
+                    let bytes = tx.query_row("SELECT size FROM blobs WHERE hash=?1", [hash], |r| r.get::<_, i64>(0))? as u64;
+                    if !pf_janitor::stores::check_preview(tx, &part, bytes)? {
+                        return Err(PfError::new("storage_full", "Preview storage is full").with("store", "previews"));
+                    }
                     tx.execute("INSERT INTO part_previews(part_id,version_id,source,poster_hash,state,updated_at) VALUES(?1,?2,'render',?3,'ready',?4) ON CONFLICT(part_id) DO UPDATE SET version_id=excluded.version_id,source=excluded.source,poster_hash=excluded.poster_hash,state=excluded.state,updated_at=excluded.updated_at",params![part,version,hash,now])?;
                 }
             }
