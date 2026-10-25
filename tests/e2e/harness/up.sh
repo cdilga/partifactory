@@ -24,6 +24,8 @@ fi
 export PF_HARNESS_MODE="$mode"
 export PF_APEX="${PF_APEX:-pf.test}"
 export PF_HTTPS_PORT="${PF_HTTPS_PORT:-18443}"
+# A nested, caller-owned remote controller may publish through its own outer loopback port.
+export PF_HARNESS_PUBLISH_BIND="${PF_HARNESS_PUBLISH_BIND:-127.0.0.1}"
 export PF_BIN="${PF_BIN:-${CARGO_TARGET_DIR:-$repo/target}/debug/partifactory}"
 export PF_RUN_DIR="${PF_RUN_DIR:-$repo/target/e2e-runs/$(date +%Y%m%d-%H%M%S)}"
 run="$PF_RUN_DIR"
@@ -138,7 +140,7 @@ if [ "$mode" = container ] && [ "$PF_HARNESS_RELEASE" != 1 ]; then
   rm -rf "$run/dev-runtime"
 fi
 : > "$run/compose.env"
-for name in PF_APEX PF_HARNESS_MODE PF_HARNESS_RELEASE PF_HARNESS_DEV_IMAGE PF_HARNESS_IMAGE PF_HTTPS_PORT PF_RENDER_GATEWAY PF_UPSTREAM_WORKSPACE PF_UPSTREAM_CONTENT; do
+for name in PF_APEX PF_HARNESS_MODE PF_HARNESS_RELEASE PF_HARNESS_DEV_IMAGE PF_HARNESS_IMAGE PF_HTTPS_PORT PF_HARNESS_PUBLISH_BIND PF_RENDER_GATEWAY PF_UPSTREAM_WORKSPACE PF_UPSTREAM_CONTENT; do
   printf '%s=%q\n' "$name" "${!name:-}" >> "$run/compose.env"
 done
 chmod 600 "$run/compose.env"

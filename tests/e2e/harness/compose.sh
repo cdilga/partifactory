@@ -21,6 +21,7 @@ export PF_SITE_CONFIG="$PF_RUN_DIR/site.toml"
 export PF_IMAGE="${PF_HARNESS_IMAGE:-pf-harness-dev:local}"
 export PF_TLS_CERT="$PF_RUN_DIR/certs/cert.pem" PF_TLS_KEY="$PF_RUN_DIR/certs/key.pem"
 export PF_HTTPS_PORT="${PF_HTTPS_PORT:-18443}" PF_OPS_PORT=19090
+export PF_HTTPS_BIND="${PF_HARNESS_PUBLISH_BIND:-127.0.0.1}"
 export PF_SESSION_KEY_FILE="$PF_RUN_DIR/secrets/session_key"
 export PF_CAP_HMAC_KEY_FILE="$PF_RUN_DIR/secrets/cap_hmac_key"
 export PF_METRICS_TOKEN_FILE="$PF_RUN_DIR/secrets/metrics_token"
