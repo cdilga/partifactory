@@ -274,7 +274,7 @@ pub async fn page(s: PartHost, req: Request) -> Response {
     .into_response();
     r.headers_mut().insert(
         header::CONTENT_SECURITY_POLICY,
-        http::HeaderValue::from_str(&csp).unwrap(),
+        http::HeaderValue::from_str(csp.trim()).unwrap(),
     );
     r.headers_mut().insert(
         header::REFERRER_POLICY,

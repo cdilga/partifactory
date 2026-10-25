@@ -18,7 +18,7 @@ pub fn canonical_csp(cfg: &PartHostConfig, name: &str, unsandboxed: bool) -> Str
         "{sandbox}default-src 'none'; script-src 'self' {own} 'unsafe-inline' 'unsafe-eval' blob: {blob}; style-src 'self' {own} 'unsafe-inline' {blob}; img-src 'self' {own} data: blob: {blob}; media-src 'self' {own} data: blob: {blob}; font-src 'self' {own} data: {blob}; connect-src 'self' {own} {ws} {blob}; worker-src 'self' {own} blob:; frame-src 'self' {own}; form-action 'self' {own}; base-uri 'none'; object-src 'none'; frame-ancestors {own} {} {}",
         cfg.workspace_origin(),
         cfg.embedders.join(" ")
-    )
+    ).trim().to_owned()
 }
 
 fn common(r: &mut Response) {
