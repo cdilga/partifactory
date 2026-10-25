@@ -20,6 +20,6 @@ else
 fi
 mkdir -p "$PF_RUN_DIR/device-pass"
 rm -f "$PF_RUN_DIR/device-pass/guest-link.json"
-docker compose -f tests/e2e/harness/compose.yaml --profile browsers run --rm \
+tests/e2e/harness/compose.sh --profile browsers run --rm \
   -e PF_DEVICE_PASS=1 browsers device_pass.spec.ts \
   --project chromium-mobile --project webkit-mobile --project firefox-desktop

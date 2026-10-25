@@ -30,7 +30,7 @@ fi
 export PF_BIN="${PF_BIN:-${CARGO_TARGET_DIR:-$repo/target}/debug/partifactory}"
 ( cd "$repo/tests/e2e" && npm ci --no-audit --no-fund --silent )
 PF_RUN_DIR="$repo/target/e2e-runs/$PF_E2E_RUN" \
-  docker compose -f "$h/compose.yaml" --profile browsers build browsers
+  "$h/compose.sh" --profile browsers build browsers
 
 run=""
 status=0
@@ -69,7 +69,7 @@ export PF_RUN_DIR="$run"
 summary="$logs/summary.txt"
 note() { echo "$*" | tee -a "$summary"; }
 
-caddy_v="$(docker compose -f "$h/compose.yaml" exec -T caddy caddy version 2>/dev/null | head -1)"
+caddy_v="$("$h/compose.sh" exec -T proxy caddy version 2>/dev/null | head -1)"
 note "caddy: $caddy_v"
 note "dex: ghcr.io/dexidp/dex:v2.45.1; playwright: mcr.microsoft.com/playwright:v1.64.1-noble"
 note "mode: $PF_HARNESS_MODE; binary: $(git -C "$repo" rev-parse --short HEAD)"
@@ -129,11 +129,11 @@ fi
 # 3. Playwright, all four projects.
 # This real client is on another subnet than the browsers. Caddy observes its actual peer;
 # no forwarded-address spoofing or fabricated device age is involved.
-docker compose -f "$h/compose.yaml" --profile security run --rm security-device-client \
+"$h/compose.sh" --profile security run --rm security-device-client \
   --base-url https://parts.pf.test --ca-cert /run/pf/run/certs/ca.pem \
   --connect-to 172.30.79.10:443 --prepare-device-file "$PF_SECURITY_DEVICE_FILE"
 note "--- playwright"
-docker compose -f "$h/compose.yaml" --profile browsers run --rm browsers --grep-invert @origin-down "$@" \
+"$h/compose.sh" --profile browsers run --rm browsers --grep-invert @origin-down "$@" \
   2>&1 | tee "$logs/playwright.txt"
 pw="${PIPESTATUS[0]}"
 if [ -f "$logs/results.json" ]; then cp "$logs/results.json" "$logs/results-main.json"; fi
@@ -182,11 +182,11 @@ note "--- origin down"
 if [ "$PF_HARNESS_MODE" = host ]; then
   kill "$(cat "$run/pf.pid")"; rm -f "$run/pf.pid"
 else
-  docker compose -f "$h/compose.yaml" --profile container stop partifactory >/dev/null
+  "$h/compose.sh" --profile container stop partifactory >/dev/null
 fi
 sleep 1
 "$repo/deploy/proxy/smoke.sh" --origin-down --cacert "$PF_CA" --resolve-to 127.0.0.1 --port "$PF_HTTPS_PORT" | tee -a "$summary"
-PF_ORIGIN_DOWN=1 docker compose -f "$h/compose.yaml" --profile browsers run --rm -e PF_ORIGIN_DOWN=1 browsers \
+PF_ORIGIN_DOWN=1 "$h/compose.sh" --profile browsers run --rm -e PF_ORIGIN_DOWN=1 browsers \
   --grep @origin-down 2>&1 | tee "$logs/playwright-origin-down.txt"
 [ "${PIPESTATUS[0]}" = 0 ] || { note "FAIL maintenance page in the browsers"; exit 1; }
 note "ok   maintenance page served with the origin stopped"

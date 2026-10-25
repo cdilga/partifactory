@@ -21,6 +21,10 @@ export type LogLine = Record<string, unknown> & { event?: string; request_id?: s
 export async function serverLog(filter: { request_id?: string; event?: string } = {}): Promise<LogLine[]> {
   const q = new URLSearchParams(filter as Record<string, string>).toString();
   try {
+    if (process.env.PF_HARNESS_RELEASE === '1') {
+      const file=process.env.PF_SERVER_LOG_FILE??'/run/pf/run/server.jsonl';
+      return fs.readFileSync(file,'utf8').split('\n').filter(line=>line.startsWith('{')).flatMap(line=>{try{return [JSON.parse(line) as LogLine];}catch{return [];}}).filter(line=>Object.entries(filter).every(([key,value])=>line[key]===value));
+    }
     const r = await fetch(`https://parts.pf.test/_dev/logs?${q}`);
     return r.ok ? ((await r.json()) as LogLine[]) : [];
   } catch {
@@ -88,7 +92,7 @@ export const test = base.extend<Fixtures>({
       ...contextOptions,
       viewport,
       userAgent,
-      baseURL: 'https://parts.pf.test',
+      baseURL: process.env.PF_BASE_URL??'https://parts.pf.test',
     });
     await use(ctx);
     await ctx.close();

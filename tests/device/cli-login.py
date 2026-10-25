@@ -59,7 +59,7 @@ def main():
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[2]
     run_dir = args.run_dir.resolve()
-    compose = repo / "tests/e2e/harness/compose.yaml"
+    compose = repo / "tests/e2e/harness/compose.sh"
     with Server(("127.0.0.1", 0), Proxy) as proxy, tempfile.TemporaryDirectory(prefix="pf-cli-gate-") as temp:
         proxy.upstream_port = args.https_port
         thread = threading.Thread(target=proxy.serve_forever, daemon=True)
@@ -89,7 +89,7 @@ def main():
                         if not approval:
                             raise RuntimeError("CLI did not produce a device approval URL: " + stderr.read_text())
                         public.write_text(approval + "\n")
-                        browser = subprocess.run(["docker", "compose", "-f", str(compose), "--profile", "browsers", "run", "--rm", "browsers", "cli_login.spec.ts", "--project", project], cwd=repo, env=env)
+                        browser = subprocess.run([str(compose), "--profile", "browsers", "run", "--rm", "browsers", "cli_login.spec.ts", "--project", project], cwd=repo, env=env)
                         artifacts = repo / "target/e2e-logs" / env.get("PF_E2E_RUN", "local")
                         shutil.copy2(artifacts / "results.json", artifacts / f"results-cli-{project}.json")
                         browser.check_returncode()

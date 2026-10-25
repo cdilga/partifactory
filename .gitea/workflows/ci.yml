@@ -161,7 +161,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        script: [devices, storage-pressure]
+        script: [security-release, storage-pressure]
     name: ${{ matrix.script }}
     container:
       image: catthehacker/ubuntu:act-22.04@sha256:3cdab37904fc1798c460f1fadd47fd2c4d24fa2f292d1b57fc12eff072b415ec
@@ -199,6 +199,11 @@ jobs:
         with:
           name: ${{ matrix.script }}-test-evidence
           path: |
+            target/e2e-logs/release-*/results*.json
+            target/e2e-logs/release-*/device-reports/
+            target/e2e-logs/release-*/security/report.json
+            target/e2e-logs/release-*/proxy-runtime-log-gate.json
+            target/e2e-logs/release-*/summary.txt
             target/e2e-logs/devices-*/results.json
             target/e2e-logs/devices-*/device-reports/
             target/e2e-logs/pressure-*/results.json

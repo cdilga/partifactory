@@ -9,8 +9,8 @@ run="${1:-${PF_RUN_DIR:-}}"
 export PF_RUN_DIR="${run:-/tmp/pf-harness-none}"
 
 if [ -n "$run" ] && [ -d "$run" ]; then
-  docker compose -f "$h/compose.yaml" --profile container logs --no-color caddy > "$run/caddy.log" 2>&1 || true
-  docker compose -f "$h/compose.yaml" --profile container logs --no-color dex dex2 > "$run/dex.log" 2>&1 || true
+  "$h/compose.sh" --profile container logs --no-color proxy > "$run/caddy.log" 2>&1 || true
+  "$h/compose.sh" --profile container logs --no-color dex dex2 > "$run/dex.log" 2>&1 || true
   if [ -f "$run/logs.pid" ]; then
     kill "$(cat "$run/logs.pid")" 2>/dev/null || true
     rm -f "$run/logs.pid"
@@ -24,7 +24,7 @@ if [ -n "$run" ] && [ -d "$run" ]; then
   fi
 fi
 
-docker compose -f "$h/compose.yaml" --profile container --profile browsers --profile render down -v --remove-orphans 2>&1 \
+"$h/compose.sh" --profile container --profile browsers --profile render down -v --remove-orphans 2>&1 \
   | grep -vE 'Stopp|Remov|Stopped|Removed' >&2 || true
 
 # Only this compose project's objects: other harnesses (the sandbox spike) share the label.

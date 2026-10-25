@@ -1,0 +1,7 @@
+# Runtime only: the one --features dev binary already built by the Linux gate.
+FROM ubuntu:24.04@sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
+COPY partifactory /usr/local/bin/partifactory
+USER 65532:65532
+WORKDIR /data
+ENTRYPOINT ["/usr/local/bin/partifactory"]
+CMD ["serve"]

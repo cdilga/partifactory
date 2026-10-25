@@ -1,0 +1,187 @@
+# Overlay only: application, renderer and proxy settings come from deploy/compose.yaml.
+# All paths are absolute because Compose resolves overlays against the shipped base file.
+name: pf-harness
+
+x-labels: &labels
+  pf.harness: "1"
+x-logging: &logging
+  driver: json-file
+  options: {max-size: "10m", max-file: "3"}
+
+networks:
+  ingress:
+    labels: *labels
+    ipam:
+      config: [{subnet: 172.30.77.0/24}]
+  render:
+    labels: *labels
+    ipam:
+      config: [{subnet: 172.30.78.0/24}]
+  security-device:
+    labels: *labels
+    ipam:
+      config: [{subnet: 172.30.79.0/24}]
+volumes:
+  data:
+    labels: *labels
+  render-public:
+    labels: *labels
+
+services:
+  partifactory:
+    profiles: [container]
+    labels: *labels
+    restart: "no"
+    environment:
+      SSL_CERT_FILE: /run/pf/ca.pem
+      PF_LOG: info
+    volumes:
+      - ${PF_RUN_DIR:?}/data:/data
+      - ${PF_RUN_DIR:?}/render-public:/run/pf-render
+      - ${PF_RUN_DIR:?}/certs/ca.pem:/run/pf/ca.pem:ro
+    networks:
+      ingress:
+        ipv4_address: 172.30.77.20
+      render:
+        ipv4_address: 172.30.78.20
+
+  partifactory-render:
+    labels: *labels
+    restart: "no"
+    environment:
+      PF_RENDER_GATEWAY: ${PF_RENDER_GATEWAY:-partifactory:8443}
+    volumes:
+      - ${PF_RUN_DIR:?}/render-public:/run/pf-render:ro
+    networks:
+      render:
+        ipv4_address: 172.30.78.30
+
+  proxy:
+    labels: *labels
+    restart: "no"
+    depends_on: [security-canary]
+    environment:
+      PF_CDN_UPSTREAM: ${PF_CDN_UPSTREAM:-unused}
+    volumes:
+      - ${PF_REPO_ROOT:?}/tests/e2e/harness/sites.d:/etc/caddy/sites.d:ro
+      - ${PF_REPO_ROOT:?}/tests/e2e/harness/fake-cdn:/srv/pf-cdn:ro
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    networks:
+      security-device:
+        ipv4_address: 172.30.79.10
+      ingress:
+        ipv4_address: 172.30.77.10
+        aliases: ["dex.${PF_DOMAIN_APEX:-pf.test}", "dex2.${PF_DOMAIN_APEX:-pf.test}", "parts.${PF_DOMAIN_APEX:-pf.test}"]
+
+  security-device-client:
+    profiles: [security]
+    image: pf-harness-browsers:1.64.1
+    labels: *labels
+    restart: "no"
+    entrypoint: ["python3", "/opt/pf-security/run.py"]
+    volumes:
+      - ${PF_REPO_ROOT:?}/tests/security:/opt/pf-security:ro
+      - ${PF_RUN_DIR:?}:/run/pf/run
+    networks:
+      security-device:
+        ipv4_address: 172.30.79.40
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  security-canary:
+    image: pf-harness-browsers:1.64.1
+    labels: *labels
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    entrypoint: ["python3", "/opt/pf-security/canary.py"]
+    volumes:
+      - ${PF_REPO_ROOT:?}/tests/security/canary.py:/opt/pf-security/canary.py:ro
+    networks: [ingress]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  dex:
+    logging: *logging
+    image: ghcr.io/dexidp/dex:v2.45.1
+    labels: *labels
+    restart: "no"
+    command: ["dex", "serve", "/etc/dex/dex.yaml"]
+    volumes:
+      - ${PF_RUN_DIR:?}/dex/dex.yaml:/etc/dex/dex.yaml:ro
+    networks: [ingress]
+
+  dex2:
+    logging: *logging
+    image: ghcr.io/dexidp/dex:v2.45.1
+    labels: *labels
+    restart: "no"
+    command: ["dex", "serve", "/etc/dex/dex.yaml"]
+    volumes:
+      - ${PF_RUN_DIR:?}/dex/dex2.yaml:/etc/dex/dex.yaml:ro
+    networks: [ingress]
+
+  # Playwright (all four projects) on the harness network: `docker compose run --rm browsers
+  # <playwright args>`. The repo is mounted at /repo (node_modules installed on the host by
+  # ci/e2e.sh; @playwright/test is plain JS). Fixed names resolve to Caddy through /etc/hosts;
+  # Chromium maps the whole wildcard with --host-resolver-rules.
+  browsers:
+    logging: *logging
+    profiles: ["browsers"]
+    image: pf-harness-browsers:1.64.1
+    build:
+      context: ${PF_REPO_ROOT:?}/tests/e2e/harness
+      dockerfile: Dockerfile.browsers
+      network: host
+    labels: *labels
+    restart: "no"
+    ipc: host
+    init: true
+    entrypoint: ["bash", "/repo/tests/e2e/harness/browsers-entry.sh"]
+    environment:
+      CI: ${CI:-}
+      PF_E2E_RUN: ${PF_E2E_RUN:-local}
+      PF_HARNESS_IP: 172.30.77.10
+      PF_FIREFOX_PROFILE: /tmp/pf-firefox-profile
+      PF_ORIGIN_DOWN: ${PF_ORIGIN_DOWN:-}
+      PF_E2E_RENDER: ${PF_E2E_RENDER:-0}
+      PF_HARNESS_RELEASE: ${PF_HARNESS_RELEASE:-0}
+      PF_BASE_URL: https://parts.${PF_DOMAIN_APEX:-pf.test}
+      PF_DEVICE_REPORT_URL: ${PF_DEVICE_REPORT_URL:-https://blobs-part.pf.test/__harness/report}
+      PF_SECURITY_DEVICE_FILE: ${PF_SECURITY_DEVICE_FILE:-}
+      HOST_UID: ${HOST_UID:-}
+      HOST_GID: ${HOST_GID:-}
+    volumes:
+      - ${PF_REPO_ROOT:?}:/repo
+      - ${PF_RUN_DIR:?}/certs/ca.pem:/run/pf/ca.pem:ro
+      - ${PF_RUN_DIR:?}:/run/pf/run:ro
+    extra_hosts:
+      - "parts.pf.test:172.30.77.10"
+      - "notes-part.pf.test:172.30.77.10"
+      - "pixel-part.pf.test:172.30.77.10"
+      - "public-pixel-part.pf.test:172.30.77.10"
+      - "pixel-chromium-desktop-part.pf.test:172.30.77.10"
+      - "pixel-chromium-mobile-part.pf.test:172.30.77.10"
+      - "pixel-webkit-mobile-part.pf.test:172.30.77.10"
+      - "pixel-firefox-desktop-part.pf.test:172.30.77.10"
+      - "pixel-undo-chromium-desktop-part.pf.test:172.30.77.10"
+      - "pixel-undo-chromium-mobile-part.pf.test:172.30.77.10"
+      - "pixel-undo-webkit-mobile-part.pf.test:172.30.77.10"
+      - "pixel-undo-firefox-desktop-part.pf.test:172.30.77.10"
+      - "device-part.pf.test:172.30.77.10"
+      - "wrapper-draft-chromium-desktop-part.pf.test:172.30.77.10"
+      - "wrapper-draft-webkit-mobile-part.pf.test:172.30.77.10"
+      - "markdown-part.pf.test:172.30.77.10"
+      - "text-part.pf.test:172.30.77.10"
+      - "bundle-part.pf.test:172.30.77.10"
+      - "mirrored-part.pf.test:172.30.77.10"
+      - "demo-part.pf.test:172.30.77.10"
+      - "blobs-part.pf.test:172.30.77.10"
+      - "forge.pf.test:172.30.77.10"
+      - "dex.pf.test:172.30.77.10"
+      - "dex2.pf.test:172.30.77.10"
+    networks: [ingress]
+

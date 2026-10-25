@@ -20,7 +20,7 @@ def main():
     args = parser.parse_args()
     run = args.run_dir.resolve()
     repo = Path(__file__).resolve().parents[2]
-    compose = ["docker", "compose", "-f", str(repo / "tests/e2e/harness/compose.yaml")]
+    compose = [str(repo / "tests/e2e/harness/compose.sh")]
     env = dict(os.environ, PF_RUN_DIR=str(run))
     logs = repo / "target/e2e-logs" / os.environ.get("PF_E2E_RUN", run.name)
     logs.mkdir(parents=True, exist_ok=True)

@@ -17,7 +17,8 @@ test('shipping device matrix: standalone, part root, reload, guest and sign-in',
   const report=async(item:string,outcome='pass')=>{
     const row={event:'device.check',item,lane:info.project.name,outcome,browser:browser.version()};
     reports.push(row);
-    const r=await context.request.post('https://parts.pf.test/_dev/report',{data:row});
+    const endpoint=process.env.PF_HARNESS_RELEASE==='1'?(process.env.PF_DEVICE_REPORT_URL??'https://blobs-part.pf.test/__harness/report'):'https://parts.pf.test/_dev/report';
+    const r=await context.request.post(endpoint,{data:row});
     expect(r.status()).toBe(204);
   };
   try {

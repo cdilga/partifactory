@@ -5,6 +5,9 @@ blobs-part.{$PF_APEX:pf.test} {
     handle /__sec_canary {
         reverse_proxy security-canary:8080
     }
+    handle /__harness/* {
+        reverse_proxy security-canary:8080
+    }
     handle {
         reverse_proxy {$PF_UPSTREAM_CONTENT:partifactory:8081} {
             import pf_upstream_opts

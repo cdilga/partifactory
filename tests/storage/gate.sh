@@ -40,7 +40,7 @@ python3 tests/e2e/harness/seed-part.py
 python3 tests/storage/seed-pressure.py "$PF_RUN_DIR/data" > "$repo/target/e2e-logs/$PF_E2E_RUN/stores.txt" 2>&1 &
 seed_pid=$!
 # Browser containers already have an exact host resolver and CA; no host /etc/hosts edits.
-docker compose -f tests/e2e/harness/compose.yaml --profile browsers run --rm \
+tests/e2e/harness/compose.sh --profile browsers run --rm \
   -e PF_STORAGE_GATE=1 \
   -e "PF_STORAGE_GATE_DATA=/repo/target/e2e-runs/$PF_E2E_RUN/data" \
   browsers disk_full.spec.ts --project chromium-desktop \

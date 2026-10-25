@@ -43,7 +43,7 @@ def main():
         assert result.returncode == expected, f"{arguments[0]} exited {result.returncode}; expected {expected}; log={log}"
         return result
 
-    compose = ["docker", "compose", "-f", str(repo / "tests/e2e/harness/compose.yaml"), "--profile", "container", "exec", "-T", "partifactory", "/usr/local/bin/partifactory", "dev"]
+    compose = [str(repo / "tests/e2e/harness/compose.sh"), "--profile", "container", "exec", "-T", "partifactory", "/usr/local/bin/partifactory", "dev"]
     dev = [str(binary), "dev", "--socket", str(run / "data/run/dev.sock")] if os.environ.get("PF_HARNESS_MODE", "host") == "host" else compose
 
     def source_call(op, arguments):
@@ -64,7 +64,10 @@ def main():
     assert "--plan" in help_text and "--apply" in help_text
     assert '"event":"export.finished"' in (output / "export.jsonl").read_text()
 
-    with tempfile.TemporaryDirectory(prefix="pf-recovery-", dir=run) as temporary:
+    # macOS sockaddr_un is short. Nesting another long fixture name beneath
+    # e2e-runs/<timestamp> exceeds SUN_LEN before the restored dev socket binds.
+    # Keep all disposable data in the repo, but use the shallow target directory.
+    with tempfile.TemporaryDirectory(prefix="r-", dir=repo / "target") as temporary:
         temp = Path(temporary)
         unpack = temp / "verified-source"
         unpack.mkdir()

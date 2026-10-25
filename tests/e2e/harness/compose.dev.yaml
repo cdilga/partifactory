@@ -1,0 +1,13 @@
+# Only the earlier regression specs use a dev-feature image/identity/socket.
+# The release security, device and deployment lanes never load this overlay.
+services:
+  partifactory:
+    image: ${PF_HARNESS_DEV_IMAGE:-pf-harness-dev:local}
+    entrypoint: [/usr/local/bin/partifactory]
+    environment:
+      PF_DEV_API_TOKEN_FILE: /run/secrets/api_token
+      PF_DEV_IDENTITY: /run/pf/identity.toml
+      PF_DEV_LOG_RING: "20000"
+    volumes:
+      - ${PF_RUN_DIR:?}/identity.toml:/run/pf/identity.toml:ro
+      - ${PF_RUN_DIR:?}/secrets/api_token:/run/secrets/api_token:ro

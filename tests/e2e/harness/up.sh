@@ -16,13 +16,19 @@ h="$repo/tests/e2e/harness"
 
 case "$(uname -s)" in Darwin) default_mode=host ;; *) default_mode=container ;; esac
 mode="${PF_HARNESS_MODE:-$default_mode}"
+export PF_HARNESS_RELEASE="${PF_HARNESS_RELEASE:-0}"
+if [ "$PF_HARNESS_RELEASE" = 1 ]; then
+  mode=container
+  : "${PF_HARNESS_IMAGE:?Release harness requires an immutable release image}"
+fi
+export PF_HARNESS_MODE="$mode"
 export PF_APEX="${PF_APEX:-pf.test}"
 export PF_HTTPS_PORT="${PF_HTTPS_PORT:-18443}"
 export PF_BIN="${PF_BIN:-${CARGO_TARGET_DIR:-$repo/target}/debug/partifactory}"
 export PF_RUN_DIR="${PF_RUN_DIR:-$repo/target/e2e-runs/$(date +%Y%m%d-%H%M%S)}"
 run="$PF_RUN_DIR"
 mkdir -p "$run"/{certs,dex,secrets,data,render-public}
-export PF_RENDER_GATEWAY="${PF_RENDER_GATEWAY:-partifactory}"
+export PF_RENDER_GATEWAY="${PF_RENDER_GATEWAY:-partifactory:8443}"
 cleanup_failed_start() {
   local rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -32,7 +38,9 @@ cleanup_failed_start() {
 trap cleanup_failed_start EXIT
 trap 'exit 130' INT TERM
 
-[ -x "$PF_BIN" ] || { echo "up.sh: no binary at $PF_BIN (cargo build -p partifactory --features dev)" >&2; exit 1; }
+if [ "$PF_HARNESS_RELEASE" != 1 ]; then
+  [ -x "$PF_BIN" ] || { echo "up.sh: no binary at $PF_BIN (cargo build -p partifactory --features dev)" >&2; exit 1; }
+fi
 
 "$h/ca.sh" "$run/certs" >/dev/null
 python3 - "$repo/tests/fixtures/identity.toml" "$run/identity.toml" "$PF_APEX" <<'PYFIX'
@@ -84,6 +92,11 @@ audience_group = "household"
 [admin]
 subject = "oidc:https://dex.$PF_APEX/dex#$admin_sub"
 
+
+EOF
+
+if [ "$PF_HARNESS_RELEASE" != 1 ]; then
+  cat >> "$run/site.toml" <<EOF
 [mirror.test_resolve]
 "dex.$PF_APEX" = "$mirror_addr"
 "dex2.$PF_APEX" = "$mirror_addr"
@@ -94,6 +107,7 @@ subject = "oidc:https://dex.$PF_APEX/dex#$admin_sub"
 "fonts.googleapis.com" = "$mirror_addr"
 "fonts.gstatic.com" = "$mirror_addr"
 EOF
+fi
 
 if [ "${PF_STORAGE_GATE:-0}" = 1 ]; then
   # The disposable small-volume lane tests quotas and physical pressure, so requests must
@@ -111,6 +125,23 @@ fi
 if [ "${PF_E2E_RENDER:-0}" = 1 ]; then
   printf '\n[render]\nenabled = true\n' >> "$run/site.toml"
 fi
+
+# The application keeps the shipped non-root user; only disposable bind directories
+# are writable. Config and secret files remain read-only mounts.
+if [ "$mode" = container ]; then chmod 777 "$run/data" "$run/render-public"; fi
+export PF_HARNESS_DEV_IMAGE="${PF_HARNESS_DEV_IMAGE:-pf-harness-dev:$(git -C "$repo" rev-parse --short HEAD)}"
+if [ "$mode" = container ] && [ "$PF_HARNESS_RELEASE" != 1 ]; then
+  mkdir -p "$run/dev-runtime"
+  cp "$PF_BIN" "$run/dev-runtime/partifactory"
+  docker build --label pf.harness=1 --label "org.opencontainers.image.revision=$(git -C "$repo" rev-parse HEAD)" \
+    -t "$PF_HARNESS_DEV_IMAGE" -f "$h/Dockerfile.dev" "$run/dev-runtime" >&2
+  rm -rf "$run/dev-runtime"
+fi
+: > "$run/compose.env"
+for name in PF_APEX PF_HARNESS_MODE PF_HARNESS_RELEASE PF_HARNESS_DEV_IMAGE PF_HARNESS_IMAGE PF_HTTPS_PORT PF_RENDER_GATEWAY PF_UPSTREAM_WORKSPACE PF_UPSTREAM_CONTENT; do
+  printf '%s=%q\n' "$name" "${!name:-}" >> "$run/compose.env"
+done
+chmod 600 "$run/compose.env"
 
 if [ "$mode" = host ]; then
   PF_SITE_TOML="$run/site.toml" PF_DATA_DIR="$run/data" \
@@ -131,18 +162,16 @@ else
 fi
 
 touch "$run/server.jsonl"
-docker compose -f "$h/compose.yaml" "${compose_profiles[@]}" up -d --quiet-pull caddy dex dex2 \
+"$h/compose.sh" "${compose_profiles[@]}" up -d --quiet-pull proxy dex dex2 \
   $([ "$mode" = container ] && echo partifactory) >&2
 if [ "${PF_E2E_RENDER:-0}" = 1 ]; then
-  render_files=(-f "$h/compose.yaml")
-  if [ "$mode" = host ]; then render_files+=(-f "$h/compose.render-host.yaml"); fi
   render_services=(partifactory-render)
   if [ "$mode" = host ]; then render_services+=(render-host-relay); fi
-  docker compose "${render_files[@]}" --profile render up -d --quiet-pull "${render_services[@]}" >&2
+  "$h/compose.sh" --profile render up -d --quiet-pull "${render_services[@]}" >&2
 fi
 if [ "$mode" = container ]; then
   # Follow the server's stdout into the run's JSONL, as host mode writes it directly.
-  nohup docker compose -f "$h/compose.yaml" --profile container logs -f --no-color --no-log-prefix partifactory \
+  nohup "$h/compose.sh" --profile container logs -f --no-color --no-log-prefix partifactory \
     > "$run/server.jsonl" 2>/dev/null &
   echo $! > "$run/logs.pid"
 fi
@@ -151,6 +180,9 @@ cat > "$run/env" <<EOF
 PF_RUN_DIR=$run
 PF_APEX=$PF_APEX
 PF_HARNESS_MODE=$mode
+PF_HARNESS_RELEASE=$PF_HARNESS_RELEASE
+PF_HARNESS_IMAGE=${PF_HARNESS_IMAGE:-}
+PF_HARNESS_DEV_IMAGE=$PF_HARNESS_DEV_IMAGE
 PF_E2E_RENDER=${PF_E2E_RENDER:-0}
 PF_HTTPS_PORT=$PF_HTTPS_PORT
 PF_OPS_URL=$ops_url
@@ -172,7 +204,7 @@ for i in $(seq 1 60); do
   sleep 1
 done
 echo "up.sh: harness did not become ready; see $run/server.jsonl and docker compose logs" >&2
-docker compose -f "$h/compose.yaml" logs --no-color --tail 50 >&2 || true
+"$h/compose.sh" logs --no-color --tail 50 >&2 || true
 tail -20 "$run/server.jsonl" "$run/server.stderr" >&2 2>/dev/null || true
 echo "$run"
 exit 1

@@ -7,9 +7,11 @@
 // under target/e2e-logs/<run>/<test>/.
 import { defineConfig, devices } from '@playwright/test';
 
+const baseURL=process.env.PF_BASE_URL??'https://parts.pf.test';
+const apex=new URL(baseURL).hostname.split('.').slice(1).join('.');
 const harnessIp = process.env.PF_HARNESS_IP ?? '172.30.77.10';
 const chromiumArgs = [
-  `--host-resolver-rules=MAP *.pf.test ${harnessIp}, EXCLUDE localhost`,
+  `--host-resolver-rules=MAP *.${apex} ${harnessIp}, EXCLUDE localhost`,
 ];
 const run = process.env.PF_E2E_RUN ?? 'local';
 const phase = process.env.PF_ORIGIN_DOWN === '1' ? '-origin-down' : '';
@@ -26,7 +28,7 @@ export default defineConfig({
   timeout: 30_000,
   reporter: [['list'], ['json', { outputFile: `../../target/e2e-logs/${run}/results${phase}.json` }]],
   use: {
-    baseURL: 'https://parts.pf.test',
+    baseURL,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'off',

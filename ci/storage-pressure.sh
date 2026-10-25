@@ -8,5 +8,5 @@ fi
 (cd "$repo/tests/e2e" && npm ci --no-audit --no-fund --silent)
 export PF_E2E_RUN="${PF_E2E_RUN:-pressure-$(date +%Y%m%d-%H%M%S)}"
 export PF_RUN_DIR="$repo/target/e2e-runs/$PF_E2E_RUN"
-docker compose -f tests/e2e/harness/compose.yaml --profile browsers build browsers
+tests/e2e/harness/compose.sh --profile browsers build browsers
 exec tests/storage/linux-gate.sh

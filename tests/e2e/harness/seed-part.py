@@ -11,7 +11,7 @@ RUN = Path(os.environ["PF_RUN_DIR"])
 if os.environ["PF_HARNESS_MODE"] == "host":
     COMMAND = [os.environ["PF_BIN"], "dev", "--socket", str(RUN / "data/run/dev.sock")]
 else:
-    COMMAND = ["docker", "compose", "-f", str(REPO / "tests/e2e/harness/compose.yaml"),
+    COMMAND = [str(REPO / "tests/e2e/harness/compose.sh"),
                "--profile", "container", "exec", "-T", "partifactory",
                "/usr/local/bin/partifactory", "dev"]
 
