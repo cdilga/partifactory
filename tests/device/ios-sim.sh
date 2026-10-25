@@ -25,8 +25,8 @@ set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 h="$repo/tests/e2e/harness"
 spec="${1:-self-test}"
+if [ "$spec" = device-pass ]; then exec "$repo/tests/device/ios-device-pass.sh"; fi
 page="${2:-/_dev/selftest}"
-[ "$spec" = device-pass ] && page="${2:-${PF_DEVICE_PAGE:-/_dev/selftest}}"
 [ "$spec" = self-test ] && page=/_dev/selftest
 
 [ "$(uname -s)" = Darwin ] || { echo "ios-sim.sh: needs macOS with Xcode" >&2; exit 2; }
@@ -153,17 +153,11 @@ if [ -z "$got" ]; then
   exit 1
 fi
 echo "$got" > "$out/report.json"
-python3 - "$out/report.json" "$spec" <<'PY'
+python3 - "$out/report.json" <<'PY'
 import json, sys
 report = json.load(open(sys.argv[1]))
 if report.get("pass") is False:
     sys.exit("ios-sim: FAIL page assertions: " + json.dumps(report.get("checks", {})))
-if sys.argv[2] == 'device-pass':
-    required={'standalone','part_root_first_open','part_root_reload','guest_link','sign_in'}
-    checks=report.get('checks',{})
-    missing=required-set(checks)
-    if missing or not all(checks.get(key) is True for key in required):
-        sys.exit('ios-sim: FAIL full device matrix not observed; missing or failing: '+', '.join(sorted(missing | {key for key in required if checks.get(key) is not True})))
 PY
 echo "ios-sim: ok, the page reported: $got"
 echo "ios-sim: output in $out"

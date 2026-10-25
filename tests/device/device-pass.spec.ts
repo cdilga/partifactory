@@ -31,17 +31,17 @@ test('shipping device matrix: standalone, part root, reload, guest and sign-in',
       else process.env.PF_BROWSER_AUTH_DIR=previousAuthDirectory;
     }
     await expect.poll(async()=>(await page.request.get('https://parts.pf.test/api/session')).status()).toBe(200);
-    await report('sign-in');
+    await report('sign_in');
     if(browserName==='chromium'){
       await nativePasskey(page,context);
-      await report('passkey-step-up');
-    }else await report('passkey-step-up','not_assertable');
+      await report('passkey_step_up');
+    }else await report('passkey_step_up','not_assertable');
     await page.goto('https://notes-part.pf.test/');
     await expect(page.frameLocator('#pf-frame').getByRole('heading',{name:'Serving fixture'})).toBeVisible();
-    await report('part-root-first-open');
+    await report('part_root_first_open');
     await page.reload();
     await expect(page.frameLocator('#pf-frame').getByRole('heading',{name:'Serving fixture'})).toBeVisible();
-    await report('part-root-reload');
+    await report('part_root_reload');
     const linkFile=path.join(directory,'guest-link.json');
     if(info.project.name==='chromium-mobile'){
       await page.getByRole('button',{name:'Share',exact:true}).click();
@@ -58,7 +58,7 @@ test('shipping device matrix: standalone, part root, reload, guest and sign-in',
     await page.goto(guestUrl);
     await expect(page.frameLocator('#pf-frame').getByRole('heading',{name:'Serving fixture'})).toBeVisible();
     expect((await context.cookies('https://parts.pf.test/')).some(c=>c.name.startsWith('__Host-'))).toBe(false);
-    await report('guest-link');
+    await report('guest_link');
     await page.screenshot({path:path.join(directory,`${info.project.name}-guest.png`),fullPage:true});
   } finally {
     fs.writeFileSync(path.join(directory,`${info.project.name}-report.json`),JSON.stringify(reports,null,2));
