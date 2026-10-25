@@ -48,12 +48,25 @@ fi
 # retain the other masked/read-only proc paths and the runner's non-privileged mode.
 mount --bind /proc/sys/net /proc/sys/net
 mount -o remount,bind,rw /proc/sys/net
-# Keep job data on the private checkout volume. Nested overlay mounts on a ZFS
-# checkout can block in kernel writeback during container creation and cleanup;
-# use the portable copying driver until a bounded alternative passes full gates.
-nohup dockerd --host="$DOCKER_HOST" --data-root="$PWD/target/ci-docker" \
+# Nested overlay upper directories on ZFS can block in kernel writeback. Keep
+# image/root layers in bounded tmpfs; named volumes (including BuildKit's cache)
+# stay on this job's disk-backed checkout volume.
+data_root="$PWD/target/ci-docker"
+volume_root="$PWD/target/ci-docker-volumes"
+mkdir -p "$data_root" "$volume_root"
+if ! mountpoint -q "$data_root"; then
+  mount -t tmpfs -o rw,nosuid,nodev,exec,size=8g,mode=700 tmpfs "$data_root"
+elif [ "$(findmnt -rn -T "$data_root" -o FSTYPE)" != tmpfs ]; then
+  echo 'ci docker: the private image store must be tmpfs' >&2
+  exit 1
+fi
+mkdir -p "$data_root/volumes"
+if ! mountpoint -q "$data_root/volumes"; then
+  mount --bind "$volume_root" "$data_root/volumes"
+fi
+nohup dockerd --host="$DOCKER_HOST" --data-root="$data_root" \
   --exec-root=/tmp/pf-ci-docker-exec --pidfile=/tmp/pf-ci-docker.pid \
-  --storage-driver=vfs "${cgroup_args[@]}" > target/e2e-logs/docker-daemon.log 2>&1 &
+  --storage-driver=overlay2 "${cgroup_args[@]}" > target/e2e-logs/docker-daemon.log 2>&1 &
 for _ in $(seq 1 60); do
   if docker info >/dev/null 2>&1; then
     echo 'ci docker: isolated daemon ready; checkout bind mounts stay inside the job'

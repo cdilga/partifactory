@@ -123,7 +123,8 @@ jobs:
       # act_runner deliberately overrides --privileged with its host policy. Grant the
       # capabilities needed by this job's private daemon explicitly instead.
       # SYS_PTRACE lets dockerd bind /proc/<non-root child>/ns/net during bridge setup.
-      options: --cap-add=SYS_ADMIN --cap-add=NET_ADMIN --cap-add=SYS_RESOURCE --cap-add=SYS_PTRACE --security-opt=seccomp=unconfined --security-opt=apparmor=unconfined
+      # The 16 GiB job holds an 8 GiB image store and a bounded 6 GiB build worker.
+      options: --cap-add=SYS_ADMIN --cap-add=NET_ADMIN --cap-add=SYS_RESOURCE --cap-add=SYS_PTRACE --security-opt=seccomp=unconfined --security-opt=apparmor=unconfined --memory=16g --memory-swap=16g
     env:
       DOCKER_HOST: unix:///var/run/pf-ci-docker.sock
       PF_E2E_RENDER: "1"
@@ -206,7 +207,7 @@ jobs:
     name: ${{ matrix.script }}
     container:
       image: catthehacker/ubuntu:act-22.04@sha256:3cdab37904fc1798c460f1fadd47fd2c4d24fa2f292d1b57fc12eff072b415ec
-      options: --cap-add=SYS_ADMIN --cap-add=NET_ADMIN --cap-add=SYS_RESOURCE --cap-add=SYS_PTRACE --security-opt=seccomp=unconfined --security-opt=apparmor=unconfined
+      options: --cap-add=SYS_ADMIN --cap-add=NET_ADMIN --cap-add=SYS_RESOURCE --cap-add=SYS_PTRACE --security-opt=seccomp=unconfined --security-opt=apparmor=unconfined --memory=16g --memory-swap=16g
     env:
       DOCKER_HOST: unix:///var/run/pf-ci-docker.sock
     steps:
@@ -282,7 +283,7 @@ jobs:
     runs-on: [browser, rust-truenas]
     container:
       image: catthehacker/ubuntu:act-22.04@sha256:3cdab37904fc1798c460f1fadd47fd2c4d24fa2f292d1b57fc12eff072b415ec
-      options: --cap-add=SYS_ADMIN --cap-add=NET_ADMIN --cap-add=SYS_RESOURCE --cap-add=SYS_PTRACE --security-opt=seccomp=unconfined --security-opt=apparmor=unconfined
+      options: --cap-add=SYS_ADMIN --cap-add=NET_ADMIN --cap-add=SYS_RESOURCE --cap-add=SYS_PTRACE --security-opt=seccomp=unconfined --security-opt=apparmor=unconfined --memory=16g --memory-swap=16g
     env:
       DOCKER_HOST: unix:///var/run/pf-ci-docker.sock
     steps:

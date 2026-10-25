@@ -14,7 +14,9 @@ oci_builder_prepare(){
   # resolve through the runner's DNS reliably; keep this exception in CI only.
   # Local builders retain their current network, snapshots and cache keys.
   if [ "${CI:-}" = true ] || [ "${GITHUB_ACTIONS:-}" = true ] || [ "${GITEA_ACTIONS:-}" = true ]; then
-    driver_args+=(--driver-opt network=host --buildkitd-flags '--allow-insecure-entitlement network.host')
+    # Named-volume cache is disk-backed in CI. Native snapshots avoid nested
+    # overlay unmount/writeback stalls on the runner's ZFS checkout.
+    driver_args+=(--driver-opt network=host --buildkitd-flags '--allow-insecure-entitlement network.host --oci-worker-snapshotter=native')
     PF_OCI_BUILD_ARGS+=(--network=host --allow=network.host)
   fi
   local inspected
