@@ -206,7 +206,7 @@ for i in $(seq 1 60); do
   sleep 1
 done
 echo "up.sh: harness did not become ready; see $run/server.jsonl and docker compose logs" >&2
-"$h/compose.sh" logs --no-color --tail 50 >&2 || true
+"$h/compose.sh" --profile container --profile render logs --no-color --tail 50 >&2 || true
 tail -20 "$run/server.jsonl" "$run/server.stderr" >&2 2>/dev/null || true
 echo "$run"
 exit 1
