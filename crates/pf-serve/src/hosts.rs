@@ -45,6 +45,11 @@ impl HostRules {
         }
     }
 
+    /// The apex beneath which workspace and part hosts are classified.
+    pub fn apex(&self) -> &str {
+        &self.apex
+    }
+
     /// The workspace's full host name, e.g. `parts.pf.test`.
     pub fn workspace_host(&self) -> String {
         format!("{}.{}", self.workspace, self.apex)

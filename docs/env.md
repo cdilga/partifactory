@@ -40,6 +40,19 @@ Run `partifactory config check` to load the config exactly as `serve` would. It 
 | `backup.host_snapshots` | `PF_BACKUP_HOST_SNAPSHOTS` | string | `"unknown"` | Whether the host snapshots `/data` (`on`, `off` or `unknown`); shown on Health. |
 | `deploy.host` | `PF_DEPLOY_HOST` | string | (unset) | Where `partifactory deploy` runs compose (an SSH target). |
 | `disk.budget_percent` | `PF_DISK_BUDGET_PERCENT` | integer | `80` | The share of the volume partifactory may use. `100` switches the budget off and needs `[unsafe] disk_budget = "off"`. |
+| `disk.stores.audit` | `PF_DISK_STORES_AUDIT` | integer | `268435456` | Byte cap for audit; bounded from 1 KiB to eight times its safe default. |
+| `disk.stores.blobs` | `PF_DISK_STORES_BLOBS` | integer | `21474836480` | Byte cap for blobs; bounded from 1 KiB to eight times its safe default. |
+| `disk.stores.build_logs` | `PF_DISK_STORES_BUILD_LOGS` | integer | `536870912` | Byte cap for build logs; bounded from 1 KiB to eight times its safe default. |
+| `disk.stores.data_docs` | `PF_DISK_STORES_DATA_DOCS` | integer | `21474836480` | Byte cap for data docs; bounded from 1 KiB to eight times its safe default. |
+| `disk.stores.data_snapshots` | `PF_DISK_STORES_DATA_SNAPSHOTS` | integer | `2147483648` | Byte cap for data snapshots; bounded from 1 KiB to eight times its safe default. |
+| `disk.stores.events` | `PF_DISK_STORES_EVENTS` | integer | `134217728` | Byte cap for events; bounded from 1 KiB to eight times its safe default. |
+| `disk.stores.exports` | `PF_DISK_STORES_EXPORTS` | integer | `8589934592` | Byte cap for scheduled exports; bounded from 1 KiB to eight times its safe default. |
+| `disk.stores.idempotency` | `PF_DISK_STORES_IDEMPOTENCY` | integer | `134217728` | Byte cap for idempotency; bounded from 1 KiB to eight times its safe default. |
+| `disk.stores.mirror_cache` | `PF_DISK_STORES_MIRROR_CACHE` | integer | `5368709120` | Byte cap for mirror cache; bounded from 1 KiB to eight times its safe default. |
+| `disk.stores.previews` | `PF_DISK_STORES_PREVIEWS` | integer | `2147483648` | Byte cap for previews; bounded from 1 KiB to eight times its safe default. |
+| `disk.stores.quota_hits` | `PF_DISK_STORES_QUOTA_HITS` | integer | `16777216` | Byte cap for quota hits; bounded from 1 KiB to eight times its safe default. |
+| `disk.stores.runtime_errors` | `PF_DISK_STORES_RUNTIME_ERRORS` | integer | `134217728` | Byte cap for runtime errors; bounded from 1 KiB to eight times its safe default. |
+| `disk.stores.shared_blobs` | `PF_DISK_STORES_SHARED_BLOBS` | integer | `5368709120` | Byte cap for shared blobs; bounded from 1 KiB to eight times its safe default. |
 | `dns.cloudflare.account_id` | `PF_DNS_CLOUDFLARE_ACCOUNT_ID` | string | (unset) | Cloudflare adapter: account id. |
 | `dns.cloudflare.plan` | `PF_DNS_CLOUDFLARE_PLAN` | string | (unset) | Cloudflare adapter: the zone's plan (`free`, `pro`, …), which decides the health check. |
 | `dns.cloudflare.tunnel_name` | `PF_DNS_CLOUDFLARE_TUNNEL_NAME` | string | (unset) | Cloudflare adapter: the tunnel's name. |
@@ -69,12 +82,43 @@ Run `partifactory config check` to load the config exactly as `serve` would. It 
 | `unsafe` | `PF_UNSAFE` | table (PF_<TABLE>_<NAME> in env) | `{}` | Protections deliberately switched off, as `<name> = "off"`. Each one is reported as a warning. |
 | `webhooks.enabled` | `PF_WEBHOOKS_ENABLED` | bool | `false` | Signed event webhooks for agents (after Slice 1; inert until then). |
 
+## Runtime and compose settings
+
+These select listeners, files and optional deployment services; they are not site keys.
+
+| Variable | Default / purpose |
+| --- | --- |
+| `PF_DATA_DIR` | `/data`, the only durable application state. |
+| `PF_LISTEN_WORKSPACE` | `0.0.0.0:8080`, proxy network only. |
+| `PF_LISTEN_CONTENT` | `0.0.0.0:8081`, proxy network only. |
+| `PF_LISTEN_OPS` | `0.0.0.0:9090`, publish to loopback only. |
+| `PF_RENDER_PUBLIC_DIR` | `/data/render-public`, public renderer certificate and SPKI only. |
+| `PF_LISTEN_RENDER` | `0.0.0.0:443`, internal render TLS listener. Compose uses `8443`. |
+| `PF_RENDER_CDP` | `http://partifactory-render:9222`, internal CDP endpoint. |
+| `PF_RENDER_CONTROL` | `http://partifactory-render:9223`, internal browser controller. |
+| `PF_IMAGE` | Required OCI image including `@sha256:…`; no floating tags. |
+| `PF_SITE_CONFIG` | Required host path to the offline site.toml mounted read-only. |
+| `PF_OPS_PORT` | `9090`, loopback host ops port. |
+| `PF_HTTPS_BIND` | `127.0.0.1`, optional proxy bind address. |
+| `PF_HTTPS_PORT` | `8443`, optional proxy HTTPS host port. |
+| `PF_UPSTREAM_WORKSPACE` | `partifactory:8080`, proxy upstream. |
+| `PF_UPSTREAM_CONTENT` | `partifactory:8081`, proxy upstream. |
+| `PF_TLS_CERT` / `PF_TLS_KEY` | Host paths to the optional proxy's wildcard TLS files. |
+| `PF_APEX` / `PF_WORKSPACE_LABEL` | Derived from domain config by compose for Caddy. |
+| `PF_RENDER_APEX` / `PF_RENDER_GATEWAY` | Derived by compose for the isolated renderer. |
+| `PF_LOG` | `info`, structured log filter. |
+
 ## Protections that need `[unsafe]`
 
 Switching one of these off fails `config check` unless `[unsafe] <name> = "off"` is set too, and a set `[unsafe]` key is reported as a warning (§5h).
 
 | Name | Switched off by |
 | --- | --- |
+| `secure_headers` | `secure_headers` |
+| `quotas` | `quotas` |
+| `ingress_tls` | `ingress_tls` |
+| `log_redaction` | `log_redaction` |
+| `retention_caps` | `retention_caps` |
 | `nightly_export` | `backup.export_schedule` |
 | `rate_limits` | `ingress.rate_limits` |
 | `disk_budget` | `disk.budget_percent` |

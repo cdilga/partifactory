@@ -8,6 +8,11 @@ if ! command -v dockerd >/dev/null; then
 fi
 export DOCKER_HOST=unix:///var/run/pf-ci-docker.sock
 if docker info >/dev/null 2>&1; then exit 0; fi
+# The job uses an explicit capability set instead of runner-wide privileged mode.
+# Give nested containers their own writable cgroup subtree in this job's mount namespace.
+if [ -d /sys/fs/cgroup ] && [ ! -w /sys/fs/cgroup ]; then
+  mount -o remount,rw /sys/fs/cgroup
+fi
 nohup dockerd --host="$DOCKER_HOST" --data-root=/tmp/pf-ci-docker \
   --exec-root=/tmp/pf-ci-docker-exec --pidfile=/tmp/pf-ci-docker.pid \
   --storage-driver=vfs > target/e2e-logs/docker-daemon.log 2>&1 &

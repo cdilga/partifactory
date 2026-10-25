@@ -55,10 +55,14 @@ fn a_hung_or_panicking_child_does_not_poison_the_pool() {
         Err(ChildError::Crashed(_))
     ));
     assert!(pool.build(input(None)).is_ok());
-    assert!(matches!(
-        pool.build(input(Some("oom"))),
-        Err(ChildError::Crashed(_))
-    ));
+    // Exercise the real memory cap with the production deadline. Touching up to a GiB
+    // can take longer than the shortened panic-path deadline on a busy CI runner.
+    pool.deadline = pf_build::child::DEADLINE;
+    let oom = pool.build(input(Some("oom")));
+    assert!(
+        matches!(oom, Err(ChildError::Crashed(_))),
+        "OOM outcome: {oom:?}"
+    );
     assert!(pool.build(input(None)).is_ok());
 }
 

@@ -101,6 +101,30 @@ pub fn env_md() -> String {
         ));
     }
     s.push_str(
+        "\n## Runtime and compose settings\n\n\
+         These select listeners, files and optional deployment services; they are not site keys.\n\n\
+         | Variable | Default / purpose |\n| --- | --- |\n\
+         | `PF_DATA_DIR` | `/data`, the only durable application state. |\n\
+         | `PF_LISTEN_WORKSPACE` | `0.0.0.0:8080`, proxy network only. |\n\
+         | `PF_LISTEN_CONTENT` | `0.0.0.0:8081`, proxy network only. |\n\
+         | `PF_LISTEN_OPS` | `0.0.0.0:9090`, publish to loopback only. |\n\
+         | `PF_RENDER_PUBLIC_DIR` | `/data/render-public`, public renderer certificate and SPKI only. |\n\
+         | `PF_LISTEN_RENDER` | `0.0.0.0:443`, internal render TLS listener. Compose uses `8443`. |\n\
+         | `PF_RENDER_CDP` | `http://partifactory-render:9222`, internal CDP endpoint. |\n\
+         | `PF_RENDER_CONTROL` | `http://partifactory-render:9223`, internal browser controller. |\n\
+         | `PF_IMAGE` | Required OCI image including `@sha256:…`; no floating tags. |\n\
+         | `PF_SITE_CONFIG` | Required host path to the offline site.toml mounted read-only. |\n\
+         | `PF_OPS_PORT` | `9090`, loopback host ops port. |\n\
+         | `PF_HTTPS_BIND` | `127.0.0.1`, optional proxy bind address. |\n\
+         | `PF_HTTPS_PORT` | `8443`, optional proxy HTTPS host port. |\n\
+         | `PF_UPSTREAM_WORKSPACE` | `partifactory:8080`, proxy upstream. |\n\
+         | `PF_UPSTREAM_CONTENT` | `partifactory:8081`, proxy upstream. |\n\
+         | `PF_TLS_CERT` / `PF_TLS_KEY` | Host paths to the optional proxy's wildcard TLS files. |\n\
+         | `PF_APEX` / `PF_WORKSPACE_LABEL` | Derived from domain config by compose for Caddy. |\n\
+         | `PF_RENDER_APEX` / `PF_RENDER_GATEWAY` | Derived by compose for the isolated renderer. |\n\
+         | `PF_LOG` | `info`, structured log filter. |\n",
+    );
+    s.push_str(
         "\n## Protections that need `[unsafe]`\n\n\
          Switching one of these off fails `config check` unless `[unsafe] <name> = \"off\"` is \
          set too, and a set `[unsafe]` key is reported as a warning (§5h).\n\n\

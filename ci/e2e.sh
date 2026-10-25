@@ -17,13 +17,14 @@
 source "$(dirname "$0")/lib.sh"
 
 h="$repo/tests/e2e/harness"
+export PF_E2E_RENDER="${PF_E2E_RENDER:-1}"
 export PF_E2E_RUN="run-$(date +%Y%m%d-%H%M%S)"
 logs="$repo/target/e2e-logs/$PF_E2E_RUN"
 mkdir -p "$logs"
 export HOST_UID="$(id -u)" HOST_GID="$(id -g)"
 
 if [ "${PF_E2E_SKIP_BUILD:-0}" != 1 ]; then
-  cargo build -p partifactory --features "$PF_FEATURES"
+  cargo build -p partifactory -p pf-mcp --features "$PF_FEATURES" --bins --examples
 fi
 export PF_BIN="${PF_BIN:-${CARGO_TARGET_DIR:-$repo/target}/debug/partifactory}"
 ( cd "$repo/tests/e2e" && npm ci --no-audit --no-fund --silent )
@@ -122,6 +123,15 @@ grep -E '^\s+[0-9]+ (passed|failed|skipped|flaky)' "$logs/playwright.txt" | tee 
 # Exercise native CLI device authorization and refresh through verified TLS without DNS edits.
 note "--- CLI device login"
 python3 "$repo/tests/device/cli-login.py" "$run" --binary "$PF_BIN" --https-port "$PF_HTTPS_PORT" 2>&1 | tee "$logs/cli-login.txt"
+
+note "--- agent surface conformance"
+python3 "$repo/tests/agent_surfaces/harness.py" "$run" --binary "$PF_BIN" \
+  --mcp-client "$repo/target/debug/examples/gate_client" 2>&1 | tee "$logs/conformance.txt"
+note "--- CLI export/import recovery"
+python3 "$repo/tests/backup/recovery.py" "$run" --binary "$PF_BIN" \
+  --https-port "$PF_HTTPS_PORT" 2>&1 | tee "$logs/recovery.txt"
+note "--- IdP outage readiness and Health"
+python3 "$repo/tests/backup/health.py" "$run" 2>&1 | tee "$logs/health-idp-down.txt"
 
 # 4. Log assertions.
 note "--- logs"

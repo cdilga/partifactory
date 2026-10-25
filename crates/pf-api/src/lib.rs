@@ -375,8 +375,11 @@ async fn screenshot(
     );
     response
 }
-async fn spec(headers: HeaderMap) -> Response {
-    let doc = openapi::document();
+async fn spec(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let doc = openapi::document_for(
+        &format!("https://{}", state.config().hosts.workspace_host()),
+        state.config().hosts.apex(),
+    );
     let bytes = serde_json::to_vec(&doc).expect("OpenAPI serializes");
     let etag = format!("\"{}\"", pf_blobs::sha256_hex(&bytes));
     if headers

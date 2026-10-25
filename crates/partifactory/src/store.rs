@@ -21,6 +21,8 @@ pub struct Store {
     pub epochs: Arc<EpochStore>,
     pub parts: PartService,
     pub host: pf_parthost::PartHost,
+    pub budget: Arc<pf_janitor::Budget>,
+    pub janitor: pf_janitor::Janitor,
 }
 
 /// Where the data lives: `PF_DATA_DIR`, default `/data`.
@@ -42,10 +44,25 @@ pub fn open(data_dir: &Path, loaded: &pf_config::Loaded) -> Result<Store, String
     std::fs::create_dir_all(data_dir).map_err(|e| format!("{}: {e}", data_dir.display()))?;
     let db = Db::open_main(data_dir.join("partifactory.db")).map_err(|e| e.to_string())?;
     let insights = Db::open_insights(data_dir.join("insights.db")).map_err(|e| e.to_string())?;
-    let blobs = BlobStore::open(data_dir.join("blobs")).map_err(|e| e.to_string())?;
+    let budget = pf_janitor::Budget::open(
+        data_dir,
+        site.disk.budget_percent,
+        site.unsafe_
+            .get("disk_budget")
+            .is_some_and(|value| value == "off"),
+    )
+    .map_err(|e| e.to_string())?;
+    let blobs = BlobStore::with_budget(data_dir.join("blobs"), budget.clone())
+        .map_err(|e| e.to_string())?;
     // A crash mid-put leaves a temp file; nothing references it.
     let _ = blobs.sweep_stale_temps(Duration::from_secs(3600));
     let epochs = Arc::new(EpochStore::load_and_bump_boot(&db).map_err(|e| e.to_string())?);
+    let janitor = pf_janitor::Janitor::new(pf_janitor::Context {
+        main: db.clone(),
+        insights: insights.clone(),
+        blobs: blobs.clone(),
+        epochs: epochs.clone(),
+    });
     let cfg = ServiceConfig {
         apex: if site.domain.apex.is_empty() {
             "localhost".into()
@@ -84,8 +101,30 @@ pub fn open(data_dir: &Path, loaded: &pf_config::Loaded) -> Result<Store, String
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?
-        .block_on(host.seed())
-        .map_err(|e| e.to_string())?;
+        .block_on(async {
+            pf_janitor::stores::configure(&db, &site.disk.stores)
+                .await
+                .map_err(|e| e.to_string())?;
+            let export_dir = if site.backup.export_dir == "/data/exports" {
+                data_dir.join("exports")
+            } else {
+                std::path::PathBuf::from(&site.backup.export_dir)
+            };
+            pf_janitor::stores::configure_export_dir(&db, &export_dir)
+                .await
+                .map_err(|e| e.to_string())?;
+            let quotas_disabled = site
+                .unsafe_
+                .get("quotas")
+                .is_some_and(|value| value == "off");
+            db.write(move |tx| {
+                pf_model::quotas::configure(tx, quotas_disabled)?;
+                Ok::<_, pf_db::DbError>(())
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+            host.seed().await.map_err(|e| e.to_string())
+        })?;
     tracing::info!(
         event = "store.ready",
         outcome = "ok",
@@ -101,6 +140,8 @@ pub fn open(data_dir: &Path, loaded: &pf_config::Loaded) -> Result<Store, String
         epochs,
         parts,
         host,
+        budget,
+        janitor,
     })
 }
 
@@ -187,8 +228,13 @@ impl Drop for Maintenance {
         }
     }
 }
-pub fn start_maintenance(store: &Store) -> Result<Maintenance, String> {
+pub fn start_maintenance(
+    store: &Store,
+    backup: pf_backup::BackupService,
+) -> Result<Maintenance, String> {
     let parts = store.parts.clone();
+    let janitor = store.janitor.clone();
+    let budget = store.budget.clone();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -198,6 +244,10 @@ pub fn start_maintenance(store: &Store) -> Result<Maintenance, String> {
         .name("pf-maintenance".into())
         .spawn(move || {
             runtime.block_on(async move {
+                pf_janitor::register_standard(&janitor).await;
+                backup.register_rotation(&janitor).await;
+                let janitor_task = janitor.start();
+                let budget_task = budget.start();
                 let work = async {
                     let mut interval = tokio::time::interval(Duration::from_secs(60));
                     loop {
@@ -208,6 +258,8 @@ pub fn start_maintenance(store: &Store) -> Result<Maintenance, String> {
                     }
                 };
                 tokio::select! {_=work=>{},_=stopped=>{}}
+                janitor_task.abort();
+                budget_task.abort();
             });
         })
         .map_err(|e| e.to_string())?;

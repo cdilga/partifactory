@@ -26,6 +26,19 @@ pub fn document() -> Value {
         .expect("registry generates valid OpenAPI structures");
     serde_json::to_value(doc).expect("OpenAPI serializes")
 }
+/// Expand the same agent guide served by discovery for this deployment.
+pub fn document_for(origin: &str, apex: &str) -> Value {
+    let mut doc = document();
+    if let Some(description) = doc["info"]["description"].as_str() {
+        doc["info"]["description"] = Value::String(
+            description
+                .replace("https://parts.<domain>", origin)
+                .replace("<domain>", apex),
+        );
+    }
+    doc["servers"] = json!([{ "url": origin }]);
+    doc
+}
 fn raw_document() -> Value {
     let mut paths = serde_json::Map::new();
     let mut schemas = serde_json::Map::new();
@@ -57,7 +70,7 @@ fn raw_document() -> Value {
     paths.insert("/api/v1/blobs/missing".into(), json!({"post":{"operationId":"missingBlobs","summary":"Return hashes that need uploading","security":[{"bearerAuth":[]}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","additionalProperties":false,"required":["hashes"],"properties":{"hashes":{"type":"array","items":{"type":"string","pattern":"^[a-f0-9]{64}$"}}}}}}},"responses":result}}));
     paths.insert("/api/v1/screenshots/{id}".into(), json!({"get":{"operationId":"getScreenshot","summary":"Read an authorized check screenshot","security":[{"bearerAuth":[]}],"parameters":[parameter("id")],"responses":binary("image/png")}}));
     paths.insert("/openapi.json".into(), json!({"get":{"operationId":"getOpenApi","summary":"Read this OpenAPI document","responses":result}}));
-    json!({"openapi":"3.1.0","info":{"title":"partifactory","version":"1.0.0","description":"Create, edit, check and read sandboxed household parts."},"servers":[{"url":"/"}],"paths":paths,"components":{"securitySchemes":{"bearerAuth":{"type":"http","scheme":"bearer"}},"schemas":schemas}})
+    json!({"openapi":"3.1.0","info":{"title":"partifactory","version":"1.0.0","description":include_str!("../../../docs/agent-contract.md")},"servers":[{"url":"/"}],"paths":paths,"components":{"securitySchemes":{"bearerAuth":{"type":"http","scheme":"bearer"}},"schemas":schemas}})
 }
 #[cfg(test)]
 mod tests {

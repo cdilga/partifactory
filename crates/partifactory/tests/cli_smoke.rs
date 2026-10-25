@@ -89,7 +89,7 @@ fn argv0_part_dispatches_to_cli() {
 
 #[test]
 fn stub_exits_64() {
-    for args in [&["export"][..], &["logs"]] {
+    for args in [&["logs"][..], &["runner"]] {
         let out = Command::new(BIN).args(args).output().unwrap();
         assert_eq!(out.status.code(), Some(64), "{args:?}");
         assert!(String::from_utf8_lossy(&out.stderr).contains("not implemented yet"));

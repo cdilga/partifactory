@@ -6,6 +6,8 @@ exclude = ["spikes", "vendor/*"]
 # Leptos stays pinned; these exact releases use the maintained pastey macro successor.
 # See vendor/README.md for the manifest-only patch and removal criteria.
 [patch.crates-io]
+i18n-config = { path = "vendor/i18n-config" }
+i18n-embed-fl = { path = "vendor/i18n-embed-fl" }
 leptos = { path = "vendor/leptos" }
 either_of = { path = "vendor/either_of" }
 reactive_graph = { path = "vendor/reactive_graph" }
@@ -53,7 +55,7 @@ incremental = false
 debug = false
 
 [profile.release]
-panic = "abort"
+panic = "unwind"
 lto = "fat"
 codegen-units = 1
 strip = true

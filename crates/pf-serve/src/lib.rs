@@ -108,6 +108,11 @@ impl ServerBuilder {
         &self.config
     }
 
+    /// Shared readiness checks for independently registered subsystems.
+    pub fn readiness(&self) -> ReadyRegistry {
+        self.ready.clone()
+    }
+
     /// Serve the identical content router over TLS on the isolated render network.
     pub fn internal_content_tls(&mut self, config: tls::Config) -> &mut Self {
         self.internal_tls = Some(config);

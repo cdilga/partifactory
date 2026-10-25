@@ -195,7 +195,9 @@ services:
       - ${PF_RUN_DIR:?}/identity.toml:/run/pf/identity.toml:ro
       - ${PF_RUN_DIR:?}/certs/ca.pem:/run/pf/ca.pem:ro
       - ${PF_RUN_DIR:?}/secrets:/run/secrets:ro
-      - pf-data:/data
+      # The private job daemon sees this same checkout. Real CLI recovery and cross-surface
+      # conformance inspect the consistent database without a second data-copy mechanism.
+      - ${PF_RUN_DIR:?}/data:/data
       - ${PF_RUN_DIR:?}/render-public:/run/pf-render
     ports:
       # The ops listener, for the gate's curl; local only, never through Caddy.
