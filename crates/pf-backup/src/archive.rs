@@ -290,6 +290,31 @@ impl BackupService {
             std::io::copy(&mut File::open(&archive_path)?, destination.as_file_mut())?;
         }
         destination.as_file().sync_all()?;
+        // The temp file is already included in this size; a refused candidate drops without
+        // replacing any complete export, including the only recoverable copy.
+        if self.export_dir().exists()
+            && std::fs::canonicalize(parent)? == std::fs::canonicalize(self.export_dir())?
+        {
+            let cap = self.db.read_blocking(|conn| {
+                pf_janitor::stores::by_name("exports")
+                    .expect("registered exports")
+                    .cap(conn)
+                    .map_err(pf_db::DbError::from)
+            })?;
+            let used = pf_janitor::budget::tree_size(&self.export_dir())?;
+            if used > cap {
+                tracing::warn!(
+                    event = "store.cap",
+                    store = "exports",
+                    outcome = "refused",
+                    used,
+                    cap
+                );
+                return Err(invalid(
+                    "Scheduled exports reached their storage cap; preserve an export elsewhere or raise the configured cap.",
+                ));
+            }
+        }
         destination
             .persist_noclobber(&output)
             .map_err(|err| Error::Io(err.error))?;
@@ -302,7 +327,9 @@ impl BackupService {
             entries: manifest.entries.len(),
             same_disk: on_same_disk,
         };
-        self.record_export(&report)?;
+        if !options.parts_only {
+            self.record_export(&report)?;
+        }
         tracing::info!(
             event = "export.finished",
             outcome = "ok",
@@ -497,17 +524,31 @@ pub fn import(path: &Path, data_dir: &Path, options: ImportOptions) -> Result<Im
     conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")?;
     drop(conn);
     integrity(&db_stage)?;
+    if let Some(insights) = verified.entries.get("insights.sqlite") {
+        let mut conn = Connection::open(insights)?;
+        pf_db::migrate(&mut conn, pf_db::INSIGHTS)?;
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")?;
+        drop(conn);
+        integrity(insights)?;
+    }
     let marker = data_dir.join(".importing");
     std::fs::write(&marker, now.to_string())?;
     File::open(&marker)?.sync_all()?;
     let blobs = pf_blobs::BlobStore::open(data_dir.join("blobs"))?;
     for (name, path) in &verified.entries {
         if let Some(hash) = name.strip_prefix("blobs/") {
-            let data = std::fs::read(path)?;
-            let put = blobs.put(&data)?;
-            if put.hash != hash {
+            // Stream even a large kept image blob; do not allocate an archive-controlled size.
+            let target = blobs.path(hash);
+            let parent = target.parent().expect("blob parent");
+            std::fs::create_dir_all(parent)?;
+            let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+            let copied = copy_hash(File::open(path)?, temp.as_file_mut())?;
+            if copied.sha256 != hash {
                 return Err(invalid("Imported blob verification failed."));
             }
+            temp.as_file().sync_all()?;
+            temp.persist(&target).map_err(|err| Error::Io(err.error))?;
+            sync_dir(parent)?;
         }
     }
     // Every potentially large allocation finishes before any previous database moves aside.

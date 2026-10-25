@@ -8,7 +8,7 @@ mod service;
 pub use archive::{ExportOptions, ExportReport, ImportOptions, ImportReport, Manifest, import};
 pub use health::install;
 pub use regrant::{RegrantPlan, apply_regrant, plan_regrant};
-pub use service::{BackupService, Maintenance, lock_server};
+pub use service::{BackupService, Maintenance, lock_import, lock_server};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

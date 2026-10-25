@@ -77,6 +77,7 @@ impl BackupService {
             Ok::<_,pf_db::DbError>(())
         })?;
         metrics().export_at.set(created_at / 1000);
+        metrics().export_age.set(0);
         metrics()
             .export_bytes
             .set(bytes.min(i64::MAX as u64) as i64);
@@ -99,6 +100,7 @@ impl BackupService {
                 self.set("backup.copy_at", now.to_string())?;
                 self.set("backup.copy_error", String::new())?;
                 metrics().copy_at.set(now / 1000);
+                metrics().copy_age.set(0);
                 tracing::info!(event = "backup.copy", outcome = "ok");
                 Ok(final_path)
             }
@@ -115,6 +117,17 @@ impl BackupService {
     }
     /// Deterministic maintenance step; tests advance this clock without sleeping overnight.
     pub fn tick(&self, now: i64) -> Result<()> {
+        for (key, gauge) in [
+            ("backup.copy_at", &metrics().copy_age),
+            ("backup.export_at", &metrics().export_age),
+        ] {
+            gauge.set(
+                self.value(key)?
+                    .and_then(|value| value.parse::<i64>().ok())
+                    .map(|at| now.saturating_sub(at).max(0) / 1000)
+                    .unwrap_or(-1),
+            );
+        }
         let copy = self
             .value("backup.copy_at")?
             .and_then(|value| value.parse::<i64>().ok())
@@ -272,6 +285,8 @@ pub(crate) struct Metrics {
     pub copy_at: prometheus::IntGauge,
     pub export_at: prometheus::IntGauge,
     pub export_bytes: prometheus::IntGauge,
+    pub export_age: prometheus::IntGauge,
+    pub copy_age: prometheus::IntGauge,
 }
 pub(crate) fn metrics() -> &'static Metrics {
     static METRICS: std::sync::OnceLock<Metrics> = std::sync::OnceLock::new();
@@ -294,6 +309,14 @@ pub(crate) fn metrics() -> &'static Metrics {
                 "Newest complete export.",
             ),
             export_bytes: gauge("pf_export_bytes", "Size of newest complete export."),
+            export_age: gauge(
+                "pf_export_age_seconds",
+                "Age of newest complete recovery export; -1 if absent.",
+            ),
+            copy_age: gauge(
+                "pf_backup_copy_age_seconds",
+                "Age of the newest consistent copy; -1 if absent.",
+            ),
         }
     })
 }
@@ -302,7 +325,8 @@ pub(crate) fn metrics() -> &'static Metrics {
 pub fn lock_server(data_dir: &Path) -> Result<std::fs::File> {
     lifetime_lock(data_dir, false)
 }
-pub(crate) fn lock_import(data_dir: &Path) -> Result<std::fs::File> {
+/// Exclusive maintenance lock; hold while importing or applying offline permission changes.
+pub fn lock_import(data_dir: &Path) -> Result<std::fs::File> {
     lifetime_lock(data_dir, true)
 }
 fn lifetime_lock(data_dir: &Path, exclusive: bool) -> Result<std::fs::File> {

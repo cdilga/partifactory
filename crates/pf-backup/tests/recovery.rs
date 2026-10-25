@@ -344,6 +344,15 @@ fn full_export_uses_gc_mark_set_and_portable_excludes_shared_data_blobs() {
                 manifest =
                     Some(serde_json::from_reader::<_, pf_backup::Manifest>(&mut entry).unwrap());
             }
+            if path == "db.sqlite" {
+                use std::io::Read;
+                let mut raw = Vec::new();
+                entry.read_to_end(&mut raw).unwrap();
+                assert!(
+                    !raw.windows(b"encrypted-secret-sentinel".len())
+                        .any(|bytes| bytes == b"encrypted-secret-sentinel")
+                );
+            }
             if path == "parts.json" {
                 portable =
                     Some(serde_json::from_reader::<_, serde_json::Value>(&mut entry).unwrap());
@@ -391,4 +400,37 @@ fn copy_during_version_burst_is_prefix_consistent() {
     assert_eq!(versions, files);
     assert_eq!(versions, max);
     assert!((1..=1_001).contains(&versions));
+}
+
+#[test]
+fn scheduled_export_cap_preserves_the_only_complete_backup() {
+    let tmp = tempfile::tempdir().unwrap();
+    let service = fixture(&tmp.path().join("source"));
+    let first = service
+        .export(ExportOptions {
+            now_ms: Some(NOW),
+            ..Default::default()
+        })
+        .unwrap();
+    let db = Db::open_main(tmp.path().join("source/partifactory.db")).unwrap();
+    let cap = first.bytes + 1;
+    db.write_blocking(move |tx| {
+        tx.execute(
+            "INSERT INTO kv(key,value) VALUES('store_cap:exports',?1)",
+            [cap.to_string()],
+        )?;
+        Ok::<_, pf_db::DbError>(())
+    })
+    .unwrap();
+    assert!(
+        service
+            .export(ExportOptions {
+                now_ms: Some(NOW + 1),
+                ..Default::default()
+            })
+            .is_err()
+    );
+    assert!(first.path.is_file());
+    assert_eq!(std::fs::read_dir(service.export_dir()).unwrap().count(), 1);
+    assert!(service.rotate_exports().unwrap().items == 0);
 }
