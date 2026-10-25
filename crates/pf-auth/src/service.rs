@@ -103,6 +103,11 @@ pub(crate) fn hex(b: &[u8]) -> String {
 }
 
 impl AuthService {
+    /// Used by the background Health sampler, never by the readiness request itself.
+    pub async fn provider_reachable(&self) -> bool {
+        if !self.0.idp.is_set() { return true; }
+        self.0.http.get(format!("{}/.well-known/openid-configuration", self.0.idp.issuer.trim_end_matches('/'))).send().await.is_ok_and(|response|response.status().is_success())
+    }
     /// Refreshes even when a browser is idle, so removed memberships invalidate its old caps.
     pub fn start_refresh(&self) -> Result<RefreshTask, PfError> {
         let auth = self.clone();

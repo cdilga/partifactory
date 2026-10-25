@@ -59,6 +59,8 @@ pub struct CheckReport {
 pub struct ReadyReport {
     /// `ready` or `not_ready`.
     pub status: &'static str,
+    pub ready: bool,
+    pub degraded: Vec<&'static str>,
     pub importing: bool,
     /// The required checks that failed.
     pub failing: Vec<&'static str>,
@@ -67,7 +69,7 @@ pub struct ReadyReport {
 
 impl ReadyReport {
     pub fn ready(&self) -> bool {
-        self.failing.is_empty()
+        self.failing.is_empty() && !self.importing
     }
 }
 
@@ -137,13 +139,18 @@ impl ReadyRegistry {
                 detail: r.err(),
             });
         }
+        let importing = self.importing.load(std::sync::atomic::Ordering::Relaxed);
+        let ready = failing.is_empty() && !importing;
+        let degraded = reports
+            .iter()
+            .filter(|r| !r.ok && r.kind == CheckKind::Degraded)
+            .map(|r| r.name)
+            .collect();
         ReadyReport {
-            status: if failing.is_empty() {
-                "ready"
-            } else {
-                "not_ready"
-            },
-            importing: self.importing.load(std::sync::atomic::Ordering::Relaxed),
+            ready,
+            degraded,
+            status: if ready { "ready" } else { "not_ready" },
+            importing,
             failing,
             checks: reports,
         }
@@ -228,6 +235,22 @@ mod tests {
         let rep = r.run().await;
         assert!(rep.ready());
         assert!(rep.checks.iter().any(|c| c.name == "idp" && !c.ok));
+    }
+
+    #[tokio::test]
+    async fn importing_is_not_ready_but_degraded_rows_do_not_block() {
+        let registry = ReadyRegistry::default();
+        registry.register("idp", CheckKind::Degraded, || async {
+            Err("unreachable".into())
+        });
+        registry.set_importing(true);
+        let report = registry.run().await;
+        assert!(!report.ready());
+        assert!(!report.ready);
+        assert_eq!(report.status, "not_ready");
+        assert_eq!(report.degraded, vec!["idp"]);
+        registry.set_importing(false);
+        assert!(registry.run().await.ready());
     }
 
     #[tokio::test]
