@@ -37,7 +37,7 @@ def start():
     if pin != pin_used:
         stop()
     if browser is None or browser.poll() is not None:
-        executables = (glob.glob("/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux-*/chrome-headless-shell")
+        executables = (glob.glob("/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux*/chrome-headless-shell")
                        + glob.glob("/ms-playwright/chromium_headless_shell-*/chrome-linux*/headless_shell"))
         if not executables:
             raise RuntimeError("pinned headless shell not installed")
