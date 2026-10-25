@@ -9,10 +9,13 @@ for image in "$good" "$busybox"; do
   [[ "$image" =~ @sha256:[a-f0-9]{64}$ ]] || { echo 'fixture inputs must be pinned by digest' >&2; exit 2; }
 done
 scripts/disk-guard.sh
+source scripts/oci-builder.sh
+oci_builder_prepare
+trap oci_builder_prune EXIT
 mkdir -p target/deploy-fixtures
 for mode in immediate delayed; do
   tag="$repository:$mode"
-  docker buildx build --platform linux/amd64 --provenance=false --sbom=false \
+  docker buildx build --builder "$PF_OCI_BUILDER" --platform linux/amd64 --provenance=false --sbom=false \
     --build-arg "GOOD_IMAGE=$good" --build-arg "BUSYBOX_IMAGE=$busybox" \
     --build-arg "FAULT_MODE=$mode" --label pf.harness=1 \
     --metadata-file "target/deploy-fixtures/$mode.json" --push --tag "$tag" \

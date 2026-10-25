@@ -31,8 +31,10 @@ export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
 outputs=(--output "type=oci,dest=$out/partifactory-linux-amd64.oci.tar,rewrite-timestamp=true")
 if [ "$dry" = 0 ]; then outputs+=(--output type=image,push=true); fi
 # A single BuildKit cache, bounded after each build, including a failed one.
-trap 'docker builder prune --force --keep-storage 10GB >/dev/null 2>&1 || true' EXIT
-docker buildx build --platform linux/amd64 --provenance=false --sbom=false \
+source scripts/oci-builder.sh
+oci_builder_prepare
+trap oci_builder_prune EXIT
+docker buildx build --builder "$PF_OCI_BUILDER" --platform linux/amd64 --provenance=false --sbom=false \
   --build-arg "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" \
   --label pf.harness=1 --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" \
   --tag "$image:$tag" --metadata-file "$out/build.json" "${outputs[@]}" .
