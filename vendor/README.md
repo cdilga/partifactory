@@ -6,7 +6,9 @@ That release, `either_of` 0.1.9, `reactive_graph` 0.2.16,
 (RUSTSEC-2024-0436). These copies are the exact crates.io release contents,
 with only the `[dependencies.paste]` entries in their normalized `Cargo.toml`
 changed to alias the maintained `pastey` 0.2.3 successor. The original manifests,
-licenses, source and tests are retained. No `paste` implementation is vendored,
+source and tests are retained. The upstream MIT license (copyright Greg
+Johnston), omitted from the published crate archives, is included at
+`vendor/LICENSE` from https://github.com/leptos-rs/leptos/blob/main/LICENSE. No `paste` implementation is vendored,
 and no advisory is suppressed.
 
 The libraries use `paste!` to generate identifiers (for enum variants,

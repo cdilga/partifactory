@@ -14,3 +14,8 @@ from shartifacts retains its original copyright notice:
   Copyright (c) 2026 Lane Birmingham
   Permission is hereby granted, free of charge, to any person obtaining a copy
   of this software ... (MIT License, see the shartifacts LICENSE file)
+
+Vendored Leptos ecosystem crates (Leptos, either_of, reactive_graph,
+reactive_stores and tachys): Copyright (c) 2022 Greg Johnston.
+Licensed under the MIT License; full upstream license is at vendor/LICENSE.
+The temporary dependency-only patches are described in vendor/README.md.
