@@ -194,7 +194,9 @@ def main():
             secret_names = ["session_key", "cap_hmac_key", "metrics_token", "idp_client_secret"]
             secret_volume = stage_volume("secrets", [(name, args.secrets_dir / name, 0o600) for name in secret_names] +
                                          [("site.toml", args.site, 0o600), ("ca.pem", args.ca_cert, 0o644)])
-            restore_entries = [("archive", args.export, 0o600), ("part", temp / "part", 0o755)]
+            # The release CLI contains the server too. Its argv0 must select the
+            # server command tree for import; `part` selects agent operations.
+            restore_entries = [("archive", args.export, 0o600), ("partifactory", temp / "part", 0o755)]
             restore_entries += [(f"identity-{i}", path, 0o600) for i, path in enumerate(args.identity_file)]
             restore_volume = stage_volume("restore", restore_entries)
             scratch_volume = stage_volume("scratch", [])
@@ -245,7 +247,7 @@ def main():
             compose_path.write_text(json.dumps(normalized))
             compose = target + ["compose", "-f", str(compose_path), "-p", run_id, "--profile", "proxy"]
             stage = "release_cli_import"
-            imported = run(compose + ["run", "--rm", "--no-deps", "--entrypoint", "/restore/part", "partifactory", "import", "/restore/archive"] +
+            imported = run(compose + ["run", "--rm", "--no-deps", "--entrypoint", "/restore/partifactory", "partifactory", "import", "/restore/archive"] +
                            [value for i in range(len(args.identity_file)) for value in ("--identity", f"/restore/identity-{i}")], timeout=400)
             require(b"import.boot_epoch_bump" in imported.stdout + imported.stderr, "import_epoch_log_missing")
             stage = "compose_start"
