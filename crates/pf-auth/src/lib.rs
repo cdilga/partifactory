@@ -16,6 +16,7 @@ use sha2::{Digest, Sha256};
 
 mod admin;
 mod oidc;
+mod oidc_verify;
 mod service;
 pub use admin::{ConsoleLogin, issue_console_login};
 mod webauthn;

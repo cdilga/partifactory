@@ -16,7 +16,9 @@ axum = "0.8"
 base64 = "0.22"
 chacha20poly1305 = "0.10"
 http = "1"
-openidconnect = "4"
+oauth2 = "5"
+jsonwebtoken = { version = "10", default-features = false, features = ["aws_lc_rs"] }
+subtle = "2"
 pf-caps = { path = "../pf-caps" }
 pf-config = { path = "../pf-config" }
 pf-db = { path = "../pf-db" }
@@ -38,6 +40,7 @@ webauthn-rs = "0.5"
 openssl = { version = "0.10", features = ["vendored"] }
 
 [dev-dependencies]
+aws-lc-rs = "1"
 tokio = { version = "1", features = ["rt", "macros"] }
 tracing-subscriber.workspace = true
 

@@ -80,8 +80,8 @@ pub(crate) struct Inner {
     pub idp: pf_config::site::Idp,
     pub client_secret: Option<String>,
     pub cipher: ChaCha20Poly1305,
-    pub http: openidconnect::reqwest::Client,
-    pub provider: tokio::sync::OnceCell<openidconnect::core::CoreProviderMetadata>,
+    pub http: oauth2::reqwest::Client,
+    pub provider: tokio::sync::OnceCell<crate::oidc_verify::Provider>,
     pub flows: Mutex<HashMap<String, crate::oidc::Flow>>,
     pub steps: Mutex<HashMap<String, crate::webauthn::Pending>>,
     // Only one refresh for a rotating refresh token may run at once.
@@ -160,15 +160,13 @@ impl AuthService {
             site.admin.subject.clone()
         };
         let key = Sha256::digest(loaded.secrets.session_key.expose().as_bytes());
-        let mut http = openidconnect::reqwest::Client::builder()
-            .redirect(openidconnect::reqwest::redirect::Policy::none())
+        let mut http = oauth2::reqwest::Client::builder()
+            .redirect(oauth2::reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(10));
         // The e2e deployment supplies its private trust root exactly as the production operator can.
         if let Ok(path) = std::env::var("SSL_CERT_FILE") {
             let pem = std::fs::read(path).map_err(internal)?;
-            for cert in
-                openidconnect::reqwest::Certificate::from_pem_bundle(&pem).map_err(internal)?
-            {
+            for cert in oauth2::reqwest::Certificate::from_pem_bundle(&pem).map_err(internal)? {
                 http = http.add_root_certificate(cert);
             }
         }

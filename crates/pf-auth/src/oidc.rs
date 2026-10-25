@@ -10,53 +10,44 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
 };
 use http::{HeaderMap, HeaderValue, header};
-use openidconnect::{core::*, *};
+use oauth2::{basic::*, *};
 use pf_db::rusqlite::{OptionalExtension, params};
 use pf_model::PfError;
 use pf_serve::AppState;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+#[cfg(test)]
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct Extras {
-    #[serde(flatten)]
-    values: BTreeMap<String, Value>,
+struct TokenFields {
+    id_token: Option<String>,
 }
-impl AdditionalClaims for Extras {}
-type Tokens = StandardTokenResponse<
-    IdTokenFields<
-        Extras,
-        EmptyExtraTokenFields,
-        CoreGenderClaim,
-        CoreJweContentEncryptionAlgorithm,
-        CoreJwsSigningAlgorithm,
-    >,
-    CoreTokenType,
->;
-type Client = openidconnect::Client<
-    Extras,
-    CoreAuthDisplay,
-    CoreGenderClaim,
-    CoreJweContentEncryptionAlgorithm,
-    CoreJsonWebKey,
-    CoreAuthPrompt,
-    StandardErrorResponse<CoreErrorResponseType>,
+impl ExtraTokenFields for TokenFields {}
+type Tokens = StandardTokenResponse<TokenFields, BasicTokenType>;
+type BareClient = oauth2::Client<
+    BasicErrorResponse,
     Tokens,
-    CoreTokenIntrospectionResponse,
-    CoreRevocableToken,
-    CoreRevocationErrorResponse,
+    BasicTokenIntrospectionResponse,
+    StandardRevocableToken,
+    BasicRevocationErrorResponse,
+>;
+type Client = oauth2::Client<
+    BasicErrorResponse,
+    Tokens,
+    BasicTokenIntrospectionResponse,
+    StandardRevocableToken,
+    BasicRevocationErrorResponse,
     EndpointSet,
     EndpointNotSet,
     EndpointNotSet,
     EndpointNotSet,
-    EndpointMaybeSet,
-    EndpointMaybeSet,
+    EndpointSet,
 >;
 
 pub(crate) struct Flow {
     binder: Vec<u8>,
-    nonce: Nonce,
+    nonce: String,
     pkce: PkceCodeVerifier,
     target: String,
     expires: i64,
@@ -94,8 +85,7 @@ impl AuthService {
             .0
             .provider
             .get_or_try_init(|| async {
-                let issuer = IssuerUrl::new(self.0.idp.issuer.clone()).map_err(internal)?;
-                CoreProviderMetadata::discover_async(issuer, &self.0.http)
+                crate::oidc_verify::discover(&self.0.http, &self.0.idp.issuer)
                     .await
                     .map_err(|_| {
                         PfError::new(
@@ -105,14 +95,16 @@ impl AuthService {
                     })
             })
             .await?;
-        Ok(Client::from_provider_metadata(
-            metadata.clone(),
-            ClientId::new(self.0.idp.client_id.clone()),
-            self.0.client_secret.clone().map(ClientSecret::new),
-        )
-        .set_redirect_uri(
-            RedirectUrl::new(format!("{}/oidc/callback", self.0.origin)).map_err(internal)?,
-        ))
+        let mut client = BareClient::new(ClientId::new(self.0.idp.client_id.clone()))
+            .set_auth_uri(AuthUrl::new(metadata.authorization_endpoint.clone()).map_err(internal)?)
+            .set_token_uri(TokenUrl::new(metadata.token_endpoint.clone()).map_err(internal)?)
+            .set_redirect_uri(
+                RedirectUrl::new(format!("{}/oidc/callback", self.0.origin)).map_err(internal)?,
+            );
+        if let Some(secret) = &self.0.client_secret {
+            client = client.set_client_secret(ClientSecret::new(secret.clone()));
+        }
+        Ok(client)
     }
 
     #[cfg(test)]
@@ -128,23 +120,27 @@ impl AuthService {
         validate_path(&target)?;
         let client = self.client().await?;
         let (challenge, pkce) = PkceCodeChallenge::new_random_sha256();
-        let mut authorize = client.authorize_url(
-            AuthenticationFlow::<CoreResponseType>::AuthorizationCode,
-            CsrfToken::new_random,
-            Nonce::new_random,
-        );
+        let nonce = new_token();
+        let mut authorize = client
+            .authorize_url(CsrfToken::new_random)
+            .add_scope(Scope::new("openid".into()))
+            .add_extra_param("nonce", nonce.clone());
         if prompt_login {
-            authorize = authorize.add_prompt(CoreAuthPrompt::Login);
+            authorize = authorize.add_extra_param("prompt", "login");
         }
-        let supported = self.0.provider.get().and_then(|p| p.scopes_supported());
+        let supported = self
+            .0
+            .provider
+            .get()
+            .and_then(|provider| provider.scopes_supported.as_ref());
         for scope in ["profile", "email", "offline_access", "groups"] {
-            if supported.is_some_and(|scopes| scopes.iter().any(|s| s.as_str() == scope))
+            if supported.is_some_and(|scopes| scopes.iter().any(|s| s == scope))
                 || (supported.is_none() && scope != "groups")
             {
                 authorize = authorize.add_scope(Scope::new(scope.into()));
             }
         }
-        let (url, state, nonce) = authorize.set_pkce_challenge(challenge).url();
+        let (url, state) = authorize.set_pkce_challenge(challenge).url();
         let cookie = new_token();
         let now = self.now();
         let mut flows = self.0.flows.lock().map_err(internal)?;
@@ -187,78 +183,67 @@ impl AuthService {
             return Err(unauthenticated());
         }
         let client = self.client().await?;
+        let code = q.code.ok_or_else(unauthenticated)?;
         let tokens = client
-            .exchange_code(AuthorizationCode::new(q.code.ok_or_else(unauthenticated)?))
-            .map_err(internal)?
+            .exchange_code(AuthorizationCode::new(code.clone()))
             .set_pkce_verifier(flow.pkce)
             .request_async(&self.0.http)
             .await
             .map_err(|_| unauthenticated())?;
-        let token = tokens.id_token().ok_or_else(unauthenticated)?;
-        let claims = token
-            .claims(&client.id_token_verifier(), &flow.nonce)
-            .map_err(|_| unauthenticated())?;
-        if let Some(expected) = claims.access_token_hash() {
-            let actual = AccessTokenHash::from_token(
-                tokens.access_token(),
-                token.signing_alg().map_err(|_| unauthenticated())?,
-                token
-                    .signing_key(&client.id_token_verifier())
-                    .map_err(|_| unauthenticated())?,
-            )
-            .map_err(|_| unauthenticated())?;
-            if &actual != expected {
-                return Err(unauthenticated());
-            }
-        }
-        let identity = self.identity(claims)?;
+        let token = tokens
+            .extra_fields()
+            .id_token
+            .as_deref()
+            .ok_or_else(unauthenticated)?;
+        let claims = crate::oidc_verify::verify(
+            self,
+            token,
+            tokens.access_token().secret(),
+            &flow.nonce,
+            false,
+            Some(&code),
+        )
+        .await
+        .map_err(|_| unauthenticated())?;
+        let identity = self.identity(&claims)?;
         let refresh = tokens.refresh_token().map(|r| RefreshSecret {
             refresh: r.secret().clone(),
-            nonce: flow.nonce.secret().clone(),
+            nonce: flow.nonce.clone(),
         });
         let session = self.login(&identity, refresh, self.now()).await?;
         tracing::info!(event="oidc.login",principal=%format!("user:{}",session.user_id),outcome="ok");
         Ok((session, flow.target))
     }
 
-    fn identity(
-        &self,
-        claims: &IdTokenClaims<Extras, CoreGenderClaim>,
-    ) -> Result<Identity, PfError> {
-        let groups = match claims
-            .additional_claims()
-            .values
-            .get(&self.0.idp.groups_claim)
-        {
+    fn identity(&self, claims: &Value) -> Result<Identity, PfError> {
+        let groups = match claims.get(&self.0.idp.groups_claim) {
             None => Vec::new(),
-            Some(v) => {
-                serde_json::from_value::<Vec<String>>(v.clone()).map_err(|_| unauthenticated())?
-            }
+            Some(value) => serde_json::from_value::<Vec<String>>(value.clone())
+                .map_err(|_| unauthenticated())?,
         };
-        if groups.len() > 1024 || groups.iter().any(|g| g.len() > 256) {
+        if groups.len() > 1024 || groups.iter().any(|group| group.len() > 256) {
             return Err(unauthenticated());
         }
-        let sub = claims.subject().as_str().to_owned();
-        let username = claims
-            .preferred_username()
-            .map(|v| v.as_str().to_owned())
+        let sub = claims["sub"]
+            .as_str()
+            .ok_or_else(unauthenticated)?
+            .to_owned();
+        let username = claims["preferred_username"]
+            .as_str()
+            .map(str::to_owned)
             .unwrap_or_else(|| {
                 format!(
                     "person-{}",
                     &hex(&secret_hash(&format!("{}#{sub}", self.0.idp.issuer)))[..16]
                 )
             });
-        let display_name = claims
-            .name()
-            .and_then(|v| v.get(None))
-            .map(|v| v.as_str().to_owned())
-            .unwrap_or_else(|| username.clone());
+        let display_name = claims["name"].as_str().unwrap_or(&username).to_owned();
         Ok(Identity {
             issuer: self.0.idp.issuer.clone(),
             sub,
             username,
             display_name,
-            email: claims.email().map(|v| v.as_str().to_owned()),
+            email: claims["email"].as_str().map(str::to_owned),
             groups,
         })
     }
@@ -371,33 +356,41 @@ impl AuthService {
         let rt = RefreshToken::new(secret.refresh.clone());
         let tokens = client
             .exchange_refresh_token(&rt)
-            .map_err(|_| RefreshFailure::Invalid)?
             .request_async(&self.0.http)
             .await
             .map_err(|e| match e {
                 RequestTokenError::ServerResponse(ref e)
-                    if e.error() == &CoreErrorResponseType::InvalidGrant =>
+                    if e.error() == &BasicErrorResponseType::InvalidGrant =>
                 {
                     RefreshFailure::Invalid
                 }
                 RequestTokenError::Request(_) => RefreshFailure::Unreachable,
                 _ => RefreshFailure::Invalid,
             })?;
-        let token = tokens.id_token().ok_or(RefreshFailure::Invalid)?;
-        let nonce = &secret.nonce;
-        let claims = token
-            .claims(&client.id_token_verifier(), |n: Option<&Nonce>| {
-                if n.is_none_or(|n| n.secret() == nonce) {
-                    Ok(())
-                } else {
-                    Err("refresh nonce mismatch".into())
-                }
-            })
-            .map_err(|_| RefreshFailure::Invalid)?;
-        if claims.subject().as_str() != sub {
+        let token = tokens
+            .extra_fields()
+            .id_token
+            .as_deref()
+            .ok_or(RefreshFailure::Invalid)?;
+        let claims = crate::oidc_verify::verify(
+            self,
+            token,
+            tokens.access_token().secret(),
+            &secret.nonce,
+            true,
+            None,
+        )
+        .await
+        .map_err(|error| match error {
+            crate::oidc_verify::VerifyError::Invalid => RefreshFailure::Invalid,
+            crate::oidc_verify::VerifyError::Unreachable => RefreshFailure::Unreachable,
+        })?;
+        if claims["sub"].as_str() != Some(sub) {
             return Err(RefreshFailure::Invalid);
         }
-        let id = self.identity(claims).map_err(|_| RefreshFailure::Invalid)?;
+        let id = self
+            .identity(&claims)
+            .map_err(|_| RefreshFailure::Invalid)?;
         let next = RefreshSecret {
             refresh: tokens
                 .refresh_token()
