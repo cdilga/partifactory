@@ -10,7 +10,7 @@ use axum::{
     routing::post,
 };
 use http::HeaderMap;
-use pf_db::{ids, rusqlite::params};
+use pf_db::rusqlite::params;
 use pf_model::PfError;
 use pf_serve::{AppState, ServerBuilder};
 use serde::Deserialize;
@@ -30,7 +30,7 @@ pub(crate) struct Pending {
 impl AuthService {
     /// Console recovery may enroll a replacement, but is not a native passkey assertion.
     async fn may_enroll(&self, actor: &SessionActor) -> Result<bool, PfError> {
-        if actor.fresh_stepup(ids::now_ms()) {
+        if actor.fresh_stepup(self.now()) {
             return Ok(true);
         }
         let key = format!("admin.recovery:{}", actor.session_id);
@@ -48,7 +48,7 @@ impl AuthService {
             .await?;
         Ok(until
             .and_then(|v| v.parse::<i64>().ok())
-            .is_some_and(|until| until > ids::now_ms()))
+            .is_some_and(|until| until > self.now()))
     }
     async fn webauthn(&self) -> Result<Webauthn, PfError> {
         let origin = Url::parse(&self.0.origin).map_err(internal)?;
@@ -101,7 +101,7 @@ impl AuthService {
         challenge: Challenge,
     ) -> Result<String, PfError> {
         let flow = crate::new_token();
-        let now = ids::now_ms();
+        let now = self.now();
         let origin = headers
             .get(http::header::ORIGIN)
             .and_then(|h| h.to_str().ok())
@@ -137,7 +137,7 @@ impl AuthService {
         let pending = steps.get(flow).ok_or_else(forbidden)?;
         if pending.session != actor.session_id
             || pending.origin != origin
-            || pending.expires <= ids::now_ms()
+            || pending.expires <= self.now()
         {
             return Err(forbidden());
         }
@@ -190,7 +190,7 @@ impl AuthService {
         let cred = key.cred_id().as_ref().to_vec();
         let hash = crate::secret_hash(crate::service::cookie_token(headers).ok_or_else(forbidden)?);
         let uid = actor.user_id.clone();
-        let now = ids::now_ms();
+        let now = self.now();
         self.0.db.write(move|tx| {
             let changed=tx.execute("UPDATE passkeys SET passkey=?3,last_used_at=?4 WHERE cred_id=?1 AND user_id=?2 AND revoked_at IS NULL",params![cred,uid,encoded,now])?;
             if changed!=1{return Err(forbidden());}
@@ -246,7 +246,7 @@ async fn register_finish(
         let Challenge::Register(state)=auth.take(&actor,&headers,&body.flow)? else{return Err(forbidden())};
         let credential=serde_json::from_value::<RegisterPublicKeyCredential>(body.credential).map_err(|_|forbidden())?;
         let key=auth.webauthn().await?.finish_passkey_registration(&credential,&state).map_err(|_|forbidden())?;
-        let encoded=serde_json::to_vec(&key).map_err(internal)?;let cred=key.cred_id().as_ref().to_vec();let now=ids::now_ms();
+        let encoded=serde_json::to_vec(&key).map_err(internal)?;let cred=key.cred_id().as_ref().to_vec();let now=auth.now();
         let uid=actor.user_id;
         auth.0.db.write(move|tx| {
             tx.execute("INSERT INTO passkeys(cred_id,user_id,purpose,passkey,label,created_at) VALUES(?1,?2,'stepup',?3,'Admin passkey',?4)",params![cred,uid,encoded,now])?;Ok::<_,PfError>(())

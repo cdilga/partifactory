@@ -1,10 +1,29 @@
 [package]
 name = "pf-oauth"
-description = "The agent token service: device grant, personal agent tokens, refresh and revocation"
+description = "Scoped agent connections, opaque tokens and device authorization"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
+
+[dependencies]
+axum = "0.8"
+getrandom = "0.3"
+http = "1"
+pf-auth = { path = "../pf-auth" }
+pf-caps = { path = "../pf-caps" }
+pf-db = { path = "../pf-db" }
+pf-model = { path = "../pf-model" }
+pf-serve = { path = "../pf-serve" }
+pf-policy = { path = "../pf-policy" }
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+url = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros"] }
+pf-config = { path = "../pf-config" }
 
 [lints]
 workspace = true

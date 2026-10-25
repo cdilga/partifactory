@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
     time::Duration,
 };
 
@@ -69,6 +69,7 @@ impl Drop for RefreshTask {
     }
 }
 pub(crate) struct Inner {
+    pub clock: RwLock<Arc<dyn Fn() -> i64 + Send + Sync>>,
     pub db: Db,
     pub epochs: Arc<EpochStore>,
     pub keys: CapKeys,
@@ -85,6 +86,7 @@ pub(crate) struct Inner {
     pub steps: Mutex<HashMap<String, crate::webauthn::Pending>>,
     // Only one refresh for a rotating refresh token may run at once.
     pub refresh_lock: tokio::sync::Mutex<()>,
+    pub retry_after: Mutex<HashMap<Vec<u8>, i64>>,
 }
 
 pub(crate) fn internal(e: impl std::fmt::Display) -> PfError {
@@ -115,7 +117,7 @@ impl AuthService {
                     let mut interval = tokio::time::interval(Duration::from_secs(60));
                     loop {
                         interval.tick().await;
-                        let now = ids::now_ms();
+                        let now = auth.now();
                         let hashes = auth.0.db.read(move |c| {
                             let mut st = c.prepare("SELECT id_hash FROM sessions WHERE revoked_at IS NULL AND expires_at>?1 AND idp_refresh_enc IS NOT NULL AND idp_checked_at<=?2")?;
                             st.query_map(params![now,now-15*60*1000],|r|r.get::<_,Vec<u8>>(0))?.collect::<Result<Vec<_>,_>>().map_err(PfError::from)
@@ -175,6 +177,7 @@ impl AuthService {
             http = http.resolve(host, address.parse().map_err(internal)?);
         }
         Ok(Self(Arc::new(Inner {
+            clock: RwLock::new(Arc::new(ids::now_ms)),
             db,
             epochs,
             keys: CapKeys::new(loaded.secrets.cap_hmac_key.expose().as_bytes()),
@@ -194,14 +197,40 @@ impl AuthService {
             flows: Mutex::new(HashMap::new()),
             steps: Mutex::new(HashMap::new()),
             refresh_lock: tokio::sync::Mutex::new(()),
+            retry_after: Mutex::new(HashMap::new()),
         })))
     }
 
     pub fn db(&self) -> &Db {
         &self.0.db
     }
+    pub fn set_clock(&self, clock: impl Fn() -> i64 + Send + Sync + 'static) {
+        *self.0.clock.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(clock);
+    }
+    pub fn now(&self) -> i64 {
+        (self.0.clock.read().unwrap_or_else(|e| e.into_inner()))()
+    }
     pub fn workspace_origin(&self) -> &str {
         &self.0.origin
+    }
+
+    /// Renew the host-only cookie to the session's committed sliding expiry. Fixed-lifetime
+    /// sessions retain their original deadline; this never extends them.
+    pub async fn renew_response(
+        &self,
+        headers: &HeaderMap,
+        response: &mut Response,
+    ) -> Result<(), PfError> {
+        let Some(token) = cookie_token(headers) else {
+            return Ok(());
+        };
+        let hash = secret_hash(token);
+        let now = self.now();
+        let expiry=self.0.db.read(move|c|c.query_row("SELECT expires_at FROM sessions WHERE id_hash=?1 AND revoked_at IS NULL AND expires_at>?2",params![hash,now],|r|r.get::<_,i64>(0)).optional().map_err(PfError::from)).await?;
+        if let Some(expiry) = expiry {
+            set_cookie(response, token, (expiry - now) / 1000);
+        }
+        Ok(())
     }
 
     /// Strict browser mutation CSRF check. Chrome routes may additionally accept the exact active
@@ -242,7 +271,7 @@ impl AuthService {
     pub async fn require_session(&self, headers: &HeaderMap) -> Result<SessionActor, PfError> {
         let token = cookie_token(headers).ok_or_else(unauthenticated)?;
         let hash = secret_hash(token);
-        let now = ids::now_ms();
+        let now = self.now();
         self.refresh_if_due(&hash, now).await?;
         self.actor(hash, now).await?.ok_or_else(unauthenticated)
     }
@@ -256,7 +285,7 @@ impl AuthService {
         if !actor.admin {
             return Err(forbidden());
         }
-        if fresh_stepup && !actor.fresh_stepup(ids::now_ms()) {
+        if fresh_stepup && !actor.fresh_stepup(self.now()) {
             return Err(
                 PfError::new("forbidden", "Confirm with your admin passkey.")
                     .with("step_up_required", true),
@@ -371,7 +400,7 @@ impl AuthService {
         let actor = self.require_session(headers).await?;
         let uid = actor.user_id.clone();
         let hash = secret_hash(cookie_token(headers).ok_or_else(unauthenticated)?);
-        let now = ids::now_ms();
+        let now = self.now();
         let bumps = self
             .0
             .db
@@ -416,7 +445,7 @@ impl AuthService {
         let actor = self.require_session(headers).await?;
         let principal = actor.principal();
         let part = part.to_owned();
-        let now = ids::now_ms();
+        let now = self.now();
         let (part_id, name, role) = self
             .0
             .db
@@ -540,6 +569,9 @@ async fn grant_route(
     match a.grant(&headers, &q.part, &q.path, &q.mode).await {
         Ok(v) => {
             let mut r = Redirect::to(v["url"].as_str().expect("grant url")).into_response();
+            if let Err(e) = a.renew_response(&headers, &mut r).await {
+                return fail(e);
+            }
             r.headers_mut()
                 .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
             r.headers_mut().insert(
@@ -580,7 +612,13 @@ async fn chrome_grant(
         return fail(e);
     }
     match a.grant(&headers, &part, &q.path, &q.mode).await {
-        Ok(v) => Json(v).into_response(),
+        Ok(v) => {
+            let mut r = Json(v).into_response();
+            if let Err(e) = a.renew_response(&headers, &mut r).await {
+                return fail(e);
+            }
+            r
+        }
         Err(e) => fail(e),
     }
 }
@@ -599,14 +637,52 @@ pub(crate) async fn chrome_cors(
         .unwrap_or("");
     let origin = req.headers().get(header::ORIGIN).cloned();
     if let Err(e) = auth.check_chrome_origin(req.headers(), part).await {
+        tracing::warn!(
+            event = "chrome.cors",
+            decision = "deny",
+            outcome = "forbidden"
+        );
         return fail(e);
     }
     let preflight = req.method() == http::Method::OPTIONS;
+    if !preflight
+        && (!req
+            .headers()
+            .get("sec-fetch-site")
+            .is_some_and(|v| v == "same-origin" || v == "same-site")
+            || !req
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|v| {
+                    v.split(';')
+                        .next()
+                        .is_some_and(|v| v.trim() == "application/json")
+                }))
+    {
+        tracing::warn!(
+            event = "chrome.cors",
+            decision = "deny",
+            outcome = "fetch_metadata"
+        );
+        return fail(forbidden());
+    }
     let mut response = if preflight {
         if req
             .headers()
             .get(header::ACCESS_CONTROL_REQUEST_METHOD)
             .is_none_or(|m| m != "POST")
+        {
+            return fail(forbidden());
+        }
+        if req
+            .headers()
+            .get(header::ACCESS_CONTROL_REQUEST_HEADERS)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| {
+                v.split(',')
+                    .any(|v| !v.trim().eq_ignore_ascii_case("content-type"))
+            })
         {
             return fail(forbidden());
         }
@@ -634,6 +710,10 @@ pub(crate) async fn chrome_cors(
                 header::ACCESS_CONTROL_ALLOW_HEADERS,
                 HeaderValue::from_static("Content-Type"),
             );
+            response.headers_mut().insert(
+                header::ACCESS_CONTROL_MAX_AGE,
+                HeaderValue::from_static("600"),
+            );
         }
     }
     response
@@ -660,7 +740,16 @@ async fn signout_impl(s: AppState, headers: HeaderMap, everywhere: bool) -> Resp
 }
 async fn session_route(State(s): State<AppState>, headers: HeaderMap) -> Response {
     let a = s.ext::<AuthService>().expect("auth");
-    match a.require_session(&headers).await{Ok(actor)=>Json(serde_json::json!({"user":actor.user_id,"username":actor.username,"admin":actor.admin,"step_up_status":actor.fresh_stepup(ids::now_ms())})).into_response(),Err(e)=>fail(e)}
+    match a.require_session(&headers).await {
+        Ok(actor) => {
+            let mut response = Json(serde_json::json!({"user":actor.user_id,"username":actor.username,"admin":actor.admin,"step_up_status":actor.fresh_stepup(a.now())})).into_response();
+            if let Err(e) = a.renew_response(&headers, &mut response).await {
+                return fail(e);
+            }
+            response
+        }
+        Err(e) => fail(e),
+    }
 }
 
 pub fn install(builder: &mut ServerBuilder, service: AuthService) {

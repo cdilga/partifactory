@@ -81,7 +81,7 @@ impl AuthService {
         let hash = crate::secret_hash(code);
         let token = crate::new_token();
         let session_hash = crate::secret_hash(&token);
-        let now = ids::now_ms();
+        let now = self.now();
         let pin = self.0.admin.clone();
         self.0.db.write(move|tx| {
             let pin=if pin.is_empty(){tx.query_row("SELECT value FROM kv WHERE key='admin.subject'",[],|r|r.get::<_,String>(0)).optional()?.unwrap_or_default()}else{pin};

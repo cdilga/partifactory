@@ -1,14 +1,11 @@
 //! Bearer-token verification for the shared HTTPS operation adapter.
-use pf_db::{
-    Db,
-    rusqlite::{OptionalExtension, params},
-};
+use pf_db::Db;
 use pf_model::{PfError, Principal, create::Caller};
-use std::{collections::BTreeSet, future::Future, pin::Pin, sync::Arc};
+use std::{future::Future, pin::Pin, sync::Arc};
 
 struct Bearer {
     db: Db,
-    resource: String,
+    tokens: pf_oauth::TokenService,
     #[cfg(feature = "dev")]
     fixture: Option<(Vec<u8>, String)>,
 }
@@ -19,7 +16,7 @@ impl pf_api::Authenticator for Bearer {
     ) -> Pin<Box<dyn Future<Output = Result<pf_ops::Ctx, PfError>> + Send + '_>> {
         let hash = pf_auth::secret_hash(token);
         let db = self.db.clone();
-        let resource = self.resource.clone();
+        let token = token.to_owned();
         #[cfg(feature = "dev")]
         if let Some((expected, uid)) = &self.fixture
             && &hash == expected
@@ -58,27 +55,24 @@ impl pf_api::Authenticator for Bearer {
                 })
             });
         }
+        let tokens = self.tokens.clone();
         Box::pin(async move {
-            let now = pf_db::ids::now_ms();
-            db.write(move|tx| {
-                let row:Option<(String,String,String,String)>=tx.query_row(
-                    "SELECT c.id,c.user_id,c.scopes,c.spaces FROM oauth_tokens t JOIN agent_connections c ON c.id=t.connection_id JOIN users u ON u.id=c.user_id WHERE t.hash=?1 AND t.kind IN('access','pat') AND t.resource=?2 AND t.revoked_at IS NULL AND t.expires_at>?3 AND c.revoked_at IS NULL AND c.expires_at>?3 AND u.status='active'",
-                    params![hash,resource,now],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
-                let Some((conn,uid,scopes,spaces))=row else {return Err(PfError::new("unauthenticated","Invalid agent token."));};
-                let scopes:BTreeSet<String>=serde_json::from_str(&scopes).map_err(|_|PfError::internal("Invalid stored connection scopes."))?;
-                let spaces:BTreeSet<String>=serde_json::from_str(&spaces).map_err(|_|PfError::internal("Invalid stored connection spaces."))?;
-                tx.execute("UPDATE agent_connections SET last_used_at=?2 WHERE id=?1",params![conn,now])?;
-                Ok(pf_ops::Ctx{caller:Caller::api(Principal::agent(uid,conn)),scopes,spaces:Some(spaces)})
-            }).await
+            use pf_oauth::AuthorizationServer;
+            let principal = tokens.resolve(&token).await?;
+            Ok(pf_ops::Ctx {
+                caller: Caller::api(principal.principal),
+                scopes: principal.scopes,
+                spaces: Some(principal.spaces),
+            })
         })
     }
 }
 
 pub fn authenticator(
-    db: Db,
-    origin: &str,
+    tokens: pf_oauth::TokenService,
     _env: &pf_config::Env,
 ) -> Result<Arc<dyn pf_api::Authenticator>, String> {
+    let db = tokens.db.clone();
     #[cfg(feature = "dev")]
     let token = match (
         _env.get("PF_DEV_API_TOKEN"),
@@ -121,7 +115,7 @@ pub fn authenticator(
     };
     Ok(Arc::new(Bearer {
         db,
-        resource: format!("{}/", origin.trim_end_matches('/')),
+        tokens,
         #[cfg(feature = "dev")]
         fixture,
     }))

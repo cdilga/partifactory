@@ -11,10 +11,7 @@ use axum::{
 };
 use http::{HeaderMap, HeaderValue, header};
 use openidconnect::{core::*, *};
-use pf_db::{
-    ids,
-    rusqlite::{OptionalExtension, params},
-};
+use pf_db::rusqlite::{OptionalExtension, params};
 use pf_model::PfError;
 use pf_serve::AppState;
 use serde::{Deserialize, Serialize};
@@ -136,7 +133,7 @@ impl AuthService {
         }
         let (url, state, nonce) = authorize.set_pkce_challenge(challenge).url();
         let cookie = new_token();
-        let now = ids::now_ms();
+        let now = self.now();
         let mut flows = self.0.flows.lock().map_err(internal)?;
         flows.retain(|_, v| v.expires > now);
         if flows.len() >= 1024 {
@@ -168,7 +165,7 @@ impl AuthService {
         let flow = {
             let mut flows = self.0.flows.lock().map_err(internal)?;
             let flow = flows.get(&state).ok_or_else(unauthenticated)?;
-            if flow.binder != binder || flow.expires <= ids::now_ms() {
+            if flow.binder != binder || flow.expires <= self.now() {
                 return Err(unauthenticated());
             }
             flows.remove(&state).ok_or_else(unauthenticated)?
@@ -206,7 +203,7 @@ impl AuthService {
             refresh: r.secret().clone(),
             nonce: flow.nonce.secret().clone(),
         });
-        let session = self.login(&identity, refresh, ids::now_ms()).await?;
+        let session = self.login(&identity, refresh, self.now()).await?;
         tracing::info!(event="oidc.login",principal=%format!("user:{}",session.user_id),outcome="ok");
         Ok((session, flow.target))
     }
@@ -259,6 +256,13 @@ impl AuthService {
         }
         // Serializing rotating tokens avoids invalid_grant races between browser requests.
         let _guard = self.0.refresh_lock.lock().await;
+        {
+            let mut retry = self.0.retry_after.lock().map_err(internal)?;
+            retry.retain(|_, until| *until > now);
+            if retry.contains_key(hash) {
+                return Ok(());
+            }
+        }
         let lookup = hash.to_vec();
         let row:Option<(String,String,Vec<u8>,i64)>=self.0.db.read(move|c| {
             c.query_row("SELECT s.user_id,u.idp_sub,s.idp_refresh_enc,s.idp_checked_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id_hash=?1 AND s.revoked_at IS NULL AND s.expires_at>?2 AND s.idp_refresh_enc IS NOT NULL AND s.idp_checked_at<=?3",params![lookup,now,now-15*60*1000],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(PfError::from)
@@ -293,6 +297,11 @@ impl AuthService {
                 Ok(())
             }
             Err(RefreshFailure::Unreachable) => {
+                self.0
+                    .retry_after
+                    .lock()
+                    .map_err(internal)?
+                    .insert(hash.to_vec(), now + 60_000);
                 let stale_key = format!("directory.stale:{uid}");
                 let stale = self
                     .0
@@ -414,7 +423,7 @@ pub(crate) async fn callback(
             set_cookie(
                 &mut r,
                 &session.token,
-                (session.expires_at - ids::now_ms()) / 1000,
+                (session.expires_at - auth.now()) / 1000,
             );
             r.headers_mut()
                 .insert(header::PRAGMA, HeaderValue::from_static("no-cache"));
