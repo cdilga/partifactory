@@ -53,8 +53,6 @@ test('Simulator guest paints and Chromium admin freezes the communal board', asy
   const device=await (await request.post('/oauth/device_authorization',{form:{client_id:'part-cli',agent_name:'Simulator pixel gate',scope:'parts:read parts:write data:read data:write'}})).json();
   await page.goto(device.verification_uri_complete);
   await page.getByRole('button',{name:'Continue',exact:true}).click();
-  const consent=await (await context.request.get('/api/agents/consent',{params:{code:device.user_code}})).json();
-  const space=consent.spaces[0].slug;
   await page.getByRole('button',{name:'Allow',exact:true}).click();
   const granted=await request.post('/oauth/token',{form:{client_id:'part-cli',grant_type:'urn:ietf:params:oauth:grant-type:device_code',device_code:device.device_code}});
   expect(granted.status()).toBe(200);
@@ -92,7 +90,8 @@ async function deviceRefused(e,key,before) {
 }
 loadBoard().then(async()=>{window.partifactory.ready();await deviceWait("admin_ready");cells["px:0:0"].setAttribute("aria-label","Paint communal pixel");});`);
   const name='ios-pixel';
-  const created=await request.post('/api/v1/part_create',{headers,data:{name,space,title:'Simulator pixel board',kind:'html',content,request_id:'ios-pixel-'+nonce}});
+  // Omitting space must keep using the consented personal space after directory renames.
+  const created=await request.post('/api/v1/part_create',{headers,data:{name,title:'Simulator pixel board',kind:'html',content,request_id:'ios-pixel-'+nonce}});
   expect(created.status(),await created.text()).toBe(200);
   await expect.poll(async()=> (await (await request.post('/api/v1/part_get',{headers,data:{name}})).json()).build?.status,{timeout:45_000}).toBe('ok');
   await page.goto(base+'/');

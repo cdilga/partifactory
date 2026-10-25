@@ -92,7 +92,9 @@ impl Registry {
                         match input["space"].as_str() {
                             Some(s) => s.to_string(),
                             None => c.query_row(
-                                "SELECT '~' || username FROM users WHERE id=?1",
+                                // A directory rename does not rename the existing personal
+                                // space. Match spaces::default_space before checking consent.
+                                "SELECT COALESCE((SELECT slug FROM spaces WHERE owner_user_id=u.id AND kind='personal'), '~' || u.username) FROM users u WHERE u.id=?1",
                                 [&p.user_id],
                                 |r| r.get::<_, String>(0),
                             )?,
