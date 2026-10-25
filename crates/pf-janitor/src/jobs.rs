@@ -290,10 +290,12 @@ async fn gc(ctx: &Context, now: i64) -> Result<JobReport, String> {
    if *created>=mark_start{continue;}
    if unref.is_none(){tx.execute("UPDATE blobs SET unref_since=?2 WHERE hash=?1",params![hash,now])?;continue;}
    if unref.is_some_and(|t|t<=now-7*DAY){
-    // An upload after mark-start may reuse an existing database hash. File mtime covers it.
-    let newer=std::fs::metadata(blobs.path(hash)).and_then(|m|m.modified()).ok().and_then(|t|t.duration_since(std::time::UNIX_EPOCH).ok()).is_some_and(|d|d.as_millis()>=mark_start as u128);
-    if newer{continue;}
-    freed+=blobs.remove(hash).map_err(|e|DbError::Io(std::io::Error::other(e.to_string())))?;
+    // A put may finish before its caller obtains this database writer. The filesystem
+    // guard and fresh upload grace cover that gap as well as puts after mark-start.
+    let cutoff=std::time::UNIX_EPOCH+std::time::Duration::from_millis(now.saturating_sub(7*DAY).max(0) as u64);
+    let removed=blobs.remove_if_older_than(hash,cutoff).map_err(|e|DbError::Io(std::io::Error::other(e.to_string())))?;
+    let Some(bytes)=removed else {continue;};
+    freed+=bytes;
     tx.execute("DELETE FROM blobs WHERE hash=?1",[hash])?;items+=1;
    }
   }

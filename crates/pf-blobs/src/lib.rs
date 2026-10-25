@@ -178,12 +178,30 @@ impl BlobStore {
         is_hash(hash) && self.path(hash).is_file()
     }
 
+    /// Separate descriptors coordinate clones, independently opened stores and concurrent
+    /// old/new deployment processes through the same on-disk advisory lock.
+    fn mutation_lock(&self, exclusive: bool) -> Result<File, BlobError> {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(self.root.join(".gc.lock"))?;
+        if exclusive {
+            fs4::fs_std::FileExt::lock_exclusive(&file)?;
+        } else {
+            fs4::fs_std::FileExt::lock_shared(&file)?;
+        }
+        Ok(file)
+    }
     /// Store `bytes` durably; returns its hash. Idempotent.
     pub fn put(&self, bytes: &[u8]) -> Result<Put, BlobError> {
+        let _guard = self.mutation_lock(false)?;
         let hash = sha256_hex(bytes);
         let size = bytes.len() as u64;
         let dest = self.path(&hash);
         if dest.is_file() {
+            File::open(&dest)?.set_modified(SystemTime::now())?;
             return Ok(Put {
                 hash,
                 size,
@@ -226,6 +244,8 @@ impl BlobStore {
         })();
         let _ = fs::remove_file(&tmp);
         let created = res?;
+        // Completion, including a concurrent deduplicated put, renews the upload grace.
+        File::open(&dest)?.set_modified(SystemTime::now())?;
         if created {
             self.budget.did_put(size);
         }
@@ -276,15 +296,47 @@ impl BlobStore {
 
     /// GC only: callers must recheck references inside the single writer before deletion.
     pub fn remove(&self, hash: &str) -> Result<u64, BlobError> {
+        Ok(self.remove_guarded(hash, None)?.unwrap_or(0))
+    }
+
+    /// Atomically guard mtime and delete against every put, across process boundaries. A
+    /// recent reuse gets a fresh seven-day upload grace even before its DB writer can run.
+    /// `None` means keep the file; `Some(0)` includes an already absent candidate.
+    pub fn remove_if_older_than(
+        &self,
+        hash: &str,
+        cutoff: SystemTime,
+    ) -> Result<Option<u64>, BlobError> {
+        self.remove_guarded(hash, Some(cutoff))
+    }
+    fn remove_guarded(
+        &self,
+        hash: &str,
+        cutoff: Option<SystemTime>,
+    ) -> Result<Option<u64>, BlobError> {
+        self.remove_guarded_with(hash, cutoff, || {})
+    }
+    fn remove_guarded_with(
+        &self,
+        hash: &str,
+        cutoff: Option<SystemTime>,
+        after_lock: impl FnOnce(),
+    ) -> Result<Option<u64>, BlobError> {
         Self::check(hash)?;
-        let size = match fs::metadata(self.path(hash)) {
-            Ok(m) => m.len(),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
-            Err(e) => return Err(e.into()),
+        let _guard = self.mutation_lock(true)?;
+        after_lock();
+        let meta = match fs::metadata(self.path(hash)) {
+            Ok(meta) => meta,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Some(0)),
+            Err(error) => return Err(error.into()),
         };
+        if cutoff.is_some_and(|cutoff| meta.modified().map(|mtime| mtime >= cutoff).unwrap_or(true))
+        {
+            return Ok(None);
+        }
         fs::remove_file(self.path(hash))?;
-        self.budget.did_delete(size);
-        Ok(size)
+        self.budget.did_delete(meta.len());
+        Ok(Some(meta.len()))
     }
 
     /// Remove temp files older than `older_than` (left by a crash mid-put). Returns how many.

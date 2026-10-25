@@ -120,3 +120,72 @@ fn stale_temp_swept() {
     assert_eq!(s.sweep_stale_temps(Duration::ZERO).unwrap(), 1);
     assert!(!stale.exists());
 }
+
+#[test]
+fn recent_dedup_renews_grace_before_database_reference_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = BlobStore::open(dir.path()).unwrap();
+    let put = s.put(b"pending upload").unwrap();
+    File::open(s.path(&put.hash))
+        .unwrap()
+        .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1))
+        .unwrap();
+    assert!(!s.put(b"pending upload").unwrap().created);
+    let cutoff = SystemTime::now() - Duration::from_secs(7 * 86400);
+    assert_eq!(s.remove_if_older_than(&put.hash, cutoff).unwrap(), None);
+    assert_eq!(s.get(&put.hash).unwrap(), b"pending upload");
+}
+
+#[test]
+fn paused_gc_and_dedup_coordinate_clones_and_independently_opened_stores() {
+    use std::sync::mpsc;
+    for reopen in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let s = BlobStore::open(dir.path()).unwrap();
+        let put = s.put(b"racing upload").unwrap();
+        File::open(s.path(&put.hash))
+            .unwrap()
+            .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1))
+            .unwrap();
+        let gc = s.clone();
+        let hash = put.hash.clone();
+        let (paused_tx, paused_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let collector = std::thread::spawn(move || {
+            gc.remove_guarded_with(&hash, Some(SystemTime::now()), || {
+                paused_tx.send(()).unwrap();
+                resume_rx.recv().unwrap();
+            })
+            .unwrap()
+        });
+        paused_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let uploader = if reopen {
+            BlobStore::open(dir.path()).unwrap()
+        } else {
+            s.clone()
+        };
+        let (done_tx, done_rx) = mpsc::channel();
+        let writer = std::thread::spawn(move || {
+            done_tx.send(uploader.put(b"racing upload")).unwrap();
+        });
+        assert!(
+            matches!(
+                done_rx.recv_timeout(Duration::from_millis(50)),
+                Err(mpsc::RecvTimeoutError::Timeout)
+            ),
+            "put must wait for GC's atomic mtime/delete section"
+        );
+        resume_tx.send(()).unwrap();
+        assert_eq!(collector.join().unwrap(), Some(13));
+        assert!(
+            done_rx
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap()
+                .unwrap()
+                .created,
+            "a put after sweep must recreate bytes, never return a stale dedup result"
+        );
+        writer.join().unwrap();
+        assert_eq!(s.get(&put.hash).unwrap(), b"racing upload");
+    }
+}
