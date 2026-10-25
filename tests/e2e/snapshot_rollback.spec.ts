@@ -12,7 +12,7 @@ test('part_data reads runtime documents and restores a snapshot into an open boa
     const response=await request.post('/api/v1/part_data',{headers:{Authorization:`Bearer ${token()}`},data:{name,...args}});
     expect(response.ok(),await response.text()).toBe(true);return response.json();
   };
-  const got=await data({action:'get',doc_id:'px:0:0'});expect(got.doc.data).toBe('#e4572e');
+  await expect.poll(async()=> (await data({action:'get',doc_id:'px:0:0'})).doc?.data).toBe('#e4572e');
   const snapshots=await data({action:'snapshot_list'});expect(snapshots.policy).toEqual({mode:'daily',keep:7});
   expect(snapshots.snapshots.length).toBeGreaterThan(0);
   const id=snapshots.snapshots[0].id;

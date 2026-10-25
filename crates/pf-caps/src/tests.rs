@@ -55,17 +55,29 @@ fn max_cap_is_at_most_300_bytes() {
 }
 
 #[test]
-fn render_window_is_about_a_minute() {
+fn render_expires_at_exactly_sixty_seconds_at_every_minute_offset() {
     let ep = EpochStore::default();
     let mut g = grant("x");
     g.subject = "render".into();
     g.minter = "render".into();
-    let now = T0 + 30_000;
-    let cap = mint(&keys(), &ep, &g, now).unwrap();
-    assert!(verify(&keys(), &ep, &cap, "x", now + 59_000).is_ok());
+    for offset in [0, 1, 30_000, 59_999] {
+        let now = T0 + offset;
+        let cap = mint(&keys(), &ep, &g, now).unwrap();
+        let claims = verify(&keys(), &ep, &cap, "x", now + 59_999).unwrap();
+        assert_eq!(claims.expires_at, Some(now + 60_000));
+        assert!(claims.ro);
+        assert!(!claims.dw);
+        assert_eq!(
+            verify(&keys(), &ep, &cap, "x", now + 60_000),
+            Err(CapError::Expired)
+        );
+    }
+    let cap = mint(&keys(), &ep, &grant("x"), T0).unwrap();
     assert_eq!(
-        verify(&keys(), &ep, &cap, "x", now + 121_000),
-        Err(CapError::Expired)
+        verify(&keys(), &ep, &cap, "x", T0 + 60_000)
+            .unwrap()
+            .expires_at,
+        None
     );
 }
 

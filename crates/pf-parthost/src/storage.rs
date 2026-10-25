@@ -12,6 +12,9 @@ fn argument<'a>(args: &'a Value, key: &str) -> Result<&'a str, PfError> {
 }
 
 pub(crate) async fn dispatch(ctx: RtCtx, op: String, args: Value) -> RtResult {
+    if ctx.claims.s == "render" {
+        return crate::render::dispatch(ctx, op, args);
+    }
     let shared = args.get("shared").and_then(Value::as_bool).unwrap_or(false);
     let owner = if shared {
         String::new()

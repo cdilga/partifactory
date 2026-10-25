@@ -490,3 +490,188 @@ async fn v0_stream_receives_first_live_version_and_rejects_foreign_origin() {
     assert!(text.contains("\"n\":1"));
     assert!(text.contains("\"live\":1"));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn render_overlay_is_scoped_discarded_and_never_emits_data_events() {
+    use futures_util::StreamExt;
+    use std::time::Duration;
+    let mut f = Fixture::new().await;
+    assert_eq!(
+        f.runtime(
+            "storage.set",
+            json!({"key":"real","value":"initial","shared":true})
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        f.runtime("storage.set", json!({"key":"private","value":"private"}))
+            .await
+            .0,
+        StatusCode::OK
+    );
+    let response = f
+        .request(
+            "notes-part.pf.test",
+            &format!("/c/{}/_rt/events", f.cap),
+            "GET",
+            &[("origin", "null")],
+            Body::empty(),
+        )
+        .await;
+    let mut stream = response.into_body().into_data_stream();
+    let baseline = f
+        ._db
+        .read(|db| {
+            Ok::<_, pf_db::DbError>(
+                db.query_row("SELECT count(*) FROM data_docs", [], |r| r.get::<_, i64>(0))?,
+            )
+        })
+        .await
+        .unwrap();
+    let version = f
+        ._db
+        .read(|db| {
+            Ok::<_, pf_db::DbError>(db.query_row(
+                "SELECT head_version_id FROM parts WHERE name='notes'",
+                [],
+                |r| r.get::<_, String>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    f.cap = pf_caps::mint(
+        &f.host.deps().keys,
+        &f.host.deps().epochs,
+        &Grant {
+            part_id: f.part.clone(),
+            host: "notes".into(),
+            subject: "render".into(),
+            minter: "render:test".into(),
+            version: Some(version[..32].into()),
+            ..Default::default()
+        },
+        f.host.now(),
+    )
+    .unwrap();
+    for allow_shared in [false, true] {
+        f.host
+            .begin_render("render:test", &f.part, allow_shared)
+            .await
+            .unwrap();
+        let (_, shared) = f
+            .runtime("storage.list", json!({"shared":true,"values":true}))
+            .await;
+        assert_eq!(
+            shared["ok"]["keys"],
+            if allow_shared {
+                json!(["real"])
+            } else {
+                json!([])
+            }
+        );
+        assert_eq!(
+            f.runtime("storage.list", json!({})).await.1["ok"]["keys"],
+            json!([])
+        );
+        for shared in [false, true] {
+            assert_eq!(
+                f.runtime(
+                    "storage.set",
+                    json!({"key":"real","value":"painted","shared":shared})
+                )
+                .await
+                .0,
+                StatusCode::OK
+            );
+            assert_eq!(
+                f.runtime("storage.get", json!({"key":"real","shared":shared}))
+                    .await
+                    .1["ok"]["value"],
+                "painted"
+            );
+            assert_eq!(
+                f.runtime(
+                    "storage.sync",
+                    json!({"shared":shared,"set":{"temporary":"batch"},"delete":["real"]})
+                )
+                .await
+                .0,
+                StatusCode::OK
+            );
+            assert!(
+                f.runtime("storage.get", json!({"key":"real","shared":shared}))
+                    .await
+                    .1["ok"]
+                    .is_null()
+            );
+        }
+        f.host.end_render("render:test");
+        assert_eq!(
+            f.runtime("storage.get", json!({"key":"real","shared":true}))
+                .await
+                .0,
+            StatusCode::FORBIDDEN
+        );
+    }
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), stream.next())
+            .await
+            .is_err()
+    );
+    f._db
+        .read(move |db| {
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM data_docs", [], |r| r.get::<_, i64>(0))?,
+                baseline
+            );
+            let body: Vec<u8> = db.query_row(
+                "SELECT body FROM data_docs WHERE scope='shared' AND doc_id='real'",
+                [],
+                |r| r.get(0),
+            )?;
+            assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), "initial");
+            Ok::<_, pf_db::DbError>(())
+        })
+        .await
+        .unwrap();
+    let (status,body)=f.runtime("errors.report",json!({"kind":"error","message":"render canary","stack":"Error: render canary","url":"/index.html"})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    f._db
+        .read(|db| {
+            assert_eq!(
+                db.query_row(
+                    "SELECT source FROM runtime_errors WHERE message='render canary'",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )?,
+                "render"
+            );
+            Ok::<_, pf_db::DbError>(())
+        })
+        .await
+        .unwrap();
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::test_runner::Config::with_cases(12))]
+    #[test]
+    fn render_cap_never_writes(changes in proptest::collection::vec(("[a-z]{1,12}", ".{0,64}", proptest::bool::ANY),1..16)) {
+        tokio::runtime::Runtime::new().unwrap().block_on(async move {
+            let mut f=Fixture::new().await;
+            let before=f._db.read(|db|Ok::<_,pf_db::DbError>((db.query_row("SELECT count(*) FROM data_docs",[],|r|r.get::<_,i64>(0))?,db.query_row("SELECT count(*) FROM events WHERE type='data.changed'",[],|r|r.get::<_,i64>(0))?))).await.unwrap();
+            f.host.begin_render("render:property",&f.part,false).await.unwrap();
+            f.cap=pf_caps::mint(&f.host.deps().keys,&f.host.deps().epochs,&Grant{part_id:f.part.clone(),host:"notes".into(),subject:"render".into(),minter:"render:property".into(),..Default::default()},f.host.now()).unwrap();
+            for (key,value,shared) in changes {
+                let (status,result)=f.runtime("storage.set",json!({"key":key,"value":value,"shared":shared})).await;
+                assert_eq!(status,StatusCode::OK,"{result}");
+                assert_eq!(f.runtime("storage.get",json!({"key":key,"shared":shared})).await.1["ok"]["value"],value);
+                assert_eq!(f.runtime("storage.delete",json!({"key":key,"shared":shared})).await.0,StatusCode::OK);
+            }
+            f.host.end_render("render:property");
+            let after=f._db.read(|db|Ok::<_,pf_db::DbError>((db.query_row("SELECT count(*) FROM data_docs",[],|r|r.get::<_,i64>(0))?,db.query_row("SELECT count(*) FROM events WHERE type='data.changed'",[],|r|r.get::<_,i64>(0))?))).await.unwrap();
+            assert_eq!(before,after);
+        });
+    }
+}

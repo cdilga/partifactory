@@ -55,6 +55,9 @@ pub async fn handle(s: PartHost, req: Request) -> Response {
         Ok(v) => v,
         Err(r) => return *r,
     };
+    if c.s == "render" {
+        return http::StatusCode::FORBIDDEN.into_response();
+    }
     let unsandboxed = match s.live(&c.h, c.v.as_deref()).await {
         Ok(Some(l)) if l.part_id == c.p => l.unsandboxed,
         Ok(None) if c.v.is_none() => {
@@ -82,6 +85,7 @@ pub async fn handle(s: PartHost, req: Request) -> Response {
         (rx, data_rx, c, s),
         |(mut rx, mut data_rx, c, s)| async move {
             if s.now() / 1000 >= c.w * 60
+                || c.expires_at.is_some_and(|expiry| s.now() >= expiry)
                 || c.e < s.deps().epochs.part_epoch(&c.p)
                 || c.me < s.deps().epochs.get(&pf_caps::minter_key(&c.m))
                 || c.b < s.deps().epochs.boot_floor()

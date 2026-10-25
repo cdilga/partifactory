@@ -134,6 +134,8 @@ pub struct Claims {
     pub b: i64,
     /// Window end, unix minutes. Valid while `now < w * 60 s`.
     pub w: i64,
+    /// Exact render expiry (unix milliseconds); normal person/link caps omit it.
+    pub expires_at: Option<i64>,
     /// Pinned version: the first 32 hex chars of its id.
     pub v: Option<String>,
     pub d: Option<String>,
@@ -256,6 +258,9 @@ fn canonical_cbor(c: &Claims) -> Result<Vec<u8>, CapError> {
     if c.ro {
         entries.push(("ro", Value::Bool(true)));
     }
+    if let Some(expiry) = c.expires_at {
+        entries.push(("x", Value::Integer(expiry.into())));
+    }
     if c.dw {
         entries.push(("dw", Value::Bool(true)));
     }
@@ -313,6 +318,7 @@ fn decode_claims(bytes: &[u8]) -> Result<Claims, CapError> {
         me: req_i("me")?,
         b: req_i("b")?,
         w: req_i("w")?,
+        expires_at: get("x").and_then(int),
         v: get("v").and_then(|v| v.as_bytes()).map(|b| hex_encode(b)),
         d: id("d"),
     })
@@ -341,14 +347,15 @@ pub fn mint(
         h: grant.host.clone(),
         s: grant.subject.clone(),
         r: grant.role,
-        ro: grant.read_only,
-        dw: grant.data_write,
+        ro: render || grant.read_only,
+        dw: !render && grant.data_write,
         g: grant.guest.clone(),
         e: epochs.part_epoch(&grant.part_id),
         m: grant.minter.clone(),
         me: epochs.get(&minter_key(&grant.minter)),
         b: epochs.boot_floor(),
         w: window_end(now_ms, render),
+        expires_at: render.then_some(now_ms.saturating_add(60_000)),
         v: grant.version.clone(),
         d: grant.draft.clone(),
     };
@@ -411,7 +418,7 @@ pub fn verify(
     if c.b < epochs.boot_floor() {
         return Err(CapError::StaleBoot);
     }
-    if now_ms.div_euclid(1000) >= c.w * 60 {
+    if now_ms.div_euclid(1000) >= c.w * 60 || c.expires_at.is_some_and(|expiry| now_ms >= expiry) {
         return Err(CapError::Expired);
     }
     Ok(c)

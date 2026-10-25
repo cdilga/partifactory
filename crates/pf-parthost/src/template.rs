@@ -33,7 +33,7 @@ pub(crate) async fn boot(s: &PartHost, cap: &str, c: &Claims) -> Result<Arc<Stri
             Ok(m)
         }).await?;
     }
-    let value = json!({"personal":personal,"scope":if owner.is_empty() {"none"} else {"person"}});
+    let value = json!({"personal":personal,"scope":if owner.is_empty() {"none"} else {"person"},"events":c.s!="render"});
     let out = Arc::new(
         value
             .to_string()
