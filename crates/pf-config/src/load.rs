@@ -400,7 +400,15 @@ fn cross_field(site: &SiteConfig, has_oidc: bool, has_runner: bool, diags: &mut 
             });
         }
         for (host, address) in &site.mirror.test_resolve {
-            if !site.mirror.allowlist.contains(host)
+            // The harness's two IdPs share its private TLS proxy. This exception affects
+            // development resolution only; it never widens the mirror egress allowlist.
+            let harness_idp = cfg!(feature = "dev")
+                && [
+                    format!("dex.{}", site.domain.apex),
+                    format!("dex2.{}", site.domain.apex),
+                ]
+                .contains(host);
+            if (!site.mirror.allowlist.contains(host) && !harness_idp)
                 || address.parse::<std::net::SocketAddr>().is_err()
             {
                 diags.push(Diag::Invalid {

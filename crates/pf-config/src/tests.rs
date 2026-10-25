@@ -20,8 +20,24 @@ fn mirror_overrides_require_dev_and_validate_exact_hosts_and_addresses() {
     let valid = "[mirror.test_resolve]\n\"unpkg.com\" = \"127.0.0.1:18444\"\n";
     let result = load(valid, &base_env());
     assert_eq!(result.is_ok(), cfg!(feature = "dev"));
+    for host in ["dex.pf.test", "dex2.pf.test"] {
+        let config = format!("[mirror.test_resolve]\n\"{host}\" = \"127.0.0.1:18444\"\n");
+        let result = load(&config, &base_env());
+        assert_eq!(result.is_ok(), cfg!(feature = "dev"));
+        if let Ok(loaded) = result {
+            assert!(
+                !loaded
+                    .site
+                    .mirror
+                    .allowlist
+                    .iter()
+                    .any(|allowed| allowed == host)
+            );
+        }
+    }
     for config in [
         "[mirror.test_resolve]\n\"evil.example.com\" = \"127.0.0.1:18444\"\n",
+        "[mirror.test_resolve]\n\"dex.other.test\" = \"127.0.0.1:18444\"\n",
         "[mirror.test_resolve]\n\"unpkg.com\" = \"not-an-address\"\n",
     ] {
         assert!(
