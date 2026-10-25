@@ -1,0 +1,862 @@
+[
+  {
+    "name": "part_create",
+    "description": "Reserve a name and create a part. Use live: after_check for pages.",
+    "inputSchema": {
+      "$defs": {
+        "FileInput": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "properties": {
+                "blob": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "blob"
+              ],
+              "type": "object"
+            }
+          ],
+          "description": "One file in a write: inline text, or a blob already uploaded."
+        },
+        "FileMap": {
+          "additionalProperties": {
+            "$ref": "#/$defs/FileInput"
+          },
+          "description": "`{path: str | {blob}}`, refusing duplicate keys (a JSON object may repeat a key; we don't\nlet the last one silently win).",
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "else": {
+            "required": [
+              "title",
+              "request_id"
+            ]
+          },
+          "if": {
+            "properties": {
+              "check_only": {
+                "const": true
+              }
+            },
+            "required": [
+              "check_only"
+            ]
+          },
+          "then": {
+            "anyOf": [
+              {
+                "required": [
+                  "title"
+                ]
+              },
+              {
+                "required": [
+                  "name"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "description": "The `part_create` arguments, exactly as the contract lists them.",
+      "properties": {
+        "check_only": {
+          "type": "boolean"
+        },
+        "content": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expires_in": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "files": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FileMap"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "from": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "live": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._:-]+$",
+          "type": "string"
+        },
+        "shared_data_writers": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "snapshots": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "space": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [],
+      "title": "CreateRequest",
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "part_edit",
+    "description": "Apply ordered edits atomically, or one lifecycle mode. Read exact anchors and hashes with part_get; retry with the same request_id.",
+    "inputSchema": {
+      "$defs": {
+        "Edit": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "file": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "new_str": {
+                  "type": "string"
+                },
+                "old_str": {
+                  "type": "string"
+                },
+                "op": {
+                  "const": "replace",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "op",
+                "old_str",
+                "new_str"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "blob": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "content": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "file": {
+                  "type": "string"
+                },
+                "if_match": {
+                  "$ref": "#/$defs/Match"
+                },
+                "op": {
+                  "const": "write",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "op",
+                "file",
+                "if_match"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "if_match": {
+                  "$ref": "#/$defs/Match"
+                },
+                "op": {
+                  "const": "delete",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "op",
+                "file",
+                "if_match"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "if_match": {
+                  "$ref": "#/$defs/Match"
+                },
+                "op": {
+                  "const": "rename",
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "op",
+                "from",
+                "to",
+                "if_match"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "Match": {
+          "description": "Required even for null: omission must never silently mean “create”."
+        },
+        "Meta": {
+          "additionalProperties": false,
+          "properties": {
+            "description": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "shared_data_writers": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tags": {
+              "default": null,
+              "items": {
+                "type": "string"
+              },
+              "type": [
+                "array",
+                "null"
+              ]
+            },
+            "title": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "edits"
+          ]
+        },
+        {
+          "required": [
+            "restore"
+          ]
+        },
+        {
+          "required": [
+            "delete"
+          ]
+        },
+        {
+          "required": [
+            "undelete"
+          ]
+        },
+        {
+          "required": [
+            "rebuild"
+          ]
+        },
+        {
+          "required": [
+            "meta"
+          ]
+        }
+      ],
+      "properties": {
+        "base_version": {
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "check": {
+          "default": false,
+          "type": "boolean"
+        },
+        "delete": {
+          "const": true
+        },
+        "edits": {
+          "default": null,
+          "items": {
+            "$ref": "#/$defs/Edit"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "live": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "meta": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Meta"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "rebuild": {
+          "const": true
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._:-]+$",
+          "type": "string"
+        },
+        "restore": {
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "undelete": {
+          "const": true
+        },
+        "wait": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "request_id"
+      ],
+      "title": "EditRequest",
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "part_get",
+    "description": "Read source, history, builds and runtime errors. Use file and range for large parts.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "The `part_get` arguments.",
+      "properties": {
+        "build": {
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "diff_from": {
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "diff_to": {
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "file": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "history": {
+          "default": false,
+          "type": "boolean"
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "range": {
+          "default": null,
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "version": {
+          "default": null,
+          "description": "`\"head\"` (default), `\"live\"` or a version number."
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "GetRequest",
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "part_data",
+    "description": "Read or change shared or personal documents and snapshots. Use if_rev for compare-and-set; mutations need request_id.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "enum": [
+                  "set",
+                  "delete",
+                  "snapshot_restore",
+                  "reset"
+                ]
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          "then": {
+            "required": [
+              "request_id"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "action": {
+          "default": "",
+          "type": "string"
+        },
+        "collection": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confirm": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "cursor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "data": {
+          "default": null
+        },
+        "doc_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "if_rev": {
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "limit": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "prefix": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._:-]+$",
+          "type": "string"
+        },
+        "scope": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "snapshot_id": {
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "action"
+      ],
+      "title": "PartDataRequest",
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "part_check",
+    "description": "Render a part and report browser errors. Use the mobile viewport unless checking a desktop layout.",
+    "inputSchema": {
+      "$defs": {
+        "Action": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "do": {
+                  "const": "click",
+                  "type": "string"
+                },
+                "selector": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "x": {
+                  "format": "double",
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "y": {
+                  "format": "double",
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "do"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "do": {
+                  "const": "type",
+                  "type": "string"
+                },
+                "selector": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "do",
+                "selector",
+                "text"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "do": {
+                  "const": "wait_ms",
+                  "type": "string"
+                },
+                "ms": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "do",
+                "ms"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "do": {
+                  "const": "eval_return",
+                  "type": "string"
+                },
+                "expr": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "do",
+                "expr"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/Action"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "include_base64": {
+          "default": false,
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": true,
+        "viewport": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "wait_ms": {
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "CheckRequest",
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "part_link_for",
+    "description": "Return a person-facing link for an administrative action. Only the admin can complete public-link actions.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "action"
+      ],
+      "title": "LinkRequest",
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  }
+]

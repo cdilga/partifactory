@@ -109,8 +109,8 @@ Reserve a name and get the part's link at once, optionally with its first versio
 | `space` | str | no | your person's personal space | a space slug your connection may write |
 | `from` | str | no | — | fork: `"name"` or `"name@n"` |
 | `expires_in` | str | no | — | scratch part: `"<n>h"` or `"<n>d"`, then it moves to the bin |
-| `tags` | [str] | no | `[]` | |
-| `description` | str | no | `""` | |
+| `tags` | [str] | no | `[]` |  |
+| `description` | str | no | `""` |  |
 | `snapshots` | `daily` \| `hourly` \| `off` | no | `daily` | data snapshots of the part's shared data |
 | `shared_data_writers` | `editors` \| `viewers` | no | `viewers` | who may write shared data besides editors (see "Who can write shared data") |
 | `live` | `always` \| `after_check` | no | `always` | `after_check`: the first version goes live only once its check passes (recommended) |
@@ -119,7 +119,7 @@ Reserve a name and get the part's link at once, optionally with its first versio
 
 Output: `{id, name, url, head, live, build}`, plus `replayed: true` on a replay. With no files, `head: 0` and the link shows "being made…" until v1 lands; with files, `head: 1` and `build.status: "queued"`. The call returns before the build, so the `after_check` result arrives in `part_check` (which waits for it) and in `part_get`'s `live`.
 With `check_only`: `{available, name, suggestions}`, where `name` is the name tested (yours, or the one derived from `title`) and `suggestions` are free names, best first.
-Errors: `invalid_input`, `unknown_field`, `name_taken` (`details.suggestions`: free names, retry with one), `not_found` (the `from` part), `forbidden` (`scope_needed` or `space`), `request_id_reused`, `quota_exceeded`, `rate_limited`, `too_large`, `storage_full`.
+Errors: `invalid_input`, `unknown_field`, `unauthenticated`, `forbidden`, `not_found`, `name_taken`, `request_id_reused`, `quota_exceeded`, `rate_limited`, `too_large`, `storage_full`, `internal`.
 ```json
 {"title":"Packing list","kind":"markdown","content":"# Packing\n- passports\n","live":"after_check","request_id":"7b1e2c40-packing-create"}
 → {"id":"p_01JB4X2K9V3M8Q7R6T5Y4W3Z2A","name":"packing-list","url":"https://packing-list-part.<domain>/","head":1,"live":null,"build":{"id":41,"status":"queued","warnings":[],"errors":[]}}
@@ -131,8 +131,8 @@ The one write op: send `edits`, or exactly one mode field (`restore`, `delete`, 
 
 | Field | Type | Req | Default | Meaning |
 | --- | --- | --- | --- | --- |
-| `name` | str | yes | — | |
-| `request_id` | str | yes | — | |
+| `name` | str | yes | — |  |
+| `request_id` | str | yes | — |  |
 | `edits` | [Edit], ≤ 64 | one of these | — | applied in order, each to the text the previous one left |
 | `restore` / `delete` / `undelete` / `rebuild` | int / `true` / `true` / `true` | one of these | — | restore version n as a new version; move to the 30-day bin; bring back; rebuild with the current toolchain |
 | `meta` | `{title?, tags?, description?, shared_data_writers?}` | one of these | — | change the title, tags, description or who may write shared data |
@@ -150,7 +150,7 @@ An `Edit` is one of:
 Output: the mutation shape (`head` is the new version), plus `rebased_from` when it was rebased, `replayed: true` when this `request_id` was already applied, and `check` when you asked for it or sent `live: "after_check"`.
 `check` is `{version, passed, blank, height, errors, console, failed_requests, actions, timing, screenshot}`, the same fields as `part_check`; `passed` is `true` when there's no `error` or `unhandledrejection` and `blank` is `false`. With `live: "after_check"` and `passed: false`, `live` stays where it was.
 If the renderer is off, `after_check` behaves as `always` and `build.warnings` carries `check_skipped`.
-Errors: `invalid_input`, `invalid_edit`, `unknown_field`, `not_found`, `file_not_found`, `forbidden`, `if_match_failed` (`file`, `current_sha256`), `file_exists`, `anchor_not_found` and `anchor_ambiguous` (`edit_index`, `file`, `context`, `lines`, `count`), `base_unknown`, `invalid_against_base`, `request_id_reused`, `quota_exceeded`, `rate_limited`, `too_large` (each file ≤ 2 MiB, each request ≤ 8 MiB), `storage_full`.
+Errors: `invalid_input`, `invalid_edit`, `unknown_field`, `unauthenticated`, `forbidden`, `not_found`, `file_not_found`, `if_match_failed`, `file_exists`, `anchor_not_found`, `anchor_ambiguous`, `base_unknown`, `invalid_against_base`, `request_id_reused`, `quota_exceeded`, `rate_limited`, `too_large`, `storage_full`, `internal`.
 A build failure is not an error: the call succeeds with `build.status: "failed"` and `build.errors: [{file, line, col, message}]` (or `{code: "mirror_failed", url, reason}`).
 ```json
 {"name":"packing-list","base_version":1,"request_id":"c2d4a9e1-packing-chargers","live":"after_check",
@@ -166,8 +166,8 @@ Read a part: everything for a small part, or the file list and the slice you ask
 
 | Field | Type | Req | Default | Meaning |
 | --- | --- | --- | --- | --- |
-| `name` | str | yes | — | |
-| `version` | `"head"` \| `"live"` \| int | no | `"head"` | |
+| `name` | str | yes | — |  |
+| `version` | `"head"` \| `"live"` \| int | no | `"head"` |  `"head"` (default), `"live"` or a version number. |
 | `file` | str | no | — | one file |
 | `range` | [int, int] | no | — | 1-based inclusive line range of `file` |
 | `history` | bool | no | `false` | add the version list |
@@ -177,7 +177,7 @@ Read a part: everything for a small part, or the file list and the slice you ask
 Output: `{id, name, url, title, kind, space, version, head, live, build, files, content?, runtime_errors, history?, diff?}`.
 `files` is `{path: {hash, size, mime}}` (use `hash` as `if_match`). `content` is `{path: text}` for every text file when the part is ≤ 32 KiB in total, otherwise only for the `file` (or `range`) you asked for.
 `runtime_errors` is always the latest 20 errors seen in people's browsers and the renderer: `[{kind, message, stack, url, count, source, version, last_at}]`. `history` is `[{n, author, actor, via, message, created_at, build_status}]`; `diff` is `{from, to, files: [{path, status, added, removed, patch}]}`.
-Errors: `invalid_input`, `unknown_field`, `not_found` (also for a part outside your connection's spaces), `file_not_found`, `forbidden`.
+Errors: `invalid_input`, `unknown_field`, `unauthenticated`, `forbidden`, `not_found`, `file_not_found`, `rate_limited`, `internal`.
 ```json
 {"name":"pixel","file":"index.html","range":[7,7]}
 → {"id":"p_01JB4X7N2C5D8F1G4H7J0K3M6P","name":"pixel","url":"https://pixel-part.<domain>/","title":"Pixel board","kind":"html","space":"~admin","version":2,"head":2,"live":2,
@@ -191,7 +191,7 @@ Render a version in the sandboxed headless browser, exactly as a viewer would, o
 
 | Field | Type | Req | Default | Meaning |
 | --- | --- | --- | --- | --- |
-| `name` | str | yes | — | |
+| `name` | str | yes | — |  |
 | `version` | `"head"` \| `"live"` \| int | no | `"head"` | check before it goes live |
 | `viewport` | `mobile` \| `desktop` | no | `mobile` | 390×844 or 1280×800 |
 | `wait_ms` | int ≤ 8000 | no | `8000` | waits for `partifactory.ready()`, 500 ms of network idle, or this, whichever is first |
@@ -213,7 +213,7 @@ Output: `{name, url, version, head, live, build, screenshot, blank, height, erro
 `blank` is true when the page shows nothing. `height` is the document's height in CSS pixels. `errors` is `[{kind, message, stack?, url?}]` with `kind` one of `error`, `unhandledrejection`, `blocked_load`, `csp` (see "What a page can do"); `console` is `[{level, text}]`; `failed_requests` is `[{url, reason, status?}]`; `actions` is `[{i, do, ok, value?, error?}]`; `timing` is `{ready_ms, total_ms}`, where `ready_ms` is `null` if the page never called `partifactory.ready()`. Every `url` is a path within the part, with the access token removed.
 If the build is still running, `part_check` waits for it; if the build isn't `ok`, it returns `screenshot: null`, `blank: null` and the build's errors in `build`. If the version was saved with `live: "after_check"` and its gate check is running, `part_check` waits for that check and returns it.
 **Viewports**: `mobile` is the default because most people open links on a phone. Check `desktop` too when the layout changes with width (a grid, a table, a side panel). Each check counts against the limit.
-Errors: `invalid_input` (including a bad action), `not_found`, `forbidden`, `rate_limited` (30 per hour per connection), `renderer_unavailable`.
+Errors: `invalid_input`, `unknown_field`, `unauthenticated`, `forbidden`, `not_found`, `rate_limited`, `renderer_unavailable`, `storage_full`, `too_large`, `internal`.
 ```json
 {"name":"pixel","actions":[{"do":"click","selector":"#b i"},{"do":"wait_ms","ms":300},{"do":"eval_return","expr":"window.storage.get('px:0:0', true).then(r => r && r.value)"}]}
 → {"name":"pixel","url":"https://pixel-part.<domain>/","version":2,"head":2,"live":2,"build":{"id":78,"status":"ok","warnings":[],"errors":[]},
@@ -228,8 +228,8 @@ Read and write the part's stored data, the same documents its page uses through 
 
 | Field | Type | Req | Default | Meaning |
 | --- | --- | --- | --- | --- |
-| `name` | str | yes | — | |
-| `action` | `get` \| `list` \| `set` \| `delete` \| `snapshot_list` \| `snapshot_restore` \| `reset` | yes | — | |
+| `name` | str | yes | — |  |
+| `action` | `get` \| `list` \| `set` \| `delete` \| `snapshot_list` \| `snapshot_restore` \| `reset` | yes | — |  |
 | `scope` | `shared` \| `personal` | no | `shared` | `personal` is your person's own data |
 | `collection` | str | no | `__storage` | `__storage` holds `window.storage` keys |
 | `doc_id` | str | for get, set, delete | — | for `__storage`, the key |
@@ -238,12 +238,12 @@ Read and write the part's stored data, the same documents its page uses through 
 | `prefix`, `cursor`, `limit` | str, str, int ≤ 1000 | no | —, —, `100` | list only |
 | `snapshot_id` | int | for snapshot_restore | — | from `snapshot_list` |
 | `confirm` | `true` | for reset | — | reset empties the part's shared data |
-| `request_id` | str | for set, delete, snapshot_restore, reset | — | |
+| `request_id` | str | for set, delete, snapshot_restore, reset | — |  |
 
 `snapshot_list`, `snapshot_restore` and `reset` act on the part's **shared** data only (personal data is never rolled back), need `parts:write` and your person's `edit` role, and take a snapshot of the current data first, so each is undoable.
 Output: get `{doc, contains_untrusted}`; list `{docs, next_cursor, contains_untrusted}`; set `{doc_id, rev}`; delete `{doc_id, deleted: true}`; snapshot_list `{snapshots, policy}`; snapshot_restore `{restored, before_snapshot_id, docs}`; reset `{before_snapshot_id, deleted}`. Writes add `replayed: true` on a replay.
 A `doc` is `{collection, doc_id, data, rev, updated_at, updated_by, provenance}`. A snapshot is `{id, taken_at, reason, docs, bytes}` with `reason` one of `scheduled`, `contribute` (taken when a link switched to Can contribute), `before_restore`, `before_reset`; `policy` is `{mode, keep}`. Open pages repaint after a restore or reset (every affected key gets a `data.changed`).
-Errors: `invalid_input`, `unknown_field`, `not_found` (part, doc or snapshot), `forbidden` (`scope_needed` or `role_needed`), `forbidden_view_only` (your person may not write this part's shared data), `if_match_failed` (`collection`, `doc_id`, `current_rev`), `request_id_reused`, `too_large`, `quota_exceeded` (5 MiB of shared data per part, 256 KiB of personal data per person per part), `rate_limited`, `storage_full`.
+Errors: `invalid_input`, `unknown_field`, `unauthenticated`, `forbidden`, `forbidden_view_only`, `not_found`, `if_match_failed`, `request_id_reused`, `too_large`, `quota_exceeded`, `rate_limited`, `storage_full`, `internal`.
 ```json
 {"name":"pixel","action":"snapshot_list"}
 → {"snapshots":[{"id":31,"taken_at":"2026-10-23T09:00:00Z","reason":"contribute","docs":0,"bytes":2},{"id":30,"taken_at":"2026-10-23T00:00:00Z","reason":"scheduled","docs":4,"bytes":180}],"policy":{"mode":"daily","keep":7}}
@@ -256,11 +256,11 @@ Get a link for something only a person can do. It grants nothing by itself: it o
 | Field | Type | Req | Default | Meaning |
 | --- | --- | --- | --- | --- |
 | `action` | `public_link` \| `contribute` | yes | — | a public view-only link, or one guests can contribute to |
-| `name` | str | yes | — | |
+| `name` | str | yes | — |  |
 
 Output: `{action, url, who}`; `url` is `https://<name>-part.<domain>/#share=public` or `#share=contribute`, and `who` names who can act on it: `"admin"` for both (public links are the admin's to make).
 The link is for a person to tap, never to post (Rule 4). If your person is the admin, give it to them. If not, tell them only the admin can do this and ask them to send the admin the link; opened by anyone else, it shows the share sheet without that option.
-Errors: `invalid_input` (an action that doesn't exist yet), `not_found`, `forbidden`.
+Errors: `invalid_input`, `unknown_field`, `unauthenticated`, `forbidden`, `not_found`, `rate_limited`, `internal`.
 ```json
 {"name":"pixel","action":"contribute"}
 → {"action":"contribute","url":"https://pixel-part.<domain>/#share=contribute","who":"admin"}
@@ -350,23 +350,23 @@ Every surface returns the same shape (MCP: a tool result with `isError: true` an
 ```
 Read `message` (expected, found), then do what `hint` says. `retryable: true` means the same call can succeed after the fix or wait.
 
-| Code | HTTP | What to do |
-| --- | --- | --- |
-| `invalid_input`, `invalid_edit`, `unknown_field` | 400 | fix the field named in `details.path`; take `details.suggestion` |
-| `unauthenticated` | 401 | refresh the token, or ask your person to connect you again |
-| `forbidden` | 403 | `details.scope_needed` or `details.space`: ask the person to reconnect with it; `details.role_needed`: your person lacks that role on the part |
-| `forbidden_view_only` | 403 | the part's shared data is view only for your person (or the link is Can view); don't retry |
-| `not_found`, `file_not_found` | 404 | check the name or path; `part_get` lists files |
-| `name_taken` | 409 | retry with one of `details.suggestions` |
-| `if_match_failed`, `file_exists` | 409 | re-read with `part_get` and use the current hash (or `rev`) |
-| `request_id_reused` | 409 | use a new `request_id` for a new change |
-| `anchor_not_found`, `anchor_ambiguous` | 422 | Rule 2 |
-| `base_unknown`, `invalid_against_base` | 422 | drop `base_version`, or re-read and rebuild the edits |
-| `quota_exceeded`, `rate_limited` | 429 | wait `details.retry_after` seconds; stop looping |
-| `too_large` | 413 | split the change; `details.limit` |
-| `storage_full` | 507 | stop and tell the person |
-| `renderer_unavailable` | 503 | carry on unchecked, and say so |
-| `internal` | 500 | retry once with the same `request_id`; report `details.request_id` |
+| Code | HTTP | CLI | What to do |
+| --- | --- | --- | --- |
+| `invalid_input`, `invalid_edit`, `unknown_field` | 400 | 2 | fix the field named in `details.path`; take `details.suggestion` |
+| `unauthenticated` | 401 | 3 | refresh the token, or ask your person to connect you again |
+| `forbidden` | 403 | 3 | `details.scope_needed` or `details.space`: ask the person to reconnect with it; `details.role_needed`: your person lacks that role on the part |
+| `forbidden_view_only` | 403 | 3 | the part's shared data is view only for your person (or the link is Can view); don't retry |
+| `not_found`, `file_not_found` | 404 | 4 | check the name or path; `part_get` lists files |
+| `name_taken` | 409 | 5 | retry with one of `details.suggestions` |
+| `if_match_failed`, `file_exists` | 409 | 5 | re-read with `part_get` and use the current hash (or `rev`) |
+| `request_id_reused` | 409 | 5 | use a new `request_id` for a new change |
+| `anchor_not_found`, `anchor_ambiguous` | 422 | 5 | Rule 2 |
+| `base_unknown`, `invalid_against_base` | 422 | 5 | drop `base_version`, or re-read and rebuild the edits |
+| `quota_exceeded`, `rate_limited` | 429 | 6 | wait `details.retry_after` seconds; stop looping |
+| `too_large` | 413 | 2 | split the change; `details.limit` |
+| `storage_full` | 507 | 7 | stop and tell the person |
+| `renderer_unavailable` | 503 | 7 | carry on unchecked, and say so |
+| `internal` | 500 | 7 | retry once with the same `request_id`; report `details.request_id` |
 
 ## A worked session
 

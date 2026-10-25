@@ -1,0 +1,118 @@
+{
+  "source": "docs/agent-contract.md: packing-list, part_data and part_link_for examples; neutral names and deterministic anchors substituted",
+  "steps": [
+    {
+      "id": "create",
+      "op": "part_create",
+      "input": {
+        "title": "Packing list",
+        "name": "$name",
+        "kind": "markdown",
+        "content": "- passports\n- tickets\n",
+        "request_id": "$rid"
+      }
+    },
+    {
+      "id": "get",
+      "op": "part_get",
+      "input": {
+        "name": "$name"
+      }
+    },
+    {
+      "id": "edit-first",
+      "op": "part_edit",
+      "input": {
+        "name": "$name",
+        "base_version": 1,
+        "edits": [
+          {
+            "op": "replace",
+            "old_str": "- passports\n",
+            "new_str": "- passports\n- chargers\n"
+          }
+        ],
+        "request_id": "$rid",
+        "wait": false
+      }
+    },
+    {
+      "id": "stale-rebase",
+      "op": "part_edit",
+      "input": {
+        "name": "$name",
+        "base_version": 1,
+        "edits": [
+          {
+            "op": "replace",
+            "old_str": "- tickets\n",
+            "new_str": "- tickets\n- snacks\n"
+          }
+        ],
+        "request_id": "$rid",
+        "wait": false
+      }
+    },
+    {
+      "id": "conflicting-anchor",
+      "op": "part_edit",
+      "input": {
+        "name": "$name",
+        "edits": [
+          {
+            "op": "replace",
+            "old_str": "missing anchor",
+            "new_str": "replacement"
+          }
+        ],
+        "request_id": "$rid",
+        "wait": false
+      },
+      "error": "anchor_not_found"
+    },
+    {
+      "id": "person-link",
+      "op": "part_link_for",
+      "input": {
+        "name": "$name",
+        "action": "contribute"
+      }
+    },
+    {
+      "id": "data-set",
+      "op": "part_data",
+      "input": {
+        "name": "$name",
+        "action": "set",
+        "doc_id": "packed",
+        "data": "true",
+        "if_rev": 0,
+        "request_id": "$rid"
+      }
+    },
+    {
+      "id": "check",
+      "op": "part_check",
+      "input": {
+        "name": "$name"
+      }
+    },
+    {
+      "id": "restore-v1",
+      "op": "part_edit",
+      "input": {
+        "name": "$name",
+        "restore": 1,
+        "request_id": "$rid",
+        "wait": false
+      }
+    },
+    {
+      "id": "get-restored",
+      "op": "part_get",
+      "input": {
+        "name": "$name"
+      }
+    }
+  ]
+}

@@ -158,7 +158,7 @@ fn write_config(path: &Path, value: &Value) -> Result<()> {
     }
     result
 }
-fn validated_url(value: &str) -> Result<String> {
+pub(super) fn validated_url(value: &str) -> Result<String> {
     let url =
         reqwest::Url::parse(value).map_err(|_| error("invalid_input", "Invalid server URL."))?;
     if (url.scheme() != "https"

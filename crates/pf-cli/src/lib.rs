@@ -2,6 +2,7 @@
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, ffi::OsString, io::Read, path::Path};
 mod login;
+mod skill;
 pub const EXIT_NOT_IMPLEMENTED: i32 = 64;
 type Result<T> = std::result::Result<T, CliError>;
 #[derive(Debug)]
@@ -283,6 +284,9 @@ fn execute(args: &[String]) -> Result<Value> {
             return help(Some("login"));
         }
         return login::run(&args[1..]);
+    }
+    if op == "skill" {
+        return skill::run(&args[1..]);
     }
     let mut input = json!({});
     let mut positionals = Vec::new();

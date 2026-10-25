@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 pf-model = { path = "../pf-model" }
+pf-obs = { path = "../pf-obs" }
 serde.workspace = true
 serde_json.workspace = true
 schemars = "1"

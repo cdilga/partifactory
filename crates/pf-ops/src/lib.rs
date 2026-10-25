@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, future::Future, pin::Pin, sync::Arc};
 pub mod catalogue;
+pub mod guide;
 pub mod json;
 
 #[derive(Clone, Debug)]
@@ -46,6 +47,21 @@ impl Registry {
         self
     }
     pub async fn run(&self, ctx: &Ctx, name: &str, input: Value) -> Result<Value, PfError> {
+        let op = definitions()
+            .into_iter()
+            .find(|d| d.name == name)
+            .map(|d| d.name)
+            .unwrap_or("unknown");
+        let result = self.run_inner(ctx, name, input).await;
+        let outcome = result
+            .as_ref()
+            .err()
+            .map(|error| error.code)
+            .unwrap_or("ok");
+        tracing::info!(event="op",op,surface=ctx.caller.via,principal=%ctx.caller.principal.key(),outcome,request_id=pf_obs::request_id::current().unwrap_or_else(||"unavailable".into()),"operation complete");
+        result
+    }
+    async fn run_inner(&self, ctx: &Ctx, name: &str, input: Value) -> Result<Value, PfError> {
         let def = definitions()
             .into_iter()
             .find(|d| d.name == name)
@@ -179,7 +195,6 @@ impl Registry {
                 out["check"] = json!({"passed":false,"skipped":true});
             }
         }
-        tracing::info!(event="op",op=def.name,surface=ctx.caller.via,principal=%ctx.caller.principal.key(),outcome="ok","operation complete");
         Ok(out)
     }
     async fn wait_build(
@@ -275,12 +290,31 @@ pub trait Op {
         })
     }
 }
+/// Adapter-neutral approval hints, kept alongside the operation catalogue.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct ToolHints {
+    pub read_only: bool,
+    pub destructive: bool,
+    pub idempotent: bool,
+    pub open_world: bool,
+}
+impl ToolHints {
+    fn for_op(name: &str) -> Self {
+        Self {
+            read_only: matches!(name, "part_get" | "part_check" | "part_link_for"),
+            destructive: matches!(name, "part_edit" | "part_data"),
+            idempotent: true,
+            open_world: false,
+        }
+    }
+}
 #[derive(Clone, Debug, Serialize)]
 pub struct Definition {
     pub name: &'static str,
     pub scope: &'static str,
     pub description: &'static str,
     pub hints: &'static str,
+    pub tool_hints: ToolHints,
     pub input: Value,
     pub examples: Vec<Value>,
 }
@@ -288,7 +322,7 @@ macro_rules! operations {
     ($($ty:ident,$name:literal,$scope:literal,$input:ty,$desc:literal,$hint:literal,$example:expr);+ $(;)?)=>{
         $(pub struct $ty;
         impl Op for $ty {const NAME:&'static str=$name;const SCOPE:&'static str=$scope;const HINTS:&'static str=$hint;type Input=$input;type Output=Value;fn examples()->Vec<Value>{vec![$example]}})+
-        pub fn definitions()->Vec<Definition>{vec![$(Definition{name:$name,scope:$scope,description:$desc,hints:$hint,input:input_schema::<$input>($name),examples:$ty::examples() }),+]}
+        pub fn definitions()->Vec<Definition>{vec![$(Definition{name:$name,scope:$scope,description:$desc,hints:$hint,tool_hints:ToolHints::for_op($name),input:input_schema::<$input>($name),examples:$ty::examples() }),+]}
     }
 }
 fn input_schema<T: schemars::JsonSchema>(name: &str) -> Value {
