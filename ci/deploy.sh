@@ -52,17 +52,24 @@ assert subprocess.run(['git','diff','--quiet',release['commit'],'HEAD','--','cra
 pathlib.Path(sys.argv[2]).write_text(json.dumps({**release,'gate_commit':subprocess.check_output(['git','rev-parse','HEAD']).decode().strip(),'fresh_source_daemon':sys.argv[3]=='1'},indent=2)+'\n')
 PY
 if [ "${PF_E2E_SKIP_BUILD:-0}" != 1 ]; then cargo build -j2 -p partifactory --features "$PF_FEATURES"; fi
-registry="$(docker run -d --rm --name "pf-deploy-registry-$PF_E2E_RUN" --label pf.harness=1 --memory=256m \
+registry="$(docker create --name "pf-deploy-registry-$PF_E2E_RUN" --label pf.harness=1 --memory=256m \
   --tmpfs /var/lib/registry:rw,nosuid,nodev,size=128m -p 127.0.0.1:25000:5000 \
   registry:3.0.0@sha256:6c5666b861f3505b116bb9aa9b25175e71210414bd010d92035ff64018f9457e 2>> "$private")"
+docker start "$registry" >> "$private" 2>&1
 for attempt in $(seq 1 30); do
   if curl -fsS http://127.0.0.1:25000/v2/ >/dev/null 2>&1; then break; fi
   sleep 1
 done
+expected_image="$(python3 - "$PF_RELEASE_ASSETS/RELEASE.json" <<'PY'
+import json,pathlib,sys
+print('127.0.0.1:25000/partifactory@'+json.loads(pathlib.Path(sys.argv[1]).read_text())['image'].rsplit('@',1)[1])
+PY
+)"
+if ! docker image inspect "$expected_image" >/dev/null 2>&1; then own_images+=("$expected_image"); fi
 python3 scripts/load-release.py --assets "$PF_RELEASE_ASSETS" --registry http://127.0.0.1:25000 \
   --repository partifactory --tag gate --pull --output "$PF_RUN_DIR/release-image" >> "$private" 2>&1
 export PF_HARNESS_IMAGE="$(cat "$PF_RUN_DIR/release-image")"
-own_images+=("$PF_HARNESS_IMAGE")
+[ "$PF_HARNESS_IMAGE" = "$expected_image" ] || { echo 'release image reference changed' >&2; exit 1; }
 tests/deploy/image_checks.sh "$PF_HARNESS_IMAGE" | tee "$logs/public/image-checks.txt"
 (cd tests/e2e && npm ci --no-audit --no-fund --silent)
 "$h/build-browsers.sh" >> "$private" 2>&1
@@ -141,12 +148,13 @@ if docker volume inspect "$volume_name" >/dev/null 2>&1; then echo 'drill volume
 docker volume create --label pf.harness=1 --driver local --opt type=tmpfs --opt device=tmpfs \
   --opt o=size=2g,mode=700 "$volume_name" >> "$private" 2>&1
 daemon_volume="$volume_name"
-daemon="$(docker run -d --name "pf-drill-daemon-$PF_E2E_RUN" --label pf.harness=1 --privileged \
+daemon="$(docker create --name "pf-drill-daemon-$PF_E2E_RUN" --label pf.harness=1 --privileged \
   --cpus=2 --memory=2g --memory-swap=2g --pids-limit=512 \
   --network pf-harness_ingress --mount "type=volume,src=$daemon_volume,dst=/var/lib/docker" \
   -e DOCKER_TLS_CERTDIR= -p 127.0.0.1:23751:2375 -p 127.0.0.1:19443:19443 \
   docker:28.5.2-dind@sha256:2a232a42256f70d78e3cc5d2b5d6b3276710a0de0596c145f627ecfae90282ac \
   --storage-driver=vfs 2>> "$private")"
+docker start "$daemon" >> "$private" 2>&1
 for attempt in $(seq 1 60); do
   if docker --host tcp://127.0.0.1:23751 info >/dev/null 2>&1; then break; fi
   sleep 1
