@@ -123,7 +123,7 @@ async fn gallery(
             let age=now.div_euclid(86_400_000)-p.updated.div_euclid(86_400_000);let section=if age==0{"TODAY"}else if age==1{"YESTERDAY"}else if age<7{"THIS WEEK"}else{"EARLIER"};
             if day!=section {if !day.is_empty(){body.push_str("</div>");}body.push_str(&format!("<h2 class=\"section-head\">{section}</h2><div class=\"parts\">"));day=section.into();}
             let url=format!("https://{}/",s.config().hosts.part_host(&p.name));
-            let thumb=if p.thumb {format!("<img alt=\"\" loading=\"lazy\" src=\"/api/v1/thumbs/{}?v={}\">",escape(&p.name),p.live.unwrap_or(0))}else{format!("<div class=\"draft\">{MARK}<span>{}</span></div>",if p.live.is_none(){"being made…"}else{"open to explore"})};
+            let thumb=if p.thumb {format!("<img alt=\"\" loading=\"lazy\" src=\"/api/v1/thumbs/{}?v={}\">",escape(&p.name),p.live.unwrap_or(0))}else{format!("<div class=\"draft\">{MARK}<span>{}</span></div>","being made…")};
             let audience=if p.public {"<span class=\"public\">◉ Public link</span>"}else if p.owner==actor.user_id {"<span>◉ Only me</span>"}else{"<span>◉ Shared with you</span>"};
             let scratch=if p.expires.is_some(){"<span class=\"scratch\">Scratch</span>"}else{""};
             body.push_str(&format!("<a class=\"part\" href=\"{url}\" aria-label=\"Open {}\"><div class=\"thumb\">{thumb}</div>{scratch}<div class=\"part-label\"><span class=\"tag\">{} · {}</span><h2>{}</h2><div class=\"part-name\">{}</div></div><div class=\"part-foot\">{audience}<span class=\"revision\">REV {}</span></div></a>",escape(&p.title),escape(p.id.get(p.id.len().saturating_sub(6)..).unwrap_or(&p.id)),escape(&p.kind.to_uppercase()),escape(&p.title),escape(&p.name),p.live.unwrap_or(0)));
@@ -138,6 +138,83 @@ async fn gallery(
     result.unwrap_or_else(fail)
 }
 
+fn edit_distance(a: &str, b: &str) -> usize {
+    let mut prior: Vec<usize> = (0..=b.chars().count()).collect();
+    for (i, x) in a.chars().enumerate() {
+        let mut row = vec![i + 1];
+        for (j, y) in b.chars().enumerate() {
+            row.push(
+                (row[j] + 1)
+                    .min(prior[j + 1] + 1)
+                    .min(prior[j] + usize::from(x != y)),
+            );
+        }
+        prior = row;
+    }
+    *prior.last().unwrap_or(&0)
+}
+async fn not_found(State(s): State<AppState>, headers: HeaderMap, uri: http::Uri) -> Response {
+    let wanted = uri
+        .path()
+        .trim_matches('/')
+        .chars()
+        .take(128)
+        .collect::<String>();
+    let suggestions = async {
+        let actor = auth(&s)?.require_session(&headers).await?;
+        let svc = parts(&s)?;
+        let policy = svc.policy.clone();
+        let principal = actor.principal();
+        let now = svc.now();
+        svc.db
+            .read(move |db| {
+                let mut statement =
+                    db.prepare("SELECT id,name FROM parts WHERE deleted_at IS NULL")?;
+                let rows = statement
+                    .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                let mut near = Vec::new();
+                for (id, name) in rows {
+                    let distance = edit_distance(&wanted, &name);
+                    if distance <= 3 && policy.role(db, &principal, &id, now)?.is_some() {
+                        near.push((distance, name));
+                    }
+                }
+                near.sort();
+                near.truncate(3);
+                Ok::<_, PfError>(near)
+            })
+            .await
+    }
+    .await
+    .unwrap_or_default();
+    let mut body = format!(
+        "<main class=\"welcome\"><a class=\"brand\" href=\"/\">{MARK}partifactory</a><h1>404 · NOT FOUND</h1><p>Nothing here.</p>"
+    );
+    if !suggestions.is_empty() {
+        body.push_str("<p>Did you mean:</p><ul>");
+        for (_, name) in suggestions {
+            body.push_str(&format!(
+                "<li><a href=\"https://{}/\">{}</a></li>",
+                s.config().hosts.part_host(&name),
+                escape(&name)
+            ));
+        }
+        body.push_str("</ul>");
+    }
+    body.push_str(&format!(
+        "<p class=\"muted mono\">Request id: <code id=\"request-id\">{}</code></p></main>",
+        escape(&pf_obs::request_id::current().unwrap_or_default())
+    ));
+    let mut response = page(
+        "404 · Not found",
+        &body,
+        &format!("https://{}", s.config().hosts.workspace_host()),
+    );
+    *response.status_mut() = StatusCode::NOT_FOUND;
+    response
+}
+
 async fn summary(
     State(s): State<AppState>,
     Path(name): Path<String>,
@@ -146,7 +223,8 @@ async fn summary(
     let result=async {
         let actor=auth(&s)?.require_session(&headers).await?;
         let svc=parts(&s)?;
-        let data=svc.get(&actor.principal(),pf_model::GetRequest{name:name.clone(),..Default::default()}).await?;
+        let ctx=pf_ops::Ctx{caller:pf_model::create::Caller{principal:actor.principal(),via:"chrome"},scopes:["parts:read".to_owned()].into(),spaces:None};
+        let data=pf_ops::Registry::new(svc.clone()).run(&ctx,"part_get",json!({"name":name})).await?;
         let principal=actor.principal();let policy=svc.policy.clone();let now=pf_db::ids::now_ms();
         let (role,unsandboxed,audience)=svc.db.read(move|db| {let row=pf_model::read::find_part(db,&name)?.ok_or_else(||PfError::not_found("part"))?;let role=policy.role(db,&principal,&row.id,now)?.ok_or_else(||PfError::not_found("part"))?;let isolated:String=db.query_row("SELECT isolation FROM parts WHERE id=?1",[&row.id],|r|r.get(0))?;let public:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM public_links WHERE part_id=?1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?2))",pf_db::rusqlite::params![row.id,now],|r|r.get(0))?;let audience=if public{"public"}else if row.owner_user_id==principal.user_id{"private"}else{"shared"};Ok::<_,PfError>((role,isolated=="unsandboxed",audience))}).await?;
         let mut out=serde_json::Map::new();for key in ["id","name","title","description","kind","head","live","url","space","build"] {if let Some(v)=data.get(key){out.insert(key.into(),v.clone());}}
@@ -369,7 +447,8 @@ pub fn install(b: &mut ServerBuilder) {
             .route("/_pf/pf_ui_shell_bg.wasm", get(hydration_wasm))
             .route("/_pf/icon.svg", get(icon))
             .route("/_pf/plex-mono.woff2", get(font))
-            .route("/licenses/fonts", get(license)),
+            .route("/licenses/fonts", get(license))
+            .route("/{*path}", get(not_found)),
     );
     b.workspace(
         Router::new()

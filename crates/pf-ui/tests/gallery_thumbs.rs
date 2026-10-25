@@ -134,4 +134,20 @@ async fn gallery_policy_and_live_render_thumbnails_are_session_checked() {
     .unwrap();
     assert!(!html.contains("Private paint"));
     assert!(html.contains("Connect an agent"));
+    for (token, visible) in [(&owner.token, true), (&member.token, false)] {
+        let response = get(&app, "/private-paintt", Some(token)).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let html = String::from_utf8(
+            to_bytes(response.into_body(), 65536)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        assert_eq!(
+            html.contains("https://private-paint-part.pf.test/"),
+            visible
+        );
+        assert!(html.contains("request-id"));
+    }
 }
