@@ -28,8 +28,38 @@ trap 'exit 130' INT TERM
 if [ "${PF_E2E_SKIP_BUILD:-0}" != 1 ]; then
   cargo build -p partifactory -p pf-mcp --features "$PF_FEATURES" --bins --examples
 fi
+release_assets="${PF_RELEASE_ASSETS:-}"
 if [ -z "${PF_HARNESS_IMAGE:-}" ]; then
-  scripts/release.sh --dry-run --tag "gate-$(git rev-parse --short HEAD)"
+  release_assets="${PF_RELEASE_ASSETS:-$repo/target/release-assets}"
+  if [ -z "${PF_RELEASE_ASSETS:-}" ]; then
+    scripts/release.sh --dry-run --tag "gate-$(git rev-parse --short HEAD)"
+  fi
+fi
+if [ -n "$release_assets" ]; then
+  # The CI producer and these gates share one artifact set. Local callers may
+  # also verify an older ancestor whose release-compiled sources are unchanged.
+  python3 - "$release_assets" "$logs/release.json" "${PF_HARNESS_IMAGE:-}" <<'PY'
+import hashlib,json,pathlib,re,subprocess,sys
+assets=pathlib.Path(sys.argv[1]); release=json.loads((assets/'RELEASE.json').read_text())
+names=set()
+for line in (assets/'SHA256SUMS').read_text().splitlines():
+    digest,name=line.split('  ',1)
+    assert pathlib.Path(name).name==name and name not in names and re.fullmatch(r'[a-f0-9]{64}',digest)
+    names.add(name)
+    assert hashlib.file_digest((assets/name).open('rb'),'sha256').hexdigest()==digest
+assert {'RELEASE.json','digest.txt','part-linux-amd64.tar.gz','partifactory-linux-amd64.oci.tar'}<=names, 'release assets incomplete'
+assert (assets/'digest.txt').read_text().strip()==release['image']
+assert re.fullmatch(r'sha256:[a-f0-9]{64}',release['image'].rsplit('@',1)[-1]), 'invalid release image digest'
+if sys.argv[3]:
+    assert '@sha256:' in sys.argv[3] and sys.argv[3].rsplit('@',1)[1]==release['image'].rsplit('@',1)[1], 'preloaded image differs from packaged assets'
+assert re.fullmatch(r'[a-f0-9]{40,64}',release['commit']), 'invalid release source revision'
+assert subprocess.run(['git','merge-base','--is-ancestor',release['commit'],'HEAD']).returncode==0
+# Keep the same compiled-source guard as the deployment lane, including main.rs.
+assert subprocess.run(['git','diff','--quiet',release['commit'],'HEAD','--','crates','Cargo.toml','Cargo.lock','Dockerfile','ui','vendor','docs/agent-contract.md','rust-toolchain.toml',':!crates/partifactory/src/dev.rs']).returncode==0,'release runtime source differs'
+pathlib.Path(sys.argv[2]).write_text(json.dumps({**release,'gate_commit':subprocess.check_output(['git','rev-parse','HEAD']).decode().strip(),'runtime_source_equal':True},indent=2)+'\n')
+PY
+fi
+if [ -z "${PF_HARNESS_IMAGE:-}" ]; then
   registry="pf-security-registry-$(date +%s)"
   docker run -d --rm --name "$registry" --label pf.harness=1 \
     --tmpfs /var/lib/registry:rw,nosuid,nodev,size=128m \
@@ -38,7 +68,7 @@ if [ -z "${PF_HARNESS_IMAGE:-}" ]; then
     if curl -fsS http://127.0.0.1:25000/v2/ >/dev/null 2>&1; then break; fi
     sleep 1
   done
-  python3 scripts/load-release.py --assets target/release-assets \
+  python3 scripts/load-release.py --assets "$release_assets" \
     --registry http://127.0.0.1:25000 --repository partifactory \
     --tag "gate-$(git rev-parse --short HEAD)" --pull --output "$PF_RUN_DIR/release-image"
   export PF_HARNESS_IMAGE="$(cat "$PF_RUN_DIR/release-image")"

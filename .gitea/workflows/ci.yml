@@ -202,10 +202,48 @@ jobs:
           if [ -f /tmp/pf-ci-docker.pid ]; then kill "$(cat /tmp/pf-ci-docker.pid)" || true; fi
           PF_CLEAN_NO_DOCKER=1 scripts/clean-build.sh --apply || true
 
+  release-assets:
+    # A cold native image build fits the runner's one-hour task cap on its own.
+    # Security/device verification consumes these exact bytes in a separate task.
+    if: github.event_name != 'schedule' && (github.event_name != 'workflow_dispatch' || inputs.job == '')
+    runs-on: [rust, rust-truenas]
+    container:
+      image: catthehacker/ubuntu:act-22.04@sha256:3cdab37904fc1798c460f1fadd47fd2c4d24fa2f292d1b57fc12eff072b415ec
+      options: --cap-add=SYS_ADMIN --cap-add=NET_ADMIN --cap-add=SYS_RESOURCE --cap-add=SYS_PTRACE --security-opt=seccomp=unconfined --security-opt=apparmor=unconfined --memory=16g --memory-swap=16g
+    env:
+      DOCKER_HOST: unix:///var/run/pf-ci-docker.sock
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Python packaging runtime
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+      - name: cold native image and CLI
+        run: |
+          bash ci/docker-daemon.sh
+          scripts/release.sh --dry-run --tag "gate-$(git rev-parse --short HEAD)"
+      - name: exact checksummed release assets
+        uses: actions/upload-artifact@v3
+        with:
+          name: shipping-release-assets
+          path: |
+            target/release-assets/RELEASE.json
+            target/release-assets/digest.txt
+            target/release-assets/SHA256SUMS
+            target/release-assets/part-linux-amd64.tar.gz
+            target/release-assets/partifactory-linux-amd64.oci.tar
+          if-no-files-found: error
+      - name: clean
+        if: always()
+        run: |
+          if [ -f /tmp/pf-ci-docker.pid ]; then kill "$(cat /tmp/pf-ci-docker.pid)" || true; fi
+          PF_CLEAN_NO_DOCKER=1 scripts/clean-build.sh --apply || true
+
   shipping-gates:
     # Each matrix job owns a daemon and a fresh harness. Pressure never shares live data
     # with the normal browser/device gates, and cannot satisfy its gate by being skipped.
     if: github.event_name != 'schedule' && (github.event_name != 'workflow_dispatch' || inputs.job == '')
+    needs: [release-assets]
     runs-on: [browser, rust-truenas]
     strategy:
       fail-fast: false
@@ -219,6 +257,12 @@ jobs:
       DOCKER_HOST: unix:///var/run/pf-ci-docker.sock
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: exact producer assets for security verification
+        if: matrix.script == 'security-release'
+        uses: actions/download-artifact@v3
+        with:
+          name: shipping-release-assets
+          path: target/release-assets
       - name: Python harness runtime
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
@@ -246,6 +290,9 @@ jobs:
       - name: run
         run: |
           bash ci/docker-daemon.sh
+          if [ '${{ matrix.script }}' = security-release ]; then
+            export PF_RELEASE_ASSETS="$PWD/target/release-assets"
+          fi
           ci/${{ matrix.script }}.sh
       - name: execution evidence
         if: always()
@@ -254,6 +301,7 @@ jobs:
           name: ${{ matrix.script }}-test-evidence
           path: |
             target/e2e-logs/release-*/results*.json
+            target/e2e-logs/release-*/release.json
             target/e2e-logs/release-*/device-reports/
             target/e2e-logs/release-*/security/report.json
             target/e2e-logs/release-*/proxy-runtime-log-gate.json
@@ -264,18 +312,6 @@ jobs:
             target/e2e-logs/pressure-*/stores.txt
             target/e2e-logs/pressure-*/tests/**/*.png
             target/e2e-logs/pressure-*/tests/**/metrics-*.txt
-      - name: exact release assets for downstream deployment gate
-        if: always() && matrix.script == 'security-release'
-        uses: actions/upload-artifact@v3
-        with:
-          name: shipping-release-assets
-          path: |
-            target/release-assets/RELEASE.json
-            target/release-assets/digest.txt
-            target/release-assets/SHA256SUMS
-            target/release-assets/part-linux-amd64.tar.gz
-            target/release-assets/partifactory-linux-amd64.oci.tar
-          if-no-files-found: error
       - name: clean
         if: always()
         run: |
