@@ -15,6 +15,29 @@ pub(crate) fn error(e: pf_model::PfError) -> Response {
         .into_response()
 }
 
+/// Recover only an otherwise valid public claim whose authority has been revoked.
+/// This never authorizes an operation; the runtime uses it to explain a refusal.
+pub(crate) fn stale_public_claims(s: &PartHost, req: &Request) -> Option<Claims> {
+    let name = req.extensions().get::<pf_serve::PartHost>()?.0.as_str();
+    let cap = req.uri().path().strip_prefix("/c/")?.split('/').next()?;
+    let rejected = pf_caps::verify(&s.deps().keys, &s.deps().epochs, cap, name, s.now());
+    if !matches!(
+        rejected,
+        Err(CapError::StalePartEpoch | CapError::StaleMinterEpoch | CapError::StaleBoot)
+    ) {
+        return None;
+    }
+    pf_caps::verify(
+        &s.deps().keys,
+        &pf_caps::EpochStore::default(),
+        cap,
+        name,
+        s.now(),
+    )
+    .ok()
+    .filter(|c| c.s.starts_with("link:"))
+}
+
 pub(crate) fn authorize(s: &PartHost, req: &Request) -> Result<(String, Claims), Box<Response>> {
     let name = req
         .extensions()

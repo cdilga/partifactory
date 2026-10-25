@@ -38,7 +38,36 @@ pub async fn handle(s: PartHost, req: Request) -> Response {
     }
     let (_, c) = match content::authorize(&s, &req) {
         Ok(v) => v,
-        Err(r) => return *r,
+        Err(r) => {
+            let Some(c) = content::stale_public_claims(&s, &req) else {
+                return *r;
+            };
+            // A signed stale claim only explains a denial. It never reaches a storage
+            // operation or renews authority, and foreign origins still receive no data.
+            if !origin_allowed(&s, &req, &c, true) {
+                return http::StatusCode::FORBIDDEN.into_response();
+            }
+            let body = match axum::body::to_bytes(req.into_body(), 1 << 20).await {
+                Ok(body) => body,
+                Err(_) => {
+                    return content::error(PfError::new("too_large", "runtime request too large"));
+                }
+            };
+            let input: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+            let name = input.get("op").and_then(Value::as_str).unwrap_or("");
+            // Never put arbitrary request strings (which may be secrets) in logs.
+            let known = s
+                .inner
+                .ops
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains_key(name);
+            tracing::info!(event="rt.op",op=if known { name } else { "unknown" },principal=%c.s,outcome="forbidden_view_only");
+            return content::error(PfError::new(
+                "forbidden_view_only",
+                "this guest capability is no longer valid; reopen the link",
+            ));
+        }
     };
     // Reject foreign origins before a DB query or body read, even for an unsandboxed part.
     let origin = req

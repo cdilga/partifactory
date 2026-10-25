@@ -155,6 +155,98 @@ async fn public_get_is_content_free_ua_identical_and_counted_only_on_go() {
 }
 
 #[tokio::test]
+async fn frozen_guest_runtime_refuses_with_structured_error_without_reauth() {
+    let (_db, host, router) = fixture().await;
+    let (link, url) = host
+        .links()
+        .create(
+            "u_admin",
+            Create {
+                name: "pixel".into(),
+                mode: "contribute".into(),
+                expires_days: None,
+            },
+            host.now(),
+        )
+        .await
+        .unwrap();
+    let go = req(
+        &router,
+        &format!("/l/{}/go", url.rsplit('/').next().unwrap()),
+        "POST",
+        "Mozilla",
+    )
+    .await;
+    let go: serde_json::Value =
+        serde_json::from_slice(&to_bytes(go.into_body(), 65536).await.unwrap()).unwrap();
+    let cap = go["cap"].as_str().unwrap();
+    host.links()
+        .set_mode("u_admin", &link.id, "view", false, host.now())
+        .await
+        .unwrap();
+    let runtime = |cap: &str, origin: &str| {
+        Request::builder()
+            .uri(format!("/c/{cap}/_rt/v1"))
+            .method("POST")
+            .header("host", "pixel-part.pf.test")
+            .header("origin", origin)
+            .header("sec-fetch-mode", "cors")
+            .header("content-type", "text/plain;charset=UTF-8")
+            .body(Body::from(
+                r#"{"op":"storage.set","args":{"key":"px:1:0","value":"red","shared":true}}"#,
+            ))
+            .unwrap()
+    };
+    let refused = router.clone().oneshot(runtime(cap, "null")).await.unwrap();
+    assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+    assert!(!refused.headers().contains_key("x-pf-reauth"));
+    assert!(!refused.headers().contains_key("location"));
+    let error: serde_json::Value =
+        serde_json::from_slice(&to_bytes(refused.into_body(), 65536).await.unwrap()).unwrap();
+    assert_eq!(error["error"]["code"], "forbidden_view_only");
+    assert_eq!(
+        req(&router, &format!("/c/{cap}/"), "GET", "Mozilla")
+            .await
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    let foreign = router
+        .clone()
+        .oneshot(runtime(cap, "https://foreign.example"))
+        .await
+        .unwrap();
+    assert_eq!(foreign.status(), StatusCode::FORBIDDEN);
+    assert!(
+        to_bytes(foreign.into_body(), 65536)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let mut tampered = cap.as_bytes().to_vec();
+    let mac = cap.rfind('.').unwrap() + 1;
+    tampered[mac] = if tampered[mac] == b'A' { b'B' } else { b'A' };
+    let tampered = String::from_utf8(tampered).unwrap();
+    assert_eq!(
+        router
+            .oneshot(runtime(&tampered, "null"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    let writes: i64 = host
+        .deps()
+        .db
+        .read_blocking(|db| {
+            Ok::<_, pf_db::DbError>(
+                db.query_row("SELECT count(*) FROM data_docs", [], |r| r.get(0))?,
+            )
+        })
+        .unwrap();
+    assert_eq!(writes, 0);
+}
+
+#[tokio::test]
 async fn expired_link_and_cross_origin_go() {
     let (_db, host, router) = fixture().await;
     let (_, url) = host
