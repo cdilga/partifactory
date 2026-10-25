@@ -18,6 +18,7 @@ source "$(dirname "$0")/lib.sh"
 
 h="$repo/tests/e2e/harness"
 export PF_E2E_RENDER="${PF_E2E_RENDER:-1}"
+export PF_SECURITY_DEVICE_FILE=/run/pf/run/security-private/device.json
 export PF_E2E_RUN="run-$(date +%Y%m%d-%H%M%S)"
 logs="$repo/target/e2e-logs/$PF_E2E_RUN"
 mkdir -p "$logs"
@@ -112,6 +113,11 @@ if [ "${PF_E2E_RENDER:-0}" = 1 ]; then
 fi
 
 # 3. Playwright, all four projects.
+# This real client is on another subnet than the browsers. Caddy observes its actual peer;
+# no forwarded-address spoofing or fabricated device age is involved.
+docker compose -f "$h/compose.yaml" --profile security run --rm security-device-client \
+  --base-url https://parts.pf.test --ca-cert /run/pf/run/certs/ca.pem \
+  --connect-to 172.30.79.10:443 --prepare-device-file "$PF_SECURITY_DEVICE_FILE"
 note "--- playwright"
 docker compose -f "$h/compose.yaml" --profile browsers run --rm browsers --grep-invert @origin-down "$@" \
   2>&1 | tee "$logs/playwright.txt"
@@ -127,6 +133,13 @@ python3 "$repo/tests/device/cli-login.py" "$run" --binary "$PF_BIN" --https-port
 note "--- agent surface conformance"
 python3 "$repo/tests/agent_surfaces/harness.py" "$run" --binary "$PF_BIN" \
   --mcp-client "$repo/target/debug/examples/gate_client" 2>&1 | tee "$logs/conformance.txt"
+note "--- external security probes"
+python3 "$repo/tests/security/run.py" --base-url https://parts.pf.test \
+  --ca-cert "$run/certs/ca.pem" --connect-to "127.0.0.1:$PF_HTTPS_PORT" \
+  --fixture "$run/part-fixture.json" --sibling-origin https://pixel-part.pf.test \
+  --logs-url https://parts.pf.test/_dev/logs --database-file "$run/data/partifactory.db" \
+  --playwright-report "$logs/results-main.json" --evidence-dir "$logs/security" \
+  2>&1 | tee "$logs/security.txt"
 note "--- CLI export/import recovery"
 python3 "$repo/tests/backup/recovery.py" "$run" --binary "$PF_BIN" \
   --https-port "$PF_HTTPS_PORT" 2>&1 | tee "$logs/recovery.txt"

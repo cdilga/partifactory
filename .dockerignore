@@ -1,0 +1,9 @@
+.git
+.beads
+target
+node_modules
+**/node_modules
+**/__pycache__
+.env
+**/.env
+*.log

@@ -1,0 +1,13 @@
+# A real sibling origin allowed by the part CSP. Only the canary path differs from the
+# shipped wildcard route; every real blob continues to use the production content listener.
+blobs-part.{$PF_APEX:pf.test} {
+    import pf_proxy
+    handle /__sec_canary {
+        reverse_proxy security-canary:8080
+    }
+    handle {
+        reverse_proxy {$PF_UPSTREAM_CONTENT:partifactory:8081} {
+            import pf_upstream_opts
+        }
+    }
+}

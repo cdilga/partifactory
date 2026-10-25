@@ -147,6 +147,33 @@ async fn report(
     Extension(RequestId(rid)): Extension<RequestId>,
     Json(mut v): Json<serde_json::Value>,
 ) -> StatusCode {
+    // Device evidence has a finite vocabulary; never turn arbitrary report fields into logs.
+    if v["event"] == "device.check"
+        && let (Some(item), Some(lane), Some(outcome)) = (
+            v["item"].as_str().filter(|s| {
+                matches!(
+                    *s,
+                    "standalone"
+                        | "sign_in"
+                        | "part_root_first_open"
+                        | "part_root_reload"
+                        | "guest_link"
+                        | "passkey_step_up"
+                )
+            }),
+            v["lane"].as_str().filter(|s| {
+                matches!(
+                    *s,
+                    "chromium-mobile" | "webkit-mobile" | "firefox-desktop" | "ios-simulator"
+                )
+            }),
+            v["outcome"]
+                .as_str()
+                .filter(|s| matches!(*s, "pass" | "fail" | "not_assertable")),
+        )
+    {
+        tracing::info!(event = "device.check", item, lane, outcome);
+    }
     tracing::info!(
         event = "harness.report",
         outcome = "ok",

@@ -18,6 +18,11 @@ x-labels: &labels
   pf.harness: "1"
 
 networks:
+  security-device:
+    labels: *labels
+    ipam:
+      config:
+        - subnet: 172.30.79.0/24
   render:
     internal: true
     labels: *labels
@@ -35,6 +40,37 @@ volumes:
     labels: *labels
 
 services:
+  security-device-client:
+    profiles: [security]
+    image: pf-harness-browsers:1.64.1
+    labels: *labels
+    restart: "no"
+    entrypoint: ["python3", "/opt/pf-security/run.py"]
+    volumes:
+      - ../../security:/opt/pf-security:ro
+      - ${PF_RUN_DIR:?}:/run/pf/run
+    networks:
+      security-device:
+        ipv4_address: 172.30.79.40
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  security-canary:
+    image: pf-harness-browsers:1.64.1
+    labels: *labels
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    entrypoint: ["python3", "/opt/pf-security/canary.py"]
+    volumes:
+      - ../../security/canary.py:/opt/pf-security/canary.py:ro
+    networks: [harness]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
   partifactory-render:
     profiles: ["render"]
     image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
@@ -67,6 +103,7 @@ services:
     image: caddy:2.11.4-alpine
     labels: *labels
     restart: "no"
+    depends_on: [security-canary]
     ports:
       - "127.0.0.1:${PF_HTTPS_PORT:-18443}:443"
     environment:
@@ -87,6 +124,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
+      security-device:
+        ipv4_address: 172.30.79.10
       harness:
         ipv4_address: 172.30.77.10
         aliases: [dex.pf.test, dex2.pf.test, parts.pf.test]
@@ -131,6 +170,7 @@ services:
       PF_FIREFOX_PROFILE: /tmp/pf-firefox-profile
       PF_ORIGIN_DOWN: ${PF_ORIGIN_DOWN:-}
       PF_E2E_RENDER: ${PF_E2E_RENDER:-0}
+      PF_SECURITY_DEVICE_FILE: ${PF_SECURITY_DEVICE_FILE:-}
       HOST_UID: ${HOST_UID:-}
       HOST_GID: ${HOST_GID:-}
     volumes:

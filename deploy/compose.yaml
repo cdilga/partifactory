@@ -1,0 +1,106 @@
+# Set PF_IMAGE to the release's registry reference including @sha256:….
+# The optional proxy terminates TLS. The application listeners have no public ports.
+name: partifactory
+
+x-logging: &logging
+  driver: json-file
+  options: {max-size: "10m", max-file: "3"}
+
+services:
+  partifactory:
+    image: ${PF_IMAGE:?Set PF_IMAGE to a release image by digest}
+    platform: linux/amd64
+    restart: unless-stopped
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 256
+    mem_limit: 3g
+    tmpfs: ["/tmp:rw,nosuid,nodev,size=64m,mode=1777"]
+    environment:
+      PF_SITE_TOML: /data/site.toml
+      PF_DATA_DIR: /data
+      PF_DOMAIN_APEX: ${PF_DOMAIN_APEX:?Set PF_DOMAIN_APEX}
+      PF_SESSION_KEY_FILE: /run/secrets/session_key
+      PF_CAP_HMAC_KEY_FILE: /run/secrets/cap_hmac_key
+      PF_METRICS_TOKEN_FILE: /run/secrets/metrics_token
+      PF_IDP_CLIENT_SECRET_FILE: /run/secrets/idp_client_secret
+      PF_RENDER_ENABLED: ${PF_RENDER_ENABLED:-false}
+      PF_RENDER_PUBLIC_DIR: /run/pf-render
+      PF_LISTEN_RENDER: 0.0.0.0:8443
+      PF_RENDER_CDP: http://partifactory-render:9222
+      PF_RENDER_CONTROL: http://partifactory-render:9223
+    secrets: [session_key, cap_hmac_key, metrics_token, idp_client_secret]
+    volumes:
+      - data:/data
+      - ${PF_SITE_CONFIG:?Set PF_SITE_CONFIG to the offline site.toml}:/data/site.toml:ro
+      - render-public:/run/pf-render
+    ports: ["127.0.0.1:${PF_OPS_PORT:-9090}:9090"]
+    networks: [ingress, render]
+    logging: *logging
+
+  partifactory-render:
+    profiles: [render]
+    image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
+    platform: linux/amd64
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 768m
+    pids_limit: 256
+    cpus: 1
+    tmpfs: ["/tmp:rw,nosuid,nodev,size=256m,mode=1777"]
+    environment:
+      HOME: /tmp
+      PF_RENDER_APEX: ${PF_DOMAIN_APEX:?Set PF_DOMAIN_APEX}
+      PF_RENDER_GATEWAY: partifactory:8443
+    command: [python3, /opt/pf-render/controller.py]
+    volumes:
+      - ./render/controller.py:/opt/pf-render/controller.py:ro
+      - render-public:/run/pf-render:ro
+    networks: [render]
+    logging: *logging
+
+  proxy:
+    profiles: [proxy]
+    image: caddy:2.11.4-alpine@sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: [/data, /config]
+    environment:
+      PF_APEX: ${PF_DOMAIN_APEX:?Set PF_DOMAIN_APEX}
+      PF_WORKSPACE_LABEL: ${PF_DOMAIN_WORKSPACE_HOST:-parts}
+      PF_UPSTREAM_WORKSPACE: ${PF_UPSTREAM_WORKSPACE:-partifactory:8080}
+      PF_UPSTREAM_CONTENT: ${PF_UPSTREAM_CONTENT:-partifactory:8081}
+    volumes:
+      - ./proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./proxy/maintenance.html:/srv/pf-proxy/maintenance.html:ro
+      - ${PF_TLS_CERT:?Set PF_TLS_CERT}:/etc/caddy/certs/cert.pem:ro
+      - ${PF_TLS_KEY:?Set PF_TLS_KEY}:/etc/caddy/certs/key.pem:ro
+    ports:
+      - "${PF_HTTPS_BIND:-127.0.0.1}:${PF_HTTPS_PORT:-8443}:443"
+    networks: [ingress]
+    logging: *logging
+
+networks:
+  ingress: {}
+  render:
+    internal: true
+volumes:
+  data: {}
+  render-public: {}
+secrets:
+  session_key:
+    file: ${PF_SESSION_KEY_FILE:?Set PF_SESSION_KEY_FILE}
+  cap_hmac_key:
+    file: ${PF_CAP_HMAC_KEY_FILE:?Set PF_CAP_HMAC_KEY_FILE}
+  metrics_token:
+    file: ${PF_METRICS_TOKEN_FILE:?Set PF_METRICS_TOKEN_FILE}
+  idp_client_secret:
+    file: ${PF_IDP_CLIENT_SECRET_FILE:?Set PF_IDP_CLIENT_SECRET_FILE (empty file if OIDC is disabled)}

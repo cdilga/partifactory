@@ -3,6 +3,8 @@
 .wrangler/
 .env
 .env.*
+!deploy/.env.example
+__pycache__/
 *.token
 *.pem
 *.key
@@ -15,3 +17,6 @@ target/
 .review-prompt.md
 .ntm/
 REVIEW-*.md
+deploy/last-deploy.json
+deploy/last-deploy.lock
+deploy/last-deploy.json.tmp
