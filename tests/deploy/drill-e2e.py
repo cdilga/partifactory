@@ -197,8 +197,12 @@ def observe(args):
     token_path = out / "agent-token"
     token_path.write_text(token)
     token_path.chmod(0o600)
-    status, _, body = client.request(base + "/api/v1/part_create", "POST", {"Authorization": "Bearer " + token, "Content-Type": "application/json"}, json.dumps({"name": "drill-member", "space": space["id"], "title": "Recovered member device", "kind": "html", "files": {"index.html": "<h1>Fresh recovered device</h1>"}, "request_id": "drill-fresh-member"}).encode())
-    require(status == 200, "fresh scoped device cannot create in its genuinely authorized space")
+    # Consent selects space IDs; the part_create contract addresses spaces by slug.
+    require(isinstance(space.get("slug"), str) and space["slug"], "authorized space has no create slug")
+    status, _, body = client.request(base + "/api/v1/part_create", "POST", {"Authorization": "Bearer " + token, "Content-Type": "application/json"}, json.dumps({"name": "drill-member", "space": space["slug"], "title": "Recovered member device", "kind": "html", "files": {"index.html": "<h1>Fresh recovered device</h1>"}, "request_id": "drill-fresh-member"}).encode())
+    if status != 200:
+        private_json(out / "scoped-create-failure.json", {"status": status, "body": body.decode("utf-8", errors="replace")})
+    require(status == 200, f"fresh scoped device create failed with HTTP {status}; inspect private scoped-create-failure.json")
     proxy = command(compose + ["ps", "-q", "proxy"], private).decode().strip()
 
     class Metrics(http.server.BaseHTTPRequestHandler):
