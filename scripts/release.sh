@@ -34,7 +34,7 @@ if [ "$dry" = 0 ]; then outputs+=(--output type=image,push=true); fi
 source scripts/oci-builder.sh
 oci_builder_prepare
 trap oci_builder_prune EXIT
-docker buildx build --builder "$PF_OCI_BUILDER" --platform linux/amd64 --provenance=false --sbom=false \
+docker buildx build --builder "$PF_OCI_BUILDER" "${PF_OCI_BUILD_ARGS[@]}" --platform linux/amd64 --provenance=false --sbom=false \
   --build-arg "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" \
   --label pf.harness=1 --label "org.opencontainers.image.revision=$(git rev-parse HEAD)" \
   --tag "$image:$tag" --metadata-file "$out/build.json" "${outputs[@]}" .
