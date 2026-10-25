@@ -128,7 +128,7 @@ final class SimulatorDeviceTests: XCTestCase {
         XCTAssertTrue(value.contains("ios-wrapper-part.localtest.me"), value)
         XCTAssertFalse(value.contains("#"), value)
         XCTAssertFalse(value.contains("/c/"), value)
-        let cancel = safari.buttons["Cancel"].firstMatch
+        let cancel = safari.buttons.matching(NSPredicate(format: "identifier == 'CancelBarItemButton' OR label == 'Cancel'")).firstMatch
         XCTAssertTrue(cancel.waitForExistence(timeout: 10))
         cancel.tap()
     }
