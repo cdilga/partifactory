@@ -434,3 +434,34 @@ fn scheduled_export_cap_preserves_the_only_complete_backup() {
     assert_eq!(std::fs::read_dir(service.export_dir()).unwrap().count(), 1);
     assert!(service.rotate_exports().unwrap().items == 0);
 }
+
+#[test]
+fn failed_copy_preserves_previous_file_and_reports_degraded_state() {
+    let tmp = tempfile::tempdir().unwrap();
+    let service = fixture(&tmp.path().join("source"));
+    let previous = service.hourly_copy(NOW).unwrap();
+    let bytes = std::fs::read(&previous).unwrap();
+    std::fs::create_dir(
+        tmp.path()
+            .join("source/backup/partifactory-latest.sqlite.tmp"),
+    )
+    .unwrap();
+    assert!(service.hourly_copy(NOW + 3_600_000).is_err());
+    assert_eq!(std::fs::read(&previous).unwrap(), bytes);
+    let db = Connection::open(tmp.path().join("source/partifactory.db")).unwrap();
+    assert_eq!(
+        db.query_row("SELECT value FROM kv WHERE key='backup.copy_at'", [], |r| r
+            .get::<_, String>(0))
+            .unwrap(),
+        NOW.to_string()
+    );
+    assert!(
+        !db.query_row(
+            "SELECT value FROM kv WHERE key='backup.copy_error'",
+            [],
+            |r| r.get::<_, String>(0)
+        )
+        .unwrap()
+        .is_empty()
+    );
+}

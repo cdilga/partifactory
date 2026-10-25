@@ -86,16 +86,18 @@ impl BackupService {
     pub fn hourly_copy(&self, now: i64) -> Result<PathBuf> {
         let _guard = self.copy_lock.lock().unwrap_or_else(|err| err.into_inner());
         let dir = self.data_dir.join("backup");
-        std::fs::create_dir_all(&dir)?;
         let temp = dir.join("partifactory-latest.sqlite.tmp");
         let final_path = dir.join("partifactory-latest.sqlite");
-        if temp.exists() {
-            std::fs::remove_file(&temp)?;
-        }
-        match consistent_copy(self.db.path(), &temp).and_then(|()| {
+        let attempt = (|| {
+            std::fs::create_dir_all(&dir)?;
+            if temp.exists() {
+                std::fs::remove_file(&temp)?;
+            }
+            consistent_copy(self.db.path(), &temp)?;
             std::fs::rename(&temp, &final_path)?;
             sync_dir(&dir)
-        }) {
+        })();
+        match attempt {
             Ok(()) => {
                 self.set("backup.copy_at", now.to_string())?;
                 self.set("backup.copy_error", String::new())?;

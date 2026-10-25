@@ -77,6 +77,16 @@ pub fn install(builder: &mut ServerBuilder, service: BackupService, auth: pf_aut
         async move {
             tokio::task::spawn_blocking(move || {
                 let now = pf_db::ids::now_ms();
+                if backup
+                    .value("backup.copy_error")
+                    .map_err(|e| e.to_string())?
+                    .is_some_and(|error| !error.is_empty())
+                {
+                    return Err(
+                        "The last consistent database copy failed; the previous copy is preserved."
+                            .into(),
+                    );
+                }
                 let copy = backup
                     .value("backup.copy_at")
                     .map_err(|e| e.to_string())?

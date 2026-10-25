@@ -133,10 +133,10 @@ pub(crate) fn same_disk(first: &Path, second: &Path) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        return std::fs::metadata(first)
+        std::fs::metadata(first)
             .ok()
             .zip(std::fs::metadata(second).ok())
-            .is_some_and(|(a, b)| a.dev() == b.dev());
+            .is_some_and(|(a, b)| a.dev() == b.dev())
     }
     #[cfg(not(unix))]
     {
