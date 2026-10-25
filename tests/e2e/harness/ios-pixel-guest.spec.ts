@@ -121,7 +121,10 @@ loadBoard().then(async()=>{window.partifactory.ready();await deviceWait("admin_r
   expect(elapsed,'guest storage.set response to admin computed style').toBeLessThan(1000);
   await expect(board.locator('[data-key="px:0:0"]')).toHaveCSS('background-color','rgb(228, 87, 46)');
   await report('admin_live_under_1s',{at:String(elapsed)});
+  const frozenResponse=page.waitForResponse(response=>response.request().method()==='POST' && new URL(response.url()).pathname.startsWith(`/api/chrome/v1/${name}/links/`));
   await page.getByRole('button',{name:'Freeze',exact:true}).click();
+  expect((await frozenResponse).status()).toBe(200);
+  await expect(page.getByText('Frozen.',{exact:true})).toBeVisible();
   await report('admin_frozen');
   const refused=await wait('guest_refused');
   expect(refused.error).toBe('PfError');

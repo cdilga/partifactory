@@ -23,6 +23,11 @@ cleanup(){
     xcrun xcresulttool export attachments --path "$out/result.xcresult" \
       --output-path "$out/screenshots" --filter '*.png' > "$out/attachments.log" 2>&1 || true
   fi
+  if [[ -n "${out:-}" && -f "${PF_CA:-}" ]]; then
+    curl -fsS --max-time 10 --cacert "$PF_CA" \
+      --resolve "blobs-part.$PF_APEX:$PF_HTTPS_PORT:127.0.0.1" \
+      "https://blobs-part.$PF_APEX/__harness/reports?run=$nonce" > "$out/collector.json" || true
+  fi
   if [[ "$owned" = 1 ]]; then tests/e2e/harness/down.sh "$PF_RUN_DIR"; fi
 }
 trap cleanup EXIT
