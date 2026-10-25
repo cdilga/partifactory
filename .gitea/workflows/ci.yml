@@ -158,6 +158,10 @@ jobs:
         run: |
           bash ci/docker-daemon.sh
           ci/e2e.sh
+      - name: renderer-off running gate
+        env:
+          PF_E2E_SKIP_BUILD: '1'
+        run: ci/render-off.sh
       - name: communal pixel editor acceptance
         # The normal suite tears down its seeded harness first. This gate creates the
         # contract board through real scoped HTTP and rmcp device agents on a fresh one.
@@ -188,6 +192,9 @@ jobs:
             target/e2e-logs/run-*/security/report.json
             target/e2e-logs/run-*/summary.txt
             target/e2e-logs/run-*/proxy-runtime-log-gate.json
+            target/e2e-logs/run-*/build-running/report.json
+            target/e2e-logs/render-off-*/report.json
+            target/e2e-logs/render-off-*/server.jsonl
       - name: clean
         if: always()
         run: |

@@ -111,6 +111,12 @@ if [ "$PF_HARNESS_RELEASE" != 1 ]; then
 EOF
 fi
 
+if [ "${PF_BUILD_GATE:-0}" = 1 ] && [ "$PF_HARNESS_RELEASE" != 1 ]; then
+  # Deliberately allow the literal address through the host policy, without a dev DNS
+  # override: the running worker must reject its actual private address before dialing.
+  printf '\n[mirror]\nallowlist = ["cdnjs.cloudflare.com", "cdn.jsdelivr.net", "unpkg.com", "esm.sh", "fonts.googleapis.com", "fonts.gstatic.com", "127.0.0.1"]\n' >> "$run/site.toml"
+fi
+
 if [ "${PF_STORAGE_GATE:-0}" = 1 ]; then
   # The disposable small-volume lane tests quotas and physical pressure, so requests must
   # reach those guards rather than the unrelated ingress limiter. Avoid allocating a second

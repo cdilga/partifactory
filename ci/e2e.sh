@@ -18,6 +18,7 @@ source "$(dirname "$0")/lib.sh"
 
 h="$repo/tests/e2e/harness"
 export PF_E2E_RENDER="${PF_E2E_RENDER:-1}"
+export PF_BUILD_GATE=1
 export PF_SECURITY_DEVICE_FILE=/run/pf/run/security-private/device.json
 export PF_E2E_RUN="run-$(date +%Y%m%d-%H%M%S)"
 logs="$repo/target/e2e-logs/$PF_E2E_RUN"
@@ -122,6 +123,7 @@ note "ok   rate-limit self-test: 429 with $(grep -i '^retry-after' <<<"$hdrs" | 
 
 # Build fixture pages through the running server, then mint their capabilities.
 python3 "$h/seed-part.py"
+python3 "$repo/tests/build/running_gate.py" --case builds --out "$logs/build-running"
 if [ "${PF_E2E_RENDER:-0}" = 1 ]; then
   python3 "$repo/tests/render/isolation.py" "$run" | tee -a "$summary"
 fi
