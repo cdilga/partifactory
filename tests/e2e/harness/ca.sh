@@ -2,8 +2,6 @@
 # A per-run internal CA and a wildcard leaf for *.pf.test (and pf.test), written to $1:
 #   ca.pem ca.key        the run's CA (browsers and the iOS Simulator trust this, nothing else)
 #   cert.pem key.pem     the leaf Caddy serves (cert.pem holds leaf + CA)
-#   ca.spki              base64 SHA-256 of the CA's SubjectPublicKeyInfo (Chromium trusts the
-#                        run CA through --ignore-certificate-errors-spki-list=<this>)
 set -euo pipefail
 out="${1:?usage: ca.sh <dir>}"
 apex="${PF_APEX:-pf.test}"
@@ -29,9 +27,6 @@ openssl x509 -req -in leaf.csr -CA ca.pem -CAkey ca.key -CAcreateserial \
 cat leaf.pem ca.pem > cert.pem
 rm -f leaf.csr leaf.ext ca.srl
 
-openssl x509 -in ca.pem -pubkey -noout \
-  | openssl pkey -pubin -outform der \
-  | openssl dgst -sha256 -binary | base64 > ca.spki
-chmod 644 ./*.pem ca.spki
+chmod 644 ./*.pem
 chmod 600 ca.key
 echo "ca.sh: CA + *.${apex} leaf in $out"

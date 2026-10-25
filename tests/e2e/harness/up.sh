@@ -21,23 +21,20 @@ export PF_BIN="${PF_BIN:-${CARGO_TARGET_DIR:-$repo/target}/debug/partifactory}"
 export PF_RUN_DIR="${PF_RUN_DIR:-$repo/target/e2e-runs/$(date +%Y%m%d-%H%M%S)}"
 run="$PF_RUN_DIR"
 mkdir -p "$run"/{certs,dex,secrets,data}
+cleanup_failed_start() {
+  local rc=$?
+  if [ "$rc" -ne 0 ]; then
+    "$h/down.sh" "$run" >&2 || true
+  fi
+}
+trap cleanup_failed_start EXIT
+trap 'exit 130' INT TERM
 
 [ -x "$PF_BIN" ] || { echo "up.sh: no binary at $PF_BIN (cargo build -p partifactory --features dev)" >&2; exit 1; }
 
 "$h/ca.sh" "$run/certs" >/dev/null
-python3 "$h/gen-dex.py" "$repo/tests/fixtures/identity.toml" "$run/dex"
+python3 "$h/gen-dex.py" "$repo/tests/fixtures/identity.toml" "$run/dex" >&2
 chmod 644 "$run/dex/"*.yaml
-
-# Firefox trusts the CA through an NSS profile (Playwright's Firefox ignores enterprise
-# policies); needs certutil (libnss3-tools on Debian/Ubuntu, nss on Homebrew).
-if command -v certutil >/dev/null; then
-  mkdir -p "$run/firefox-profile"
-  certutil -N --empty-password -d "sql:$run/firefox-profile"
-  certutil -A -n pf-harness-ca -t "C,," -i "$run/certs/ca.pem" -d "sql:$run/firefox-profile"
-  chmod -R a+rX "$run/firefox-profile"
-else
-  echo "up.sh: certutil not found; firefox-desktop will fail TLS (install libnss3-tools / nss)" >&2
-fi
 
 for s in session_key cap_hmac_key metrics_token; do
   openssl rand -hex 32 | tr -d '\n' > "$run/secrets/$s"
@@ -98,7 +95,6 @@ PF_HARNESS_MODE=$mode
 PF_HTTPS_PORT=$PF_HTTPS_PORT
 PF_OPS_URL=$ops_url
 PF_CA=$run/certs/ca.pem
-PF_CA_SPKI=$(cat "$run/certs/ca.spki")
 PF_METRICS_TOKEN_FILE=$run/secrets/metrics_token
 PF_SERVER_LOG=$run/server.jsonl
 EOF

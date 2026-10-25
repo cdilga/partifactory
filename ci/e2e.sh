@@ -27,6 +27,8 @@ if [ "${PF_E2E_SKIP_BUILD:-0}" != 1 ]; then
 fi
 export PF_BIN="${PF_BIN:-${CARGO_TARGET_DIR:-$repo/target}/debug/partifactory}"
 ( cd "$repo/tests/e2e" && npm ci --no-audit --no-fund --silent )
+PF_RUN_DIR="$repo/target/e2e-runs/$PF_E2E_RUN" \
+  docker compose -f "$h/compose.yaml" --profile browsers build browsers
 
 run=""
 status=0
@@ -39,7 +41,7 @@ teardown() {
     cp "$run"/caddy.log "$run"/dex.log "$logs/" 2>/dev/null || true
     if [ "$status" = 0 ]; then
       # Passing: keep only the summary and the results file.
-      find "$logs" -mindepth 1 ! -name results.json ! -name summary.txt -delete 2>/dev/null || true
+      find "$logs" -mindepth 1 ! -name 'results*.json' ! -name summary.txt -delete 2>/dev/null || true
       rm -rf "$run"
     fi
   fi
@@ -53,7 +55,9 @@ teardown() {
 trap teardown EXIT
 trap 'status=130; exit 130' INT TERM
 
-run="$("$h/up.sh")"
+run="$repo/target/e2e-runs/$PF_E2E_RUN"
+export PF_RUN_DIR="$run"
+"$h/up.sh" >/dev/null
 set -a
 # shellcheck disable=SC1091
 source "$run/env"

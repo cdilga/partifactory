@@ -51,7 +51,8 @@ impl ServeConfig {
                 .get("PF_DATA_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| "/data".into()),
-            rate_limits: site.unsafe_.get("rate_limits").map(String::as_str) != Some("off"),
+            // `config check` already refuses `false` without `[unsafe] rate_limits = "off"`.
+            rate_limits: site.ingress.rate_limits,
         })
     }
 

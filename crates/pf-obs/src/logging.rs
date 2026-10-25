@@ -42,6 +42,51 @@ impl LogHandle {
 
 static GLOBAL: OnceLock<LogHandle> = OnceLock::new();
 
+/// The last log lines in memory, kept only when `PF_DEV_LOG_RING` is set (the e2e harness:
+/// its tests read them through the dev-only `/_dev/logs` route, because a bind-mounted log file
+/// goes stale on Docker Desktop). Already redacted.
+pub struct LogRing {
+    lines: Mutex<std::collections::VecDeque<String>>,
+    cap: usize,
+}
+
+impl LogRing {
+    fn push(&self, chunk: &str) {
+        let mut l = self.lines.lock().unwrap_or_else(|e| e.into_inner());
+        for line in chunk.lines().filter(|l| !l.is_empty()) {
+            if l.len() == self.cap {
+                l.pop_front();
+            }
+            l.push_back(line.to_string());
+        }
+    }
+
+    /// A copy of the kept lines, oldest first.
+    pub fn snapshot(&self) -> Vec<String> {
+        self.lines
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .cloned()
+            .collect()
+    }
+}
+
+static RING: OnceLock<LogRing> = OnceLock::new();
+
+/// The in-memory log ring, if enabled.
+pub fn log_ring() -> Option<&'static LogRing> {
+    RING.get()
+}
+
+/// Keep the last `cap` log lines in memory (see [`LogRing`]).
+pub fn enable_log_ring(cap: usize) {
+    let _ = RING.set(LogRing {
+        lines: Mutex::new(std::collections::VecDeque::with_capacity(cap)),
+        cap: cap.max(1),
+    });
+}
+
 /// The process-wide handle, once [`init_json_logs`] has run.
 pub fn log_handle() -> Option<LogHandle> {
     GLOBAL.get().cloned()
@@ -56,7 +101,11 @@ pub struct RedactingWriter<W>(W);
 impl<W: Write> Write for RedactingWriter<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let s = String::from_utf8_lossy(buf);
-        self.0.write_all(redact_str(&s).as_bytes())?;
+        let red = redact_str(&s);
+        self.0.write_all(red.as_bytes())?;
+        if let Some(ring) = RING.get() {
+            ring.push(&red);
+        }
         Ok(buf.len())
     }
     fn flush(&mut self) -> io::Result<()> {
@@ -108,6 +157,9 @@ pub fn init_json_logs() -> Option<LogHandle> {
         return Some(h.clone());
     }
     let directives = std::env::var("PF_LOG").unwrap_or_else(|_| "info".into());
+    if let Ok(n) = std::env::var("PF_DEV_LOG_RING") {
+        enable_log_ring(n.parse().unwrap_or(20_000));
+    }
     let (sub, handle) = subscriber(io::stdout, &directives);
     if tracing::subscriber::set_global_default(sub).is_err() {
         return None;

@@ -9,6 +9,7 @@
 //! - `POST /_dev/echo`       reads the body (up to 16 MiB) and returns its size (proxy smoke)
 //! - `GET  /_dev/selftest`   a self-reporting page that POSTs to `/_dev/report` (iOS Simulator)
 //! - `POST /_dev/report`, `GET /_dev/reports`  the collector the iOS lane polls
+//! - `GET  /_dev/logs?request_id=…&event=…`  recent server log lines (needs `PF_DEV_LOG_RING`)
 
 use crate::hosts::{HostClass, PartHost};
 use crate::ingress::{ClientAddr, RequestId};
@@ -143,6 +144,32 @@ async fn list_reports(Extension(reports): Extension<Reports>) -> Json<Vec<serde_
     Json(reports.0.lock().unwrap_or_else(|e| e.into_inner()).clone())
 }
 
+#[derive(serde::Deserialize)]
+struct LogsQ {
+    request_id: Option<String>,
+    event: Option<String>,
+}
+
+async fn logs(Query(q): Query<LogsQ>) -> Response {
+    let Some(ring) = pf_obs::logging::log_ring() else {
+        return (
+            StatusCode::NOT_FOUND,
+            "log ring off (set PF_DEV_LOG_RING)\n",
+        )
+            .into_response();
+    };
+    let lines: Vec<serde_json::Value> = ring
+        .snapshot()
+        .iter()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        // Never echo the log route's own access lines back.
+        .filter(|v| v["path"] != "/_dev/logs")
+        .filter(|v| q.request_id.as_deref().is_none_or(|r| v["request_id"] == r))
+        .filter(|v| q.event.as_deref().is_none_or(|e| v["event"] == e))
+        .collect();
+    Json(lines).into_response()
+}
+
 /// The workspace listener's dev routes.
 pub fn workspace_routes() -> Router<AppState> {
     Router::new()
@@ -161,6 +188,7 @@ pub fn workspace_routes() -> Router<AppState> {
         .route("/_dev/selftest", get(selftest))
         .route("/_dev/report", post(report))
         .route("/_dev/reports", get(list_reports))
+        .route("/_dev/logs", get(logs))
         .layer(Extension(Reports::default()))
 }
 

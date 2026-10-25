@@ -76,9 +76,23 @@ fn unsafe_key_controls_the_layer() {
     env.insert("PF_CAP_HMAC_KEY".into(), "c".into());
     env.insert("PF_METRICS_TOKEN".into(), "m".into());
     env.insert("PF_DOMAIN_APEX".into(), "pf.test".into());
+    // On by default.
     let loaded = pf_config::load("", &env).unwrap();
     assert!(
         pf_serve::ServeConfig::from_loaded(&loaded, &env)
+            .unwrap()
+            .rate_limits
+    );
+    // Switching it off without the [unsafe] key fails the load (`config check`).
+    assert!(pf_config::load("[ingress]\nrate_limits = false\n", &env).is_err());
+    // With the key, it is off.
+    let loaded = pf_config::load(
+        "[ingress]\nrate_limits = false\n[unsafe]\nrate_limits = \"off\"\n",
+        &env,
+    )
+    .unwrap();
+    assert!(
+        !pf_serve::ServeConfig::from_loaded(&loaded, &env)
             .unwrap()
             .rate_limits
     );

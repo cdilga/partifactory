@@ -3,7 +3,10 @@
 // projects can attach a virtual authenticator, and the click-budget helper bites.
 import { test, expect, clickBudget, waitForLog } from './fixtures';
 
-test('TLS chain is valid and the workspace answers', async ({ page }) => {
+test('TLS chain is valid and the workspace answers', async ({ page, browser }, testInfo) => {
+  const version = browser.version();
+  testInfo.annotations.push({ type: 'browser', description: version });
+  console.log(`${testInfo.project.name}: ${version}`);
   const resp = await page.goto('/healthz');
   expect(resp?.status()).toBe(200);
   expect(await resp?.json()).toMatchObject({ status: 'ok' });

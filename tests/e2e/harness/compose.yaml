@@ -79,7 +79,10 @@ services:
   # Chromium maps the whole wildcard with --host-resolver-rules.
   browsers:
     profiles: ["browsers"]
-    image: mcr.microsoft.com/playwright:v1.64.1-noble
+    image: pf-harness-browsers:1.64.1
+    build:
+      context: .
+      dockerfile: Dockerfile.browsers
     labels: *labels
     restart: "no"
     ipc: host
@@ -88,9 +91,8 @@ services:
     environment:
       CI: ${CI:-}
       PF_E2E_RUN: ${PF_E2E_RUN:-local}
-      PF_CA_SPKI: ${PF_CA_SPKI:-}
       PF_HARNESS_IP: 172.30.77.10
-      PF_FIREFOX_PROFILE: /run/pf/run/firefox-profile
+      PF_FIREFOX_PROFILE: /tmp/pf-firefox-profile
       PF_ORIGIN_DOWN: ${PF_ORIGIN_DOWN:-}
       HOST_UID: ${HOST_UID:-}
       HOST_GID: ${HOST_GID:-}
