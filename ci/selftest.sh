@@ -4,7 +4,13 @@
 set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 tmp="$(mktemp -d)"
-trap 'chmod -R u+w "$tmp" 2>/dev/null; rm -rf "$tmp"' EXIT
+t=
+cleanup() {
+  chmod -R u+w "$tmp" 2>/dev/null || true
+  rm -rf -- "$tmp"
+  [ -z "$t" ] || rm -rf -- "$t"
+}
+trap cleanup EXIT
 fail() { echo "selftest: FAIL: $*" >&2; exit 1; }
 
 python3 "$here/tests/render/test_controller.py"
@@ -60,11 +66,26 @@ echo new > "$t/debug/deps/libnew.rlib"
 echo new > "$t/debug/incremental/new-def/x"
 touch -t 202001010000 "$t/debug/deps/libold.rlib" "$t/debug/incremental/old-abc"
 for i in 1 2 3 4 5 6 7; do mkdir -p "$t/e2e-logs/run-$i"; touch -t "20200101000$i" "$t/e2e-logs/run-$i"; done
-# ZFS accounts allocated blocks when its transaction group is committed. Flush the
-# fixture before testing du-based limits, otherwise freshly written random bytes
-# can still report zero blocks on the shared runners.
-sync
-echo "selftest: fixture target allocation $(du -sk "$t" | awk '{print $1}') KiB"
+# ZFS may delay du's allocation accounting even after a flush. Sync only our
+# fixture files, then observe enough allocated blocks to exercise the same cap.
+# A timeout fails the fixture setup; it must never turn this assertion into a skip.
+python3 - "$t" <<'PY'
+import os, pathlib, subprocess, sys, time
+target = pathlib.Path(sys.argv[1])
+for path in target.rglob("*"):
+    if path.is_file():
+        with path.open("rb") as fixture:
+            os.fsync(fixture.fileno())
+deadline = time.monotonic() + 30
+while True:
+    allocated = int(subprocess.check_output(["du", "-sk", str(target)], text=True, timeout=5).split()[0])
+    if allocated >= 3072:
+        print(f"selftest: fixture target allocation {allocated} KiB")
+        break
+    if time.monotonic() >= deadline:
+        sys.exit(f"selftest: fixture allocation timed out: {allocated} KiB, expected at least 3072 KiB")
+    time.sleep(0.1)
+PY
 if PF_TARGET_DIR="$t" PF_TARGET_MAX_GB=0.002 PF_CLEAN_NO_DOCKER=1 "$here/scripts/disk-guard.sh" >/dev/null 2>&1; then
   fail "disk-guard passed an oversized target/"
 fi
