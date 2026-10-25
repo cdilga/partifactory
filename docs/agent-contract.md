@@ -394,7 +394,7 @@ board.addEventListener("click", async ev => {
   try { await window.storage.set(key, color.value, true); note.textContent = ""; }
   catch (e) { cells[key].style.background = before; note.textContent = e.code === "forbidden_view_only" ? "This board is view only." : "Not saved: " + e.message; }
 });
-async function loadBoard() {
+async function load() {
   let cursor = null;
   do {
     const page = await window.storage.list("px:", true, { values: true, cursor });

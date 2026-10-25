@@ -62,7 +62,12 @@ pub async fn handle(s: PartHost, req: Request) -> Response {
                 .read()
                 .unwrap_or_else(|e| e.into_inner())
                 .contains_key(name);
-            tracing::info!(event="rt.op",op=if known { name } else { "unknown" },principal=%c.s,outcome="forbidden_view_only");
+            let principal = if let Some(guest) = &c.g {
+                format!("guest:{}:{guest}", c.s.strip_prefix("link:").unwrap_or(&c.s))
+            } else {
+                c.s.clone()
+            };
+            tracing::info!(event="rt.op",op=if known { name } else { "unknown" },principal=%principal,outcome="forbidden_view_only");
             return content::error(PfError::new(
                 "forbidden_view_only",
                 "this guest capability is no longer valid; reopen the link",
