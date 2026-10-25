@@ -51,7 +51,7 @@ final class SimulatorDeviceTests: XCTestCase {
         try report("standalone")
         try open("signin")
         let email = safari.webViews.textFields.firstMatch
-        XCTAssertTrue(email.waitForExistence(timeout: 30))
+        XCTAssertTrue(email.waitForExistence(timeout: 60))
         email.tap()
         email.typeText("admin@example.com")
         let password = safari.webViews.secureTextFields.firstMatch

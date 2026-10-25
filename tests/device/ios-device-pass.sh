@@ -30,6 +30,17 @@ else
   set -a; source "$PF_RUN_DIR/env"; set +a
 fi
 [[ "$PF_APEX" = localtest.me ]] || { echo 'ios device pass: the running harness must use localtest.me' >&2; exit 2; }
+# /healthz deliberately ignores IdP availability. Wait for the application's own
+# lazy OIDC discovery before opening the browser, just as the browser harness does.
+signin_ready=0
+for attempt in {1..12}; do
+  status="$(curl -sS --max-time 15 --cacert "$PF_CA" \
+    --resolve "parts.$PF_APEX:$PF_HTTPS_PORT:127.0.0.1" \
+    -o /dev/null -w '%{http_code}' "https://parts.$PF_APEX:$PF_HTTPS_PORT/signin?return=/" || true)"
+  if [[ "$status" = 303 ]]; then signin_ready=1; break; fi
+  sleep 1
+done
+[[ "$signin_ready" = 1 ]] || { echo 'ios device pass: application OIDC discovery did not become ready' >&2; exit 1; }
 out="$repo/target/e2e-logs/ios-sim/device-pass/$PF_E2E_RUN"
 mkdir -p "$out"
 chmod 700 "$out"
@@ -65,7 +76,10 @@ print(configured)
 PY
 xcodebuild test-without-building -xctestrun target/device-xctest/Build/Products/PartifactoryDevice-configured.xctestrun \
   -destination "platform=iOS Simulator,id=$udid" -parallel-testing-enabled NO \
+  -collect-test-diagnostics never \
   -resultBundlePath "$out/result.xcresult" > "$out/test.log" 2>&1
+xcrun xcresulttool export attachments --path "$out/result.xcresult" \
+  --output-path "$out/screenshots" --filter '*.png' > "$out/attachments.log" 2>&1
 curl -fsS --cacert "$PF_CA" --resolve "parts.$PF_APEX:$PF_HTTPS_PORT:127.0.0.1" \
   "https://parts.$PF_APEX:$PF_HTTPS_PORT/_dev/reports" > "$out/collector.json"
 python3 - "$out" "$runtime" <<'PY'
@@ -74,6 +88,8 @@ out=pathlib.Path(sys.argv[1]);nonce=(out/'nonce').read_text()
 rows=[r for r in json.loads((out/'collector.json').read_text()) if r.get('run')==nonce and r.get('lane')=='ios-simulator']
 required={'guest_link','standalone','sign_in','part_root_first_open','part_root_reload'}
 assert {r['item'] for r in rows if r.get('outcome')=='pass'}==required,rows
-(out/'report.json').write_text(json.dumps({'pass':True,'runtime':sys.argv[2],'checks':{r['item']:True for r in rows},'reports':rows},indent=2))
+screenshots=sorted(str(p.relative_to(out)) for p in (out/'screenshots').glob('*.png'))
+assert len(screenshots)==len(required),screenshots
+(out/'report.json').write_text(json.dumps({'pass':True,'runtime':sys.argv[2],'checks':{r['item']:True for r in rows},'reports':rows,'screenshots':screenshots},indent=2))
 print('ios device pass: all five real Mobile Safari matrix checks passed; evidence '+str(out))
 PY
