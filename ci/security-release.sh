@@ -45,7 +45,7 @@ if [ -z "${PF_HARNESS_IMAGE:-}" ]; then
 fi
 tests/deploy/image_checks.sh "$PF_HARNESS_IMAGE" | tee "$logs/image-checks.txt"
 (cd "$repo/tests/e2e" && npm ci --no-audit --no-fund --silent)
-"$h/compose.sh" --profile browsers build browsers
+"$h/build-browsers.sh"
 "$h/up.sh" >/dev/null
 set -a
 source "$PF_RUN_DIR/env"

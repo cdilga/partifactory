@@ -30,7 +30,7 @@ fi
 export PF_BIN="${PF_BIN:-${CARGO_TARGET_DIR:-$repo/target}/debug/partifactory}"
 ( cd "$repo/tests/e2e" && npm ci --no-audit --no-fund --silent )
 PF_RUN_DIR="$repo/target/e2e-runs/$PF_E2E_RUN" \
-  "$h/compose.sh" --profile browsers build browsers
+  "$h/build-browsers.sh"
 
 run=""
 status=0
