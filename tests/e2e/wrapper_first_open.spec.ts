@@ -97,8 +97,8 @@ test('a drafting part receives its first live version through the sandbox prelud
   await page.evaluate(()=>{(window as any).__versionPosts=0;window.addEventListener('message',e=>{if(e.source===(document.getElementById('pf-frame') as HTMLIFrameElement).contentWindow&&e.data?.type==='pf:version')(window as any).__versionPosts++;});});
   await expect.poll(async()=>{const frame=page.frames().find(f=>f.url().includes('/c/'));return frame?.evaluate(()=>!!(window as any).partifactory);}).toBe(true);
   // A real build promotes version 1; the existing v0 document's event stream tells the wrapper.
-  const edit=await call('part_edit',{name,request_id:name+'-first-version',edits:[{op:'write',file:'index.html',content:'<!doctype html><h1>Ready for the household</h1>'}]});
-  expect(edit.status()).toBe(200);
+  const edit=await call('part_edit',{name,request_id:name+'-first-version',edits:[{op:'write',file:'index.html',content:'<!doctype html><h1>Ready for the household</h1>',if_match:null}]});
+  expect(edit.status(),await edit.text()).toBe(200);
   await expect(page.frameLocator('#pf-frame').getByRole('heading',{name:'Ready for the household'})).toBeVisible();
   await expect(page.locator('#pf-drafting')).toBeHidden();await expect(page.locator('.pf-revision')).toHaveText('REV 1');
   await expect.poll(()=>page.evaluate(()=>(window as any).__versionPosts)).toBeGreaterThanOrEqual(1);
