@@ -21,6 +21,17 @@
 {
 	admin off
 	auto_https disable_certs
+	# Caddy also logs failed streaming responses outside its access logger. Remove
+	# credential-bearing paths and all request headers from the default runtime logger.
+	log {
+		format filter {
+			wrap json
+			fields {
+				request>uri delete
+				request>headers delete
+			}
+		}
+	}
 	servers {
 		timeouts {
 			read_header 10s

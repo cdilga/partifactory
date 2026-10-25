@@ -74,8 +74,22 @@ note "caddy: $caddy_v"
 note "dex: ghcr.io/dexidp/dex:v2.45.1; playwright: mcr.microsoft.com/playwright:v1.64.1-noble"
 note "mode: $PF_HARNESS_MODE; binary: $(git -C "$repo" rev-parse --short HEAD)"
 
+# Verify the application's real lazy OIDC discovery through ingress before parallel
+# browser sign-ins. A first discovery attempt can time out while the provider starts.
+oidc_ready=0
+for attempt in 1 2 3; do
+  code="$(curl -sS --max-time 15 --cacert "$PF_CA" \
+    --resolve "parts.pf.test:$PF_HTTPS_PORT:127.0.0.1" \
+    -o /dev/null -w '%{http_code}' "https://parts.pf.test:$PF_HTTPS_PORT/signin?return=/")" || code=000
+  if [ "$code" = 303 ]; then oidc_ready=1; break; fi
+  sleep 2
+done
+[ "$oidc_ready" = 1 ] || { note "FAIL application OIDC discovery did not become ready"; exit 1; }
+note "ok   application OIDC discovery reaches the real provider through verified TLS"
+
 # 1. Proxy smoke.
 note "--- proxy smoke"
+python3 "$repo/deploy/proxy/test-runtime-logs.py" | tee "$logs/proxy-runtime-log-gate.json"
 "$repo/deploy/proxy/smoke.sh" --dev --cacert "$PF_CA" --resolve-to 127.0.0.1 --port "$PF_HTTPS_PORT" | tee -a "$summary"
 
 # 2. The running-binary gate.
