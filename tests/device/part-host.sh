@@ -8,7 +8,7 @@ scripts/disk-guard.sh
 cargo build -p partifactory --features dev
 export PF_APEX="${PF_APEX:-localtest.me}" PF_HTTPS_PORT="${PF_HTTPS_PORT:-443}"
 export PF_BIN="$repo/target/debug/partifactory"
-export PF_RUN_DIR="$repo/target/e2e-runs/ios-part-host-$(date +%Y%m%d-%H%M%S)"
+export PF_RUN_DIR="$repo/target/e2e-runs/ios-$(date +%s)"
 trap 'tests/e2e/harness/down.sh "$PF_RUN_DIR"' EXIT
 tests/e2e/harness/up.sh >/dev/null
 set -a
