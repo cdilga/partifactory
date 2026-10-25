@@ -31,9 +31,10 @@ case "$job" in
   advisories) binstall cargo-audit cargo-deny ;;
   gitleaks) gitleaks_install ;;
   selftest) gitleaks_install ;;
+  spikes) python3 scripts/install-spike-esbuild.py "$bin/esbuild" ;;
   store-durability)
     command -v jq >/dev/null 2>&1 || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq jq >/dev/null; } ;;
-  fmt | clippy | check-boundaries | env-docs | spikes) ;;
+  fmt | clippy | check-boundaries | env-docs) ;;
   *) echo "install-tools: unknown job $job" >&2; exit 2 ;;
 esac
 # The toolchain (with rustfmt and clippy) comes from rust-toolchain.toml.

@@ -92,10 +92,7 @@ fn rlimit_breach_is_failed_build() {
 
 #[test]
 fn bundle_resolves_virtual_react_once() {
-    let Some(esbuild) = esbuild_path() else {
-        eprintln!("SKIP: no esbuild (set PF_ESBUILD)");
-        return;
-    };
+    let esbuild = esbuild_path().expect("esbuild 0.28.2 is required; run scripts/install-spike-esbuild.py or set PF_ESBUILD");
     // Five files, four of which import react, plus react-dom/client.
     let mut files = BTreeMap::new();
     let mut imports = String::new();
@@ -128,7 +125,7 @@ fn bundle_resolves_virtual_react_once() {
 
 #[test]
 fn compile_error_is_failed_not_crash() {
-    let Some(_) = esbuild_path() else { return };
+    esbuild_path().expect("esbuild 0.28.2 is required; run scripts/install-spike-esbuild.py or set PF_ESBUILD");
     let mut pool = Pool::new(Path::new(EXE), 1).unwrap();
     let mut r = req(None);
     r.files.insert("app.tsx".into(), "import x from 'left-pad';\nexport const y = <div>{x}</div>;".into());
