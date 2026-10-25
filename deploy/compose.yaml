@@ -42,7 +42,9 @@ services:
 
   partifactory-render:
     profiles: [render]
-    image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
+    # The amd64 child of the pinned upstream index; native browser helpers can
+    # retain the arm64 child on image stores that keep one platform per index.
+    image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:d65108d1a8095d8b0c4a5e32bf1807a40a5ce90ff0c78473e1116b1c243235e8
     platform: linux/amd64
     restart: unless-stopped
     user: "1000:1000"
