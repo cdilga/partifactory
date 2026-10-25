@@ -83,22 +83,25 @@ def main():
         docker("volume", "create", "--label", "pf.harness=1", "--label", "pf.drill=" + run_id, volume)
         volumes.append(volume)
         container = docker("create", "--label", "pf.harness=1", "--label", "pf.drill=" + run_id,
-                           "--user", "0:0", "--mount", f"type=volume,src={volume},dst=/stage", image).stdout.decode().strip()
+                           "--user", f"{uid}:{uid}", "--mount", f"type=volume,src={volume},dst=/stage", image).stdout.decode().strip()
         containers.append(container)
         # docker cp accepts a tar stream and does not need a shell or a writable image.
         with tempfile.TemporaryFile() as stream:
             with tarfile.open(fileobj=stream, mode="w") as archive:
-                root = tarfile.TarInfo(".")
+                # Copy the named directory into its parent: extracting "." into
+                # an existing mount leaves that volume root's owner unchanged.
+                # Docker cp also uses the container user for streamed ownership.
+                root = tarfile.TarInfo("stage")
                 root.type, root.mode, root.uid, root.gid = tarfile.DIRTYPE, 0o700, uid, uid
                 archive.addfile(root)
                 for path, source, mode in entries:
-                    member = tarfile.TarInfo(path)
+                    member = tarfile.TarInfo("stage/" + path)
                     member.size, member.mode, member.uid, member.gid = source.stat().st_size, mode, uid, uid
                     with source.open("rb") as content:
                         archive.addfile(member, content)
             stream.seek(0)
             remaining = max(1, 900 - (time.monotonic() - start))
-            result = subprocess.run(target + ["cp", "-a", "-", container + ":/stage"], stdin=stream,
+            result = subprocess.run(target + ["cp", "-a", "-", container + ":/"], stdin=stream,
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment, timeout=remaining)
             with private_log.open("ab") as log:
                 log.write(result.stdout + result.stderr)
