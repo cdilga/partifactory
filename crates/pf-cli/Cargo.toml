@@ -8,6 +8,8 @@ publish = false
 
 [dependencies]
 clap.workspace = true
+fs4 = "0.13"
+qrcode = { version = "0.14", default-features = false }
 pf-ops = { path = "../pf-ops" }
 pf-model = { path = "../pf-model" }
 pf-blobs = { path = "../pf-blobs" }

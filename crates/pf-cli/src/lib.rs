@@ -1,14 +1,10 @@
 //! The `part` CLI. Aliases construct registry inputs and call the same HTTPS operations.
 use serde_json::{Value, json};
-use std::{
-    collections::BTreeMap,
-    ffi::OsString,
-    io::Read,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{collections::BTreeMap, ffi::OsString, io::Read, path::Path};
+mod login;
 pub const EXIT_NOT_IMPLEMENTED: i32 = 64;
 type Result<T> = std::result::Result<T, CliError>;
+#[derive(Debug)]
 struct CliError {
     body: Value,
     code: i32,
@@ -26,48 +22,11 @@ struct Client {
 }
 impl Client {
     fn new() -> Result<Self> {
-        let cfg = if std::env::var_os("PARTIFACTORY_URL").is_some()
-            && std::env::var_os("PARTIFACTORY_TOKEN").is_some()
-        {
-            json!({})
-        } else {
-            config()?
-        };
-        let url = std::env::var("PARTIFACTORY_URL")
-            .ok()
-            .or_else(|| cfg["url"].as_str().map(str::to_owned))
-            .ok_or_else(|| error("invalid_input", "set PARTIFACTORY_URL"))?;
-        let parsed =
-            reqwest::Url::parse(&url).map_err(|e| error("invalid_input", e.to_string()))?;
-        if parsed.scheme() != "https"
-            && !(parsed.scheme() == "http"
-                && matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "[::1]")))
-        {
-            return Err(error("invalid_input", "server URL must use HTTPS"));
-        }
-        let token = std::env::var("PARTIFACTORY_TOKEN")
-            .ok()
-            .or_else(|| keychain(&url))
-            .or_else(|| cfg["token"].as_str().map(str::to_owned))
-            .ok_or_else(|| error("unauthenticated", "set PARTIFACTORY_TOKEN or sign in"))?;
-        let mut builder = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(25))
-            .redirect(reqwest::redirect::Policy::none());
-        if let Ok(path) = std::env::var("PARTIFACTORY_CA_CERT") {
-            let pem = std::fs::read(path).map_err(|e| error("invalid_input", e.to_string()))?;
-            let cert = reqwest::Certificate::from_pem(&pem)
-                .map_err(|e| error("invalid_input", e.to_string()))?;
-            builder = builder.add_root_certificate(cert);
-        }
-        let http = builder
-            .build()
-            .map_err(|e| error("internal", e.to_string()))?;
-        Ok(Self {
-            http,
-            url: url.trim_end_matches('/').into(),
-            token,
-        })
+        let (url, token) = login::credentials()?;
+        let http = login::http_client()?;
+        Ok(Self { http, url, token })
     }
+
     fn post(&self, path: &str, body: Vec<u8>, json_body: bool) -> Result<Value> {
         for attempt in 0..2 {
             let response = self
@@ -116,38 +75,6 @@ impl Client {
         )
     }
 }
-fn config() -> Result<Value> {
-    let path = std::env::var_os("PARTIFACTORY_CONFIG")
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("XDG_CONFIG_HOME")
-                .map(|p| PathBuf::from(p).join("partifactory/config.json"))
-        })
-        .or_else(|| {
-            std::env::var_os("HOME")
-                .map(|p| PathBuf::from(p).join(".config/partifactory/config.json"))
-        });
-    let Some(path) = path.filter(|p| p.exists()) else {
-        return Ok(json!({}));
-    };
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(&path)
-            .map_err(|e| error("invalid_input", e.to_string()))?
-            .permissions()
-            .mode()
-            & 0o777;
-        if mode != 0o600 {
-            return Err(error(
-                "invalid_input",
-                "credential config must have mode 600",
-            ));
-        }
-    }
-    let data = std::fs::read(path).map_err(|e| error("invalid_input", e.to_string()))?;
-    serde_json::from_slice(&data).map_err(|e| error("invalid_input", e.to_string()))
-}
 fn keychain(url: &str) -> Option<String> {
     #[cfg(target_os = "macos")]
     {
@@ -187,6 +114,11 @@ fn json_input(arg: &str) -> Result<Value> {
     serde_json::from_slice(&bytes).map_err(|e| error("invalid_input", e.to_string()))
 }
 fn help(op: Option<&str>) -> Result<Value> {
+    if op == Some("login") {
+        return Ok(
+            json!({"usage":"part login [--url origin] [--agent-name name] [--scope scopes] [--no-browser]","description":"Approve this CLI in your browser; credentials are stored in a mode-600 config and refreshed automatically."}),
+        );
+    }
     if let Some(op) = op {
         let op = canonical(op);
         let d = pf_ops::definitions()
@@ -196,7 +128,7 @@ fn help(op: Option<&str>) -> Result<Value> {
         return Ok(serde_json::to_value(d).expect("definition serializes"));
     }
     Ok(
-        json!({"usage":"part <op> --json @file|- | part put <file-or-dir> --name <name> | part get <name> | part edit <name> --replace <old> <new>","ops":pf_ops::definitions().iter().map(|d|d.name).collect::<Vec<_>>()}),
+        json!({"usage":"part login [--url origin] | part <op> --json @file|- | part put <file-or-dir> --name <name> | part get <name> | part edit <name> --replace <old> <new>","ops":pf_ops::definitions().iter().map(|d|d.name).collect::<Vec<_>>()}),
     )
 }
 fn canonical(op: &str) -> &str {
@@ -342,6 +274,15 @@ fn execute(args: &[String]) -> Result<Value> {
     }
     if ["--version", "-V"].contains(&op.as_str()) {
         return Ok(json!({"version":env!("CARGO_PKG_VERSION")}));
+    }
+    if op == "login" {
+        if args[1..]
+            .iter()
+            .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
+        {
+            return help(Some("login"));
+        }
+        return login::run(&args[1..]);
     }
     let mut input = json!({});
     let mut positionals = Vec::new();
