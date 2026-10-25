@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import select
+import shutil
 import socket
 import socketserver
 import subprocess
@@ -86,7 +87,10 @@ def main():
                         if not approval:
                             raise RuntimeError("CLI did not produce a device approval URL: " + stderr.read_text())
                         public.write_text(approval + "\n")
-                        subprocess.run(["docker", "compose", "-f", str(compose), "--profile", "browsers", "run", "--rm", "browsers", "cli_login.spec.ts", "--project", project], cwd=repo, env=env, check=True)
+                        browser = subprocess.run(["docker", "compose", "-f", str(compose), "--profile", "browsers", "run", "--rm", "browsers", "cli_login.spec.ts", "--project", project], cwd=repo, env=env)
+                        artifacts = repo / "target/e2e-logs" / env.get("PF_E2E_RUN", "local")
+                        shutil.copy2(artifacts / "results.json", artifacts / f"results-cli-{project}.json")
+                        browser.check_returncode()
                         stdout, _ = process.communicate(timeout=30)
                     if process.returncode != 0:
                         raise RuntimeError("CLI login failed: " + stderr.read_text())
