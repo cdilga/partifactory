@@ -23,7 +23,9 @@ import time
 class Proxy(socketserver.StreamRequestHandler):
     def handle(self):
         request = self.rfile.readline(8192).decode("ascii")
-        if request.strip() != "CONNECT parts.pf.test:443 HTTP/1.1":
+        # urllib uses HTTP/1.0 for CONNECT on Python 3.11; reqwest uses HTTP/1.1.
+        # Accept both versions while retaining the exact destination allowlist.
+        if request.strip() not in ("CONNECT parts.pf.test:443 HTTP/1.0", "CONNECT parts.pf.test:443 HTTP/1.1"):
             self.wfile.write(b"HTTP/1.1 403 Forbidden\r\n\r\n")
             return
         while self.rfile.readline(8192).strip():
