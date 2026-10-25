@@ -1076,6 +1076,15 @@ version = "0.1.0"
 [[package]]
 name = "pf-policy"
 version = "0.1.0"
+dependencies = [
+ "pf-caps",
+ "pf-db",
+ "pf-model",
+ "proptest",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "pf-prelude"

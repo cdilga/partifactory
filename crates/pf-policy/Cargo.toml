@@ -6,5 +6,16 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[dependencies]
+pf-caps = { path = "../pf-caps" }
+pf-db = { path = "../pf-db" }
+pf-model = { path = "../pf-model" }
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tokio = { version = "1", features = ["rt", "macros"] }
+
 [lints]
 workspace = true
