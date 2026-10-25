@@ -10,7 +10,7 @@ test('renderer checks throwing blank and interactive pages without changing shar
   if(process.env.PF_E2E_RENDER==='1') expect(probe.ok(),`Enabled renderer: ${await probe.text()}`).toBeTruthy();
   if(probe.status()===503){
     expect((await probe.json()).error.code).toBe('renderer_unavailable');
-    const created=await call('part_create',{name:'render-off',kind:'html',files:{'index.html':'<!doctype html><body>renderer optional</body>'},live:'after_check',request_id:'render-off-create',wait:true});
+    const created=await call('part_create',{name:'render-off',title:'Renderer off',kind:'html',files:{'index.html':'<!doctype html><body>renderer optional</body>'},live:'after_check',request_id:'render-off-create'});
     expect(created.ok(),await created.text()).toBeTruthy();
     await expect.poll(async()=> (await (await call('part_get',{name:'render-off'})).json()).live).toBe(1);
     const part=await (await call('part_get',{name:'render-off'})).json();
@@ -19,7 +19,7 @@ test('renderer checks throwing blank and interactive pages without changing shar
   }
   expect(probe.ok(),await probe.text()).toBeTruthy();
   const create=async(name:string,html:string)=>{
-    const r=await call('part_create',{name,kind:'html',files:{'index.html':html},live:'after_check',request_id:`${name}-create`,wait:true});
+    const r=await call('part_create',{name,title:name,kind:'html',files:{'index.html':html},live:'after_check',request_id:`${name}-create`});
     expect(r.ok(),await r.text()).toBeTruthy();
     await expect.poll(async()=> (await (await call('part_get',{name})).json()).build.status).toBe('ok');
   };
