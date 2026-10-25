@@ -63,7 +63,7 @@ impl BackupService {
                 .map_err(pf_db::DbError::from)
         })?)
     }
-    fn set(&self, key: &str, value: String) -> Result<()> {
+    pub(crate) fn set(&self, key: &str, value: String) -> Result<()> {
         let key = key.to_owned();
         self.db.write_blocking(move|tx|{tx.execute("INSERT INTO kv(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",params![key,value])?;Ok::<_,pf_db::DbError>(())})?;
         Ok(())
@@ -119,6 +119,10 @@ impl BackupService {
     }
     /// Deterministic maintenance step; tests advance this clock without sleeping overnight.
     pub fn tick(&self, now: i64) -> Result<()> {
+        if self.refresh_drill(now).is_err() {
+            metrics().drill_ok.set(0);
+            tracing::warn!(event = "drill.report", outcome = "rejected");
+        }
         for (key, gauge) in [
             ("backup.copy_at", &metrics().copy_age),
             ("backup.export_at", &metrics().export_age),
@@ -289,6 +293,8 @@ pub(crate) struct Metrics {
     pub export_bytes: prometheus::IntGauge,
     pub export_age: prometheus::IntGauge,
     pub copy_age: prometheus::IntGauge,
+    pub drill_ok: prometheus::IntGauge,
+    pub drill_age: prometheus::IntGauge,
 }
 pub(crate) fn metrics() -> &'static Metrics {
     static METRICS: std::sync::OnceLock<Metrics> = std::sync::OnceLock::new();
@@ -318,6 +324,14 @@ pub(crate) fn metrics() -> &'static Metrics {
             copy_age: gauge(
                 "pf_backup_copy_age_seconds",
                 "Age of the newest consistent copy; -1 if absent.",
+            ),
+            drill_ok: gauge(
+                "pf_last_drill_ok",
+                "Last recovery drill: 1 passed, 0 failed, -1 absent.",
+            ),
+            drill_age: gauge(
+                "pf_last_drill_age_s",
+                "Age of last recovery drill in seconds; -1 absent.",
             ),
         }
     })

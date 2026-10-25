@@ -186,7 +186,6 @@ async fn page(State(state): State<AppState>, headers: HeaderMap) -> Response {
         ("Newest export", "backup.export_at"),
         ("Export bytes", "backup.export_bytes"),
         ("Same disk", "backup.export_same_disk"),
-        ("Last drill", "drill.last_result"),
     ] {
         let value = service.value(key).ok().flatten();
         let detail = if key.ends_with("_at") {
@@ -215,6 +214,39 @@ async fn page(State(state): State<AppState>, headers: HeaderMap) -> Response {
             },
             &detail,
         );
+    }
+    match service
+        .value("drill.last_result")
+        .ok()
+        .flatten()
+        .and_then(|value| serde_json::from_str::<crate::DrillReport>(&value).ok())
+    {
+        Some(report) => {
+            let age = pf_db::ids::now_ms().saturating_sub(report.at).max(0) / 1000;
+            row(
+                &mut html,
+                "Last drill",
+                if !report.ok {
+                    "red"
+                } else if age > 30 * 86_400 {
+                    "amber"
+                } else {
+                    "ok"
+                },
+                &format!(
+                    "{}; recovery {:.1} seconds; {} hours ago",
+                    if report.ok { "Passed" } else { "Failed" },
+                    report.rto_s,
+                    age / 3600
+                ),
+            );
+        }
+        None => row(
+            &mut html,
+            "Last drill",
+            "amber",
+            "No recovery drill has been recorded",
+        ),
     }
     html.push_str("</table><h2>Disk budget and stores</h2><table>");
     if let Some(budget) = state.ext::<Arc<pf_janitor::Budget>>() {

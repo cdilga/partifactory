@@ -1,11 +1,13 @@
 //! Export and import: consistent DB copies, the nightly export, import with the boot-epoch bump.
 mod archive;
+mod drill;
 mod health;
 mod portable;
 mod regrant;
 mod service;
 
 pub use archive::{ExportOptions, ExportReport, ImportOptions, ImportReport, Manifest, import};
+pub use drill::DrillReport;
 pub use health::install;
 pub use regrant::{RegrantPlan, apply_regrant, plan_regrant};
 pub use service::{BackupService, Maintenance, lock_import, lock_server};
