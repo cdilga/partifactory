@@ -1,0 +1,26 @@
+# Distribution manifest for cargo-binstall, not a source-build package.
+# Supply the chosen forge asset URL with --pkg-url; see docs/ops/cli-install.md.
+[package]
+name = "partifactory-cli"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "The part CLI from the partifactory release image"
+publish = false
+
+[[bin]]
+name = "part"
+path = "../crates/partifactory/src/main.rs"
+
+[package.metadata.binstall]
+pkg-url = "https://example.com/partifactory/releases/download/v{ version }/part-linux-amd64.tar.gz"
+pkg-fmt = "tgz"
+bin-dir = "part"
+disabled-strategies = ["quick-install", "compile"]
+
+# Slice 1 ships a static Linux amd64 binary only. Refuse other platforms before
+# requesting an archive, including when --pkg-url selects a different forge.
+[package.metadata.binstall.overrides.'cfg(not(all(target_os = "linux", target_arch = "x86_64", any(target_env = "gnu", target_env = "musl"))))']
+disabled-strategies = ["crate-meta-data"]
+
+[workspace]

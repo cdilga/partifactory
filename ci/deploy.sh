@@ -48,9 +48,24 @@ for line in (assets/'SHA256SUMS').read_text().splitlines():
     assert pathlib.Path(name).name==name and hashlib.file_digest((assets/name).open('rb'),'sha256').hexdigest()==digest
 assert (assets/'digest.txt').read_text().strip()==release['image']
 assert subprocess.run(['git','merge-base','--is-ancestor',release['commit'],'HEAD']).returncode==0
-assert subprocess.run(['git','diff','--quiet',release['commit'],'HEAD','--','crates','Cargo.toml','Cargo.lock','Dockerfile','ui','vendor','docs/agent-contract.md','rust-toolchain.toml']).returncode==0,'release runtime source differs'
+# main.rs excludes the entire dev module behind cfg(feature="dev"). Every
+# release-compiled runtime source remains checked, including that cfg itself.
+assert subprocess.run(['git','diff','--quiet',release['commit'],'HEAD','--','crates','Cargo.toml','Cargo.lock','Dockerfile','ui','vendor','docs/agent-contract.md','rust-toolchain.toml',':!crates/partifactory/src/dev.rs']).returncode==0,'release runtime source differs'
 pathlib.Path(sys.argv[2]).write_text(json.dumps({**release,'gate_commit':subprocess.check_output(['git','rev-parse','HEAD']).decode().strip(),'fresh_source_daemon':sys.argv[3]=='1'},indent=2)+'\n')
 PY
+# Exercise the actual release CLI archive, not a rebuilt or placeholder binary.
+# Keep both the installer and its installations in this run's private directory.
+binstall_dir="$logs/private/binstall-tools"
+mkdir -p "$binstall_dir"
+curl -fLsS --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 120 \
+  https://github.com/cargo-bins/cargo-binstall/releases/download/v1.26.1/cargo-binstall-x86_64-unknown-linux-musl.tgz \
+  -o "$binstall_dir/cargo-binstall.tgz"
+printf '%s  %s\n' 43d379fef8cb450961a14ff113e7bce7b5e1e52db709c776d186f928d8a20a40 \
+  "$binstall_dir/cargo-binstall.tgz" | sha256sum --check
+tar xzf "$binstall_dir/cargo-binstall.tgz" -C "$binstall_dir" cargo-binstall
+python3 tests/deploy/binstall.py --binstall "$binstall_dir/cargo-binstall" \
+  --assets "$PF_RELEASE_ASSETS" --output "$logs/private/binstall" \
+  --report "$logs/public/binstall.json"
 if [ "${PF_E2E_SKIP_BUILD:-0}" != 1 ]; then cargo build -j2 -p partifactory --features "$PF_FEATURES"; fi
 registry="$(docker create --name "pf-deploy-registry-$PF_E2E_RUN" --label pf.harness=1 --memory=256m \
   --tmpfs /var/lib/registry:rw,nosuid,nodev,size=128m -p 127.0.0.1:25000:5000 \
