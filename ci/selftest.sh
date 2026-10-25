@@ -7,6 +7,8 @@ tmp="$(mktemp -d)"
 trap 'chmod -R u+w "$tmp" 2>/dev/null; rm -rf "$tmp"' EXIT
 fail() { echo "selftest: FAIL: $*" >&2; exit 1; }
 
+python3 "$here/tests/render/test_controller.py"
+
 # 1. Boundaries: pf-model gains an adapter dependency.
 cp -R "$here/crates" "$tmp/crates"
 printf '\n[dependencies]\npf-adapter-cloudflare = { path = "../pf-adapter-cloudflare" }\n' >> "$tmp/crates/pf-model/Cargo.toml"

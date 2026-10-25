@@ -104,15 +104,38 @@ def reap():
                 stop()
 
 
-threading.Thread(target=reap, daemon=True).start()
+def cdp_request(connection):
+    """Normalize the initial HTTP Host for the fixed loopback Chrome endpoint."""
+    deadline = time.monotonic() + 5
+    data = b""
+    while b"\r\n\r\n" not in data:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("CDP request header timeout")
+        connection.settimeout(remaining)
+        chunk = connection.recv(16384 - len(data))
+        if not chunk:
+            raise ValueError("incomplete CDP request")
+        data += chunk
+        if len(data) >= 16384 and b"\r\n\r\n" not in data:
+            raise ValueError("CDP request header too large")
+    header, payload = data.split(b"\r\n\r\n", 1)
+    lines = header.split(b"\r\n")
+    headers = [line for line in lines[1:] if line.partition(b":")[0].lower() != b"host"]
+    connection.settimeout(None)
+    return b"\r\n".join([lines[0], b"Host: localhost:9224", *headers]) + b"\r\n\r\n" + payload
 
 # Recent headless-shell versions bind CDP to loopback regardless of its address flag.
 # Expose only that fixed local endpoint on the internal render network.
 class Cdp(socketserver.BaseRequestHandler):
     def handle(self):
         try:
+            # Chrome rejects service-name Host headers, including WebSocket upgrades.
+            # Keep its validation enabled; this proxy always connects to local Chrome.
+            request = cdp_request(self.request)
             with socket.create_connection(("127.0.0.1", 9224), timeout=2) as remote:
                 remote.settimeout(None)
+                remote.sendall(request)
                 peers = {self.request: remote, remote: self.request}
                 while True:
                     ready, _, _ = select.select(list(peers), [], [], 30)
@@ -123,7 +146,7 @@ class Cdp(socketserver.BaseRequestHandler):
                         if not data:
                             return
                         peers[source].sendall(data)
-        except OSError:
+        except (OSError, ValueError):
             pass
 
 
@@ -132,10 +155,16 @@ class CdpServer(socketserver.ThreadingTCPServer):
     daemon_threads = True
 
 
-cdp = CdpServer(("0.0.0.0", 9222), Cdp)
-threading.Thread(target=cdp.serve_forever, daemon=True).start()
-try:
-    http.server.ThreadingHTTPServer(("0.0.0.0", 9223), Handler).serve_forever()
-finally:
-    with guard:
-        stop()
+def main():
+    threading.Thread(target=reap, daemon=True).start()
+    cdp = CdpServer(("0.0.0.0", 9222), Cdp)
+    threading.Thread(target=cdp.serve_forever, daemon=True).start()
+    try:
+        http.server.ThreadingHTTPServer(("0.0.0.0", 9223), Handler).serve_forever()
+    finally:
+        with guard:
+            stop()
+
+
+if __name__ == "__main__":
+    main()
