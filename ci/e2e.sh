@@ -106,6 +106,9 @@ note "ok   rate-limit self-test: 429 with $(grep -i '^retry-after' <<<"$hdrs" | 
 
 # Build fixture pages through the running server, then mint their capabilities.
 python3 "$h/seed-part.py"
+if [ "${PF_E2E_RENDER:-0}" = 1 ]; then
+  python3 "$repo/tests/render/isolation.py" "$run" | tee -a "$summary"
+fi
 
 # 3. Playwright, all four projects.
 note "--- playwright"
