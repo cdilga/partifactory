@@ -420,6 +420,32 @@ async fn handle(store: &Store, dir: &StaticDirectory, req: &Value) -> Result<Val
     let name = || s(args, "name");
     let request_id = args["request_id"].as_str();
     match op {
+        "grant" => {
+            let name = name()?;
+            let subject = s(args, "subject")?;
+            let principal = caller.principal.clone();
+            let policy = store.parts.policy.clone();
+            let now = store.host.now();
+            let bumped = store
+                .db
+                .write(move |tx| {
+                    let part = find_part(tx, &name)?.ok_or_else(|| PfError::not_found("part"))?;
+                    let role = policy.role(tx, &principal, &part.id, now)?;
+                    pf_policy::grants::authorize(role, false, None, &subject, pf_policy::VIEW)?;
+                    pf_policy::grants::set_grant(
+                        tx,
+                        &pf_policy::grants::Actor::person(&principal.user_id),
+                        &pf_policy::grants::Target::Part(part.id),
+                        &subject,
+                        pf_policy::VIEW,
+                        None,
+                        now,
+                    )
+                })
+                .await?;
+            pf_policy::mirror(&store.epochs, &bumped, "dev_fixture_grant");
+            Ok(json!({"granted": true}))
+        }
         "build" | "build-status" => {
             let n = name()?;
             let principal = caller.principal.clone();

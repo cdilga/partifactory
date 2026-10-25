@@ -34,6 +34,10 @@ def compose(*args, **kwargs):
     return command([H / 'compose.sh', *args], **kwargs)
 
 
+def database():
+    return sqlite3.connect(f'file:{RUN / "data/partifactory.db"}?mode=ro', uri=True)
+
+
 def stop_server():
     if ENV['PF_HARNESS_MODE'] == 'host':
         pid = RUN / 'pf.pid'
@@ -126,21 +130,21 @@ def main():
     dev('sign-in', {'username': 'admin'})
     dev('put', {'name': 'identity', 'title': 'Identity group fixture', 'kind': 'html', 'request_id': 'identity-gate-seed',
                 'files': {'index.html': '<!doctype html><h1>Identity group fixture</h1>'}})
-    with sqlite3.connect(RUN / 'data/partifactory.db') as db:
-        part, owner = db.execute("SELECT id,owner_user_id FROM parts WHERE name='identity'").fetchone()
-        db.execute("INSERT INTO grants(target_kind,target_id,subject,role,created_by,created_at) VALUES('part',?,'group:household',0,?,?)",
-                   (part, owner, int(time.time() * 1000)))
+    # Set fixtures through the server's writer, including when the non-root container owns DB files.
+    dev('grant', {'name': 'identity', 'subject': 'group:household'})
+    with database() as db:
+        part = db.execute("SELECT id FROM parts WHERE name='identity'").fetchone()[0]
     stop_server()
     site = (RUN / 'site.toml').read_text().replace('https://dex.pf.test/dex', 'https://dex2.pf.test/dex')
     site = site.replace('client_id = "partifactory"', 'client_id = "partifactory-second"')
     # A real provider which has no groups uses a different configured claim key.
     (RUN / 'site.toml').write_text(site.replace('groups_claim = "groups"', 'groups_claim = "roles"').replace('audience_group = "household"', 'audience_group = ""'))
     start_server()
-    with sqlite3.connect(RUN / 'data/partifactory.db') as db:
+    with database() as db:
         assert db.execute("SELECT count(*) FROM users WHERE idp_issuer='https://dex2.pf.test/dex'").fetchone()[0] == 0
     for project in ['chromium-desktop', 'webkit-mobile']:
         browser('second', project)
-        with sqlite3.connect(RUN / 'data/partifactory.db') as db:
+        with database() as db:
             users = db.execute("SELECT id FROM users WHERE idp_issuer='https://dex2.pf.test/dex'").fetchall()
             assert len(users) == 1
             assert db.execute("SELECT count(*) FROM spaces WHERE owner_user_id=? AND kind='personal'", users[0]).fetchone()[0] == 1
@@ -223,7 +227,7 @@ def main():
                 time.sleep(1)
             assert (private / 'group-before.json').exists(), 'browser did not request mutation'
             user = json.loads((private / 'group-before.json').read_text())['user']
-            with sqlite3.connect(RUN / 'data/partifactory.db') as db:
+            with database() as db:
                 assert db.execute("SELECT count(*) FROM group_members WHERE user_id=? AND group_name='household'", (user,)).fetchone()[0] == 1
                 before = db.execute("SELECT coalesce((SELECT epoch FROM epochs WHERE key=?),0)", ('part:' + part,)).fetchone()[0]
             graphql(f'mutation {{ removeUserFromGroup(userId:"admin",groupId:{group}) {{ ok }} }}', token)
@@ -231,7 +235,7 @@ def main():
             (private / 'group-after.ready').touch()
             assert proc.wait(timeout=60) == 0, 'group refresh browser gate failed'
             (LOGS / 'results.json').rename(LOGS / f'results-group-{project}.json')
-            with sqlite3.connect(RUN / 'data/partifactory.db') as db:
+            with database() as db:
                 assert db.execute("SELECT count(*) FROM group_members WHERE user_id=? AND group_name='household'", (user,)).fetchone()[0] == 0
                 after = db.execute("SELECT epoch FROM epochs WHERE key=?", ('part:' + part,)).fetchone()[0]
                 assert after > before
@@ -242,7 +246,7 @@ def main():
             if proc.poll() is None:
                 proc.terminate()
                 proc.wait(timeout=15)
-    with sqlite3.connect(RUN / 'data/partifactory.db') as db:
+    with database() as db:
         assert db.execute("SELECT count(*) FROM audit WHERE actor='break-glass' AND action='admin.break_glass.used'").fetchone()[0] == 1
     (LOGS / 'summary.json').write_text(json.dumps({'pass': True, 'source_commit': command(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip(),
         'dev_binary_sha256': hashlib.sha256(BIN.read_bytes()).hexdigest(),
