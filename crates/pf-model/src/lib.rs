@@ -7,6 +7,8 @@
 
 pub mod builds;
 pub mod create;
+pub mod data;
+pub mod edit;
 pub mod error;
 pub mod events;
 pub mod idem;
@@ -15,6 +17,7 @@ pub mod lifecycle;
 pub mod manifest;
 pub mod names;
 pub mod read;
+pub mod rebase;
 pub mod spaces;
 pub mod version;
 

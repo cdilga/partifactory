@@ -107,5 +107,13 @@ seed("bundle", "files", {
     "assets/chunk.js": 'export const value="loaded";',
 })
 seed("mirrored", "html", {"index.html": '<!doctype html><h1 id="mirrored">Mirrored libraries</h1><script type="module" src="https://unpkg.com/widget@latest/main.js"></script><link rel="stylesheet" href="https://unpkg.com/widget@1.2.3/style.css"><script src="https://unpkg.com/unknown.js"></script>'})
+# The executable contract is the shared-data fixture, not a separately maintained copy.
+contract = REPO.joinpath("docs/agent-contract.md").read_text()
+board = contract.split('Hermes writes `board.html`:', 1)[1].split('```html\n', 1)[1].split('\n```', 1)[0]
+seed("pixel", "html", {"index.html": board})
+seed("public-pixel", "html", {"index.html": board})
+for browser in ("chromium-desktop", "chromium-mobile", "webkit-mobile", "firefox-desktop"):
+    seed("pixel-" + browser, "html", {"index.html": board})
+    seed("pixel-undo-" + browser, "html", {"index.html": board})
 RUN.joinpath("part-fixture.json").write_text(json.dumps(fixtures))
 print("seed-part: all four kinds built; mirrored CDN graph and capabilities ready")

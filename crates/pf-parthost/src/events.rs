@@ -3,7 +3,7 @@ use axum::{
     extract::Request,
     response::{
         IntoResponse, Response,
-        sse::{Event, KeepAlive, Sse},
+        sse::{Event, Sse},
     },
 };
 use serde_json::Value;
@@ -55,32 +55,66 @@ pub async fn handle(s: PartHost, req: Request) -> Response {
         Ok(v) => v,
         Err(r) => return *r,
     };
-    let live = match s.live(&c.h, c.v.as_deref()).await {
-        Ok(Some(l)) if l.part_id == c.p => l,
+    let unsandboxed = match s.live(&c.h, c.v.as_deref()).await {
+        Ok(Some(l)) if l.part_id == c.p => l.unsandboxed,
+        Ok(None) if c.v.is_none() => {
+            let part = c.p.clone();
+            let name = c.h.clone();
+            match s.read(move|db| {
+                use pf_db::rusqlite::OptionalExtension;
+                Ok(db.query_row("SELECT isolation='unsandboxed' FROM parts WHERE id=?1 AND name=?2 AND deleted_at IS NULL",pf_db::rusqlite::params![part,name],|r|r.get::<_,bool>(0)).optional()?)
+            }).await {
+                Ok(Some(unsandboxed))=>unsandboxed,
+                _=>return http::StatusCode::NOT_FOUND.into_response(),
+            }
+        }
         _ => return http::StatusCode::NOT_FOUND.into_response(),
     };
-    if !crate::rt::origin_allowed(&s, &req, &c, live.unsandboxed) {
+    if !crate::rt::origin_allowed(&s, &req, &c, unsandboxed) {
         return http::StatusCode::FORBIDDEN.into_response();
     }
     let rx = s.events().subscribe(&c.p);
-    let stream = futures_util::stream::unfold((rx, c, s), |(mut rx, c, s)| async move {
-        if s.now() / 1000 >= c.w * 60
-            || c.e < s.deps().epochs.part_epoch(&c.p)
-            || c.me < s.deps().epochs.get(&pf_caps::minter_key(&c.m))
-            || c.b < s.deps().epochs.boot_floor()
-        {
-            return None;
-        }
-        tokio::select! {
-            result=rx.recv()=>match result {
-                Ok(e)=>Some((Ok::<_,Infallible>(Event::default().event(e.kind).data(e.data.to_string())),(rx,c,s))),
-                Err(broadcast::error::RecvError::Lagged(_))=>Some((Ok(Event::default().event("resync").data("{}")),(rx,c,s))),
-                Err(_)=>None,
-            },
-            _=tokio::time::sleep(Duration::from_secs(15))=>Some((Ok(Event::default().comment("keepalive")),(rx,c,s)))
-        }
-    });
-    Sse::new(stream)
-        .keep_alive(KeepAlive::default())
-        .into_response()
+    let data_rx = s.data_events().subscribe(&c.p);
+    let part = c.p.clone();
+    let now = s.now();
+    let _=s.write(move|tx| {tx.execute("INSERT INTO kv(key,value) VALUES(?1,CAST(?2 AS TEXT)) ON CONFLICT(key) DO UPDATE SET value=excluded.value",pf_db::rusqlite::params![format!("data.opened:{part}"),now])?; Ok(())}).await;
+    let stream = futures_util::stream::unfold(
+        (rx, data_rx, c, s),
+        |(mut rx, mut data_rx, c, s)| async move {
+            if s.now() / 1000 >= c.w * 60
+                || c.e < s.deps().epochs.part_epoch(&c.p)
+                || c.me < s.deps().epochs.get(&pf_caps::minter_key(&c.m))
+                || c.b < s.deps().epochs.boot_floor()
+            {
+                return None;
+            }
+            tokio::select! {
+                result=rx.recv()=>match result {
+                    Ok(mut e)=>{
+                        if e.kind=="pf:version" {
+                            let part=c.p.clone();
+                            e.data=s.read(move|db| {
+                                let (n,live):(i64,Option<i64>)=db.query_row("SELECT head_n,(SELECT n FROM versions WHERE id=parts.live_version_id) FROM parts WHERE id=?1",[part],|r|Ok((r.get(0)?,r.get(1)?)))?;
+                                Ok(serde_json::json!({"n":n,"live":live}))
+                            }).await.unwrap_or_else(|_|serde_json::json!({}));
+                        }
+                        Some((Ok::<_,Infallible>(Event::default().event(e.kind).data(e.data.to_string())),(rx,data_rx,c,s)))
+                    },
+                    Err(broadcast::error::RecvError::Lagged(_))=>Some((Ok(Event::default().event("pf:resync").data("{}")),(rx,data_rx,c,s))),
+                    Err(_)=>None,
+                },
+                result=data_rx.recv()=>match result {
+                    Ok(e) if e.ty=="data.changed"=>{
+                        tracing::info!(event="sse.deliver",r#type=%e.ty,part_id=%c.p);
+                        Some((Ok(Event::default().id(e.seq.to_string()).event(e.ty).data(e.payload.to_string())),(rx,data_rx,c,s)))
+                    },
+                    Ok(_)=>Some((Ok(Event::default().comment("keepalive")),(rx,data_rx,c,s))),
+                    Err(broadcast::error::RecvError::Lagged(_))=>Some((Ok(Event::default().event("pf:resync").data("{}")),(rx,data_rx,c,s))),
+                    Err(_)=>None,
+                },
+                _=tokio::time::sleep(Duration::from_secs(25))=>Some((Ok(Event::default().comment("keepalive")),(rx,data_rx,c,s)))
+            }
+        },
+    );
+    Sse::new(stream).into_response()
 }

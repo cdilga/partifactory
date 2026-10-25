@@ -52,6 +52,7 @@
   function rt(op, args) {
     return nativeFetch(RT, {
       method: 'POST', headers: { 'Content-Type': 'text/plain' }, credentials: 'omit',
+      keepalive: op === 'storage.sync',
       body: JSON.stringify({ op: op, args: args || {} })
     }).then(function (r) {
       if (r.status === 401 && r.headers.get('X-PF-Reauth')) regrant();
@@ -253,12 +254,13 @@
       delete d.tab;
       emit('data.changed', d);
     });
+    es.addEventListener('pf:resync', function () { emit('pf:resync', {}); });
     es.addEventListener('pf:version', function (e) {
       if (framed) parentPost({ type: 'pf:version' });
       else L.reload();
     });
     es.onerror = function () {
-      if (es && es.readyState === 2) { es = null; nativeFetch(L.href, { method: 'HEAD' }).then(function (r) { if (r.status === 401) regrant(); }); }
+      if (es && es.readyState === 2) { es.close(); es = null; nativeFetch(L.href, { method: 'HEAD' }).then(function (r) { if (r.status === 401) regrant(); else setTimeout(openEvents, 1000); }).catch(function () { setTimeout(openEvents, 2000); }); }
     };
   }
 

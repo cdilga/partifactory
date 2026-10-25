@@ -41,7 +41,7 @@ fi
 # Docker publishes 443 through its existing port helper; no host file or DNS settings change.
 export PF_HTTPS_PORT="${PF_HTTPS_PORT:-443}"
 
-out="$repo/target/e2e-logs/ios-sim/$spec"
+out="${PF_IOS_EVIDENCE_ROOT:-$repo/target/e2e-logs/ios-sim}/$spec"
 mkdir -p "$out"
 # Evidence from an earlier attempt must never make a failed run look successful.
 rm -f "$out/report.json" "$out/screenshot.png"
@@ -110,7 +110,8 @@ port="$PF_HTTPS_PORT"
 sep='?'
 [[ "$page" == *\?* ]] && sep='&'
 url="https://parts.$PF_APEX:$port$page${sep}spec=$spec&nonce=$nonce"
-echo "ios-sim: $device_name on $runtime_name opening $url"
+# A frame query contains a capability: keep it out of command logs.
+echo "ios-sim: $device_name on $runtime_name opening https://parts.$PF_APEX:$port/_dev/selftest?spec=$spec&nonce=$nonce"
 # On a cold Safari, openurl may time out even after handing the URL to the browser.
 # The page's collector POST, rather than this launch command, decides the outcome.
 xcrun simctl openurl "$udid" "$url" >"$out/openurl.log" 2>&1 &

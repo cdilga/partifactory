@@ -103,6 +103,7 @@ pub(crate) struct Inner {
     pub wrapper_hash: RwLock<String>,
     pub shell_css_hash: RwLock<Option<String>>,
     pub events: RtEvents,
+    pub data_events: RwLock<pf_model::events::EventBus>,
     pub err_limits: Mutex<HashMap<String, (i64, u32)>>,
     pub ops: RwLock<HashMap<String, RtOp>>,
     pub clock: RwLock<Clock>,
@@ -133,6 +134,7 @@ impl PartHost {
                 wrapper_hash: RwLock::new(String::new()),
                 shell_css_hash: RwLock::new(None),
                 events: RtEvents::default(),
+                data_events: RwLock::new(pf_model::events::EventBus::new()),
                 err_limits: Mutex::default(),
                 ops: RwLock::default(),
                 clock: RwLock::new(Arc::new(now_ms)),
@@ -159,6 +161,13 @@ impl PartHost {
 
     pub fn config(&self) -> &PartHostConfig {
         &self.inner.cfg
+    }
+
+    pub fn links(&self) -> pf_links::LinkService {
+        let cfg = self.config().clone();
+        pf_links::LinkService::new(self.deps().db.clone(), self.deps().blobs.clone(),
+            self.deps().epochs.clone(), self.deps().keys.clone(), cfg.workspace_origin(),
+            move |name| cfg.part_origin(name))
     }
 
     pub fn deps(&self) -> &PartHostDeps {
@@ -191,6 +200,16 @@ impl PartHost {
     /// The live events hub (`data.changed`, `pf:version`) for `/_rt/events`.
     pub fn events(&self) -> &RtEvents {
         &self.inner.events
+    }
+
+    /// Use the service's committed-event bus for shared writes and snapshot restores.
+    pub fn with_data_events(self, bus: pf_model::events::EventBus) -> Self {
+        *self.inner.data_events.write().unwrap_or_else(|e|e.into_inner()) = bus;
+        self
+    }
+
+    pub(crate) fn data_events(&self) -> pf_model::events::EventBus {
+        self.inner.data_events.read().unwrap_or_else(|e|e.into_inner()).clone()
     }
 
     /// Register (or replace) a `/_rt/v1` op. The shared data bead extends the dispatch this way.
@@ -340,12 +359,16 @@ fn wrapper_route(
 /// routes, and a coarse per-IP rate rule on `/_rt`.
 pub fn install(b: &mut ServerBuilder, host: &PartHost) {
     b.ext(host.clone());
+    pf_links::web::install(b, &host.links());
     b.rate_rule(pf_serve::RateRule::per_ip(
         "rt",
         "rt",
         1200,
         Duration::from_secs(60),
     ));
+    for route in ["data.read", "data.write"] {
+        b.rate_rule(pf_serve::RateRule::per_principal(route, "rt", 600, Duration::from_secs(60)));
+    }
     b.part(host.part_router());
     b.blobs(host.blob_router());
 }

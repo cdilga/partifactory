@@ -68,6 +68,15 @@ pub async fn handle(s: PartHost, req: Request) -> Response {
     {
         return http::StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
     }
+    let client_ip = req
+        .extensions()
+        .get::<pf_serve::ClientAddr>()
+        .map(|c| c.0.to_string())
+        .unwrap_or_default();
+    let rates = req
+        .extensions()
+        .get::<pf_serve::AppState>()
+        .map(|s| s.rates().clone());
     let body = match axum::body::to_bytes(req.into_body(), 1 << 20).await {
         Ok(b) => b,
         Err(_) => return content::error(PfError::new("too_large", "runtime request too large")),
@@ -77,6 +86,21 @@ pub async fn handle(s: PartHost, req: Request) -> Response {
         Err(_) => return content::error(PfError::invalid("body", "expected JSON")),
     };
     let name = input.get("op").and_then(Value::as_str).unwrap_or("");
+    let principal = if let Some(guest) = &c.g {
+        format!(
+            "guest:{}:{guest}",
+            c.s.strip_prefix("link:").unwrap_or(&c.s)
+        )
+    } else {
+        c.s.clone()
+    };
+    if c.s.starts_with("link:") && !name.starts_with("storage.") {
+        tracing::info!(event="rt.op",op=name,principal=%principal,outcome="forbidden");
+        return content::error(PfError::new(
+            "forbidden",
+            "link capabilities only permit shared storage",
+        ));
+    }
     let op = s
         .inner
         .ops
@@ -87,6 +111,60 @@ pub async fn handle(s: PartHost, req: Request) -> Response {
     let Some(op) = op else {
         return content::error(PfError::invalid("op", "unknown runtime operation"));
     };
+    if name.starts_with("storage.") {
+        let route = if matches!(name, "storage.get" | "storage.getMany" | "storage.list") {
+            "data.read"
+        } else {
+            "data.write"
+        };
+        let mut checks = vec![(route, format!("{}:{}", c.s, c.p))];
+        if c.s.starts_with("link:") {
+            if route == "data.read" {
+                checks.push((
+                    "guest_read",
+                    format!("{}:{}", c.s, c.g.as_deref().unwrap_or("view")),
+                ));
+            } else {
+                checks.push((
+                    "guest_write",
+                    format!("{}:{}", c.s, c.g.as_deref().unwrap_or("view")),
+                ));
+                checks.push(("guest_write_ip", client_ip));
+            }
+        }
+        for (route, key) in checks {
+            if let Some(rates) = &rates
+                && let Err(wait) = rates.check(route, &key)
+            {
+                let secs = wait.as_secs().saturating_add(1);
+                let route_class = if route.starts_with("guest_") {
+                    "guest"
+                } else {
+                    "rt"
+                };
+                tracing::warn!(
+                    event = "ratelimit.trip",
+                    route,
+                    route_class,
+                    retry_after_s = secs,
+                    outcome = "rate_limited"
+                );
+                pf_obs::metrics::metrics()
+                    .rate_limited
+                    .with_label_values(&[route_class])
+                    .inc();
+                let mut response = content::error(
+                    PfError::new("rate_limited", "too many data operations")
+                        .with("retry_after", secs),
+                );
+                response.headers_mut().insert(
+                    http::header::RETRY_AFTER,
+                    http::HeaderValue::from_str(&secs.to_string()).expect("digits"),
+                );
+                return response;
+            }
+        }
+    }
     let result = op(
         RtCtx {
             host: s.clone(),
@@ -99,6 +177,7 @@ pub async fn handle(s: PartHost, req: Request) -> Response {
     tracing::info!(
         event = "rt.op",
         op = name,
+        principal = %principal,
         outcome = if result.is_ok() { "ok" } else { "error" }
     );
     let mut r = match result {
@@ -115,6 +194,8 @@ pub async fn handle(s: PartHost, req: Request) -> Response {
 pub(crate) fn register_builtin(s: &PartHost) {
     for name in [
         "storage.get",
+        "storage.getMany",
+        "storage.list",
         "storage.set",
         "storage.delete",
         "storage.sync",

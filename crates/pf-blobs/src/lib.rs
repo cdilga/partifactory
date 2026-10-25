@@ -109,6 +109,11 @@ impl BlobStore {
         Ok(Self { root, budget })
     }
 
+    /// Check the shared disk budget before a database-backed allocation or undo snapshot.
+    pub fn check_capacity(&self, incoming: u64) -> Result<(), BlobError> {
+        if self.budget.is_full(incoming) {Err(BlobError::StorageFull)} else {Ok(())}
+    }
+
     pub fn root(&self) -> &Path {
         &self.root
     }
