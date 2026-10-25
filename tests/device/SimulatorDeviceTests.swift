@@ -117,12 +117,20 @@ final class SimulatorDeviceTests: XCTestCase {
     }
 
     func assertCleanWrapperAddress() {
-        let address = safari.textFields["URL"].firstMatch
+        // Safari 27 calls its collapsed native address field TabBarItemTitle /
+        // Address. Expand it so the check sees the full URL, including fragments.
+        let collapsed = safari.textFields.matching(NSPredicate(format: "identifier == 'TabBarItemTitle' OR identifier == 'URL' OR label == 'Address'")).firstMatch
+        XCTAssertTrue(collapsed.waitForExistence(timeout: 15))
+        collapsed.tap()
+        let address = safari.textFields.firstMatch
         XCTAssertTrue(address.waitForExistence(timeout: 15))
         let value = String(describing: address.value ?? "")
         XCTAssertTrue(value.contains("ios-wrapper-part.localtest.me"), value)
         XCTAssertFalse(value.contains("#"), value)
         XCTAssertFalse(value.contains("/c/"), value)
+        let cancel = safari.buttons["Cancel"].firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout: 10))
+        cancel.tap()
     }
 
     func testMobileSafariWrapperRegrant() throws {
