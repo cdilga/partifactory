@@ -4,6 +4,8 @@ services:
   partifactory:
     image: ${PF_HARNESS_DEV_IMAGE:-pf-harness-dev:local}
     entrypoint: [/usr/local/bin/partifactory]
+    # Compose clears an image's CMD when entrypoint is overridden.
+    command: [serve]
     environment:
       PF_DEV_API_TOKEN_FILE: /run/secrets/api_token
       PF_DEV_IDENTITY: /run/pf/identity.toml
