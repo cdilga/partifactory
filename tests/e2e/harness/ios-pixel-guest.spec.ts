@@ -104,6 +104,8 @@ load().then(async()=>{window.partifactory.ready();await deviceWait("admin_ready"
   await page.getByLabel('Link access').selectOption('contribute');
   await page.getByRole('button',{name:'Copy link',exact:true}).click();
   const url=await page.getByLabel('Public link',{exact:true}).inputValue();
+  const createdLinks=await (await page.request.get(base+`/api/chrome/v1/${name}/links`,{headers:{Origin:`https://${name}-part.${apex}`}})).json();
+  const linkId=createdLinks.links.find((value:any)=>value.mode==='contribute').id;
   const frame=page.frames().find(f=>f.url().includes('/c/'))!;
   await frame.evaluate(()=>{
     (window as any).devicePixelSeen=new Promise<number>(resolve=>{
@@ -116,10 +118,21 @@ load().then(async()=>{window.partifactory.ready();await deviceWait("admin_ready"
   fs.writeFileSync(path.join(dir,'guest.json'),JSON.stringify({url,nonce}),{mode:0o600});
   const painted=await wait('guest_painted');
   const seen=await frame.evaluate(()=> (window as any).devicePixelSeen);
-  const elapsed=Math.max(0,seen-Number(painted.at));
-  expect(elapsed,'guest storage.set response to admin computed style').toBeLessThan(1000);
+  // Safari may run on a different host from this native amd64 harness. The
+  // successful rt.op log is emitted before constructing the guest's response.
+  // Its clock and Chromium's Date.now share the Linux kernel. Thus this measures
+  // a conservative response→computed-style upper bound without assuming Mac and
+  // Linux wall clocks agree. Keep their raw difference only as a diagnostic.
+  const guestWrites=async()=> (await logs('rt.op')).filter((row:any)=>row.op==='storage.set'&&row.principal?.startsWith(`guest:${linkId}:`)&&row.outcome==='ok');
+  await expect.poll(async()=> (await guestWrites()).length).toBe(1);
+  const write=(await guestWrites())[0];
+  const completed=Date.parse(write.timestamp);
+  expect(Number.isFinite(completed)).toBe(true);
+  const elapsed=Math.max(0,seen-completed)+1; // include millisecond timestamp quantization
+  const rawCrossHostClockDifferenceMs=seen-Number(painted.at);
+  expect(elapsed,'server completion to admin style bounds guest response→style').toBeLessThan(1000);
   await expect(board.locator('[data-key="px:0:0"]')).toHaveCSS('background-color','rgb(228, 87, 46)');
-  await report('admin_live_under_1s',{at:String(elapsed)});
+  await report('admin_live_under_1s',{at:String(elapsed),measurement:'same-host-server-completion-upper-bound'});
   const frozenResponse=page.waitForResponse(response=>response.request().method()==='POST' && new URL(response.url()).pathname.startsWith(`/api/chrome/v1/${name}/links/`));
   await page.getByRole('button',{name:'Freeze',exact:true}).click();
   expect((await frozenResponse).status()).toBe(200);
@@ -135,5 +148,5 @@ load().then(async()=>{window.partifactory.ready();await deviceWait("admin_ready"
   expect(events.some(row=>String(row.key).startsWith('minter:link:'))).toBe(true);
   const writes=await logs('rt.op');
   expect(writes.some(row=>['stale_epoch','forbidden_view_only'].includes(String(row.outcome)))).toBe(true);
-  fs.writeFileSync(path.join(dir,'admin-report.json'),JSON.stringify({pass:true,responseToComputedStyleMs:elapsed,refusal:refused.code,events,writes},null,2));
+  fs.writeFileSync(path.join(dir,'admin-report.json'),JSON.stringify({pass:true,responseToComputedStyleMs:elapsed,measurement:'same-host-server-completion-upper-bound',serverWriteTimestamp:write.timestamp,adminComputedStyleTimestamp:seen,rawCrossHostClockDifferenceMs,linkId,refusal:refused.code,events,writes},null,2));
 });

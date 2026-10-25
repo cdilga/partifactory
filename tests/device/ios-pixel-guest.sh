@@ -74,7 +74,7 @@ tests/e2e/harness/compose.sh --profile browsers run --rm --name "$admin_containe
   > "$out/admin.log" 2>&1 &
 admin_pid=$!
 python3 - "$PF_RUN_DIR" "$out" "$nonce" "$admin_pid" <<'PY'
-import json,os,pathlib,plistlib,sys,time
+import json,os,pathlib,plistlib,subprocess,sys,time
 run,out,nonce,pid=pathlib.Path(sys.argv[1]),pathlib.Path(sys.argv[2]),sys.argv[3],int(sys.argv[4])
 source=next(pathlib.Path('target/device-xctest/Build/Products').glob('PartifactoryDevice_*.xctestrun'))
 deadline=time.monotonic()+150
@@ -86,6 +86,8 @@ while True:
     try: os.kill(pid,0)
     except ProcessLookupError: sys.exit('Chromium setup failed; inspect admin.log')
     if time.monotonic()>deadline: sys.exit('Chromium setup barrier timed out; inspect admin.log')
+    if os.environ.get('PF_REMOTE_READER'):
+        subprocess.run(['tests/device/remote-run.sh','pull','device-pixel/guest.json'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=20)
     time.sleep(.1)
 value=plistlib.loads(source.read_bytes())
 env=value['PartifactoryDevice']['EnvironmentVariables']
@@ -100,6 +102,10 @@ xcodebuild test-without-building -xctestrun target/device-xctest/Build/Products/
   -collect-test-diagnostics never -resultBundlePath "$out/result.xcresult" > "$out/test.log" 2>&1
 wait "$admin_pid"
 admin_pid=
+if [[ -n "${PF_REMOTE_READER:-}" ]]; then
+  tests/device/remote-run.sh pull device-pixel/admin-report.json
+  tests/device/remote-run.sh pull device-pixel/admin-after-freeze.png
+fi
 xcrun xcresulttool export attachments --path "$out/result.xcresult" \
   --output-path "$out/screenshots" --filter '*.png' > "$out/attachments.log" 2>&1
 curl -fsS --cacert "$PF_CA" --resolve "blobs-part.$PF_APEX:$PF_HTTPS_PORT:127.0.0.1" \
@@ -114,6 +120,6 @@ assert all(r.get('os') for r in rows if r['lane']=='ios-simulator'),rows
 admin=json.loads((run/'device-pixel/admin-report.json').read_text());assert admin['pass']
 screenshots=sorted(str(p.relative_to(out)) for p in (out/'screenshots').glob('*.png'))
 assert len(screenshots)==2,screenshots
-(out/'report.json').write_text(json.dumps({'pass':True,'runtime':sys.argv[3],'harness':'release' if os.environ.get('PF_HARNESS_RELEASE')=='1' else 'dev','image':os.environ.get('PF_HARNESS_IMAGE'),'checks':{item:True for item in required},'responseToComputedStyleMs':admin['responseToComputedStyleMs'],'reports':rows,'screenshots':screenshots},indent=2))
+(out/'report.json').write_text(json.dumps({'pass':True,'runtime':sys.argv[3],'harness':'release' if os.environ.get('PF_HARNESS_RELEASE')=='1' else 'dev','image':os.environ.get('PF_HARNESS_IMAGE'),'checks':{item:True for item in required},'responseToComputedStyleMs':admin['responseToComputedStyleMs'],'measurement':admin['measurement'],'serverWriteTimestamp':admin['serverWriteTimestamp'],'adminComputedStyleTimestamp':admin['adminComputedStyleTimestamp'],'rawCrossHostClockDifferenceMs':admin['rawCrossHostClockDifferenceMs'],'reports':rows,'screenshots':screenshots},indent=2))
 print('ios pixel guest: actual Safari paint, admin update <1s, Freeze refusal/revert PASS; '+str(out))
 PY

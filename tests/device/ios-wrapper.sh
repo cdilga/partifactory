@@ -9,9 +9,17 @@ cd "$repo"
 scripts/disk-guard.sh
 export PF_APEX="${PF_APEX:-localtest.me}" PF_HTTPS_PORT="${PF_HTTPS_PORT:-443}" PF_E2E_RENDER=0
 [[ "$PF_APEX" = localtest.me ]] || { echo 'ios wrapper uses localtest.me without hosts edits' >&2;exit 2; }
-[[ -z "${PF_RUN_DIR:-}" ]] || { echo 'ios wrapper requires its own fresh harness' >&2;exit 2; }
-export PF_E2E_RUN="${PF_E2E_RUN:-iwr-$(date +%H%M%S)}" PF_HARNESS_MODE=container
-export PF_RUN_DIR="$repo/target/e2e-runs/$PF_E2E_RUN"
+owned=0
+if [[ -n "${PF_RUN_DIR:-}" ]]; then
+  [[ "${PF_IOS_PREPARED_FRESH:-0}" = 1 && -n "${PF_REMOTE_READER:-}" ]] || {
+    echo 'ios wrapper requires its own fresh harness or an explicitly prepared fresh remote source' >&2;exit 2;
+  }
+  : "${PF_E2E_RUN:?requires the actual prepared remote run identifier}"
+else
+  export PF_E2E_RUN="${PF_E2E_RUN:-iwr-$(date +%H%M%S)}" PF_HARNESS_MODE=container
+  export PF_RUN_DIR="$repo/target/e2e-runs/$PF_E2E_RUN"
+  owned=1
+fi
 out="$repo/target/e2e-logs/ios-sim/wrapper-regrant/$PF_E2E_RUN"
 mkdir -p "$out"
 udid= observer=
@@ -21,12 +29,26 @@ cleanup(){
   if [[ -d "$out/result.xcresult" && ! -d "$out/screenshots" ]]; then
     xcrun xcresulttool export attachments --path "$out/result.xcresult" --output-path "$out/screenshots" --filter '*.png' > "$out/attachments.log" 2>&1 || true
   fi
-  tests/e2e/harness/down.sh "$PF_RUN_DIR" || true
+  if [[ "$owned" = 1 ]];then tests/e2e/harness/down.sh "$PF_RUN_DIR" || true;fi
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
-tests/e2e/harness/up.sh >/dev/null
+if [[ "$owned" = 1 ]];then tests/e2e/harness/up.sh >/dev/null;fi
 set -a;source "$PF_RUN_DIR/env";set +a
+if [[ "$owned" = 0 ]];then
+  # Check the actual source process before any setup flow: no previously opened
+  # wrapper or created fixture can be relabelled as a fresh first-open observation.
+  tests/device/remote-run.sh pull compose.env
+  python3 - "$out/fresh-source.json" <<'PY'
+import json,pathlib,subprocess,sys
+raw=subprocess.run(['tests/e2e/harness/compose.sh','--profile','container','logs','--no-color','--no-log-prefix','partifactory'],capture_output=True,text=True,check=True,timeout=20).stdout
+rows=[json.loads(line) for line in raw.splitlines() if line.startswith('{')]
+boots=[r['boot_epoch'] for r in rows if r.get('event')=='store.ready']
+assert boots==[1],('source must be a fresh data directory and first process',boots)
+assert not any(r.get('event') in ['op','part.write','wrapper.serve','chrome.grant','link.create'] or r.get('path')=='/grant' for r in rows), 'source has already been used'
+pathlib.Path(sys.argv[1]).write_text(json.dumps({'fresh':True,'bootEpoch':1,'logRows':len(rows)}))
+PY
+fi
 nonce="$(openssl rand -hex 8)"
 ready=0
 for attempt in {1..12}; do
