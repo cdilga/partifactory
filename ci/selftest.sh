@@ -57,6 +57,11 @@ echo new > "$t/debug/deps/libnew.rlib"
 echo new > "$t/debug/incremental/new-def/x"
 touch -t 202001010000 "$t/debug/deps/libold.rlib" "$t/debug/incremental/old-abc"
 for i in 1 2 3 4 5 6 7; do mkdir -p "$t/e2e-logs/run-$i"; touch -t "20200101000$i" "$t/e2e-logs/run-$i"; done
+# ZFS accounts allocated blocks when its transaction group is committed. Flush the
+# fixture before testing du-based limits, otherwise freshly written random bytes
+# can still report zero blocks on the shared runners.
+sync
+echo "selftest: fixture target allocation $(du -sk "$t" | awk '{print $1}') KiB"
 if PF_TARGET_DIR="$t" PF_TARGET_MAX_GB=0.002 PF_CLEAN_NO_DOCKER=1 "$here/scripts/disk-guard.sh" >/dev/null 2>&1; then
   fail "disk-guard passed an oversized target/"
 fi
