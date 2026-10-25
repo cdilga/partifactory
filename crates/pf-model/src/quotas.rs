@@ -170,23 +170,23 @@ impl PartService {
         principal: &Principal,
         now: i64,
     ) -> Result<T, PfError> {
-        if let Err(e) = &result {
-            if e.code == "quota_exceeded" {
-                let kind = e.details["kind"].as_str().unwrap_or("unknown").to_owned();
-                let limit = e.details["limit"].as_i64().unwrap_or(0);
-                let key = principal.key();
-                let inserted=self.db.write(move|tx|{
+        if let Err(e) = &result
+            && e.code == "quota_exceeded"
+        {
+            let kind = e.details["kind"].as_str().unwrap_or("unknown").to_owned();
+            let limit = e.details["limit"].as_i64().unwrap_or(0);
+            let key = principal.key();
+            let inserted=self.db.write(move|tx|{
                     let n=tx.execute("INSERT INTO quota_hits(principal,kind,day,at,limit_value) VALUES(?1,?2,?3,?4,?5) ON CONFLICT DO NOTHING",params![key,kind,now.div_euclid(DAY),now,limit])?;
                     Ok::<_,pf_db::DbError>(n)
                 }).await?;
-                if inserted > 0 {
-                    let kind = e.details["kind"].as_str().unwrap_or("unknown");
-                    pf_obs::metrics::metrics()
-                        .quota_hits_total
-                        .with_label_values(&[kind])
-                        .inc();
-                    tracing::warn!(event = "quota.hit", kind, "quota hit recorded");
-                }
+            if inserted > 0 {
+                let kind = e.details["kind"].as_str().unwrap_or("unknown");
+                pf_obs::metrics::metrics()
+                    .quota_hits_total
+                    .with_label_values(&[kind])
+                    .inc();
+                tracing::warn!(event = "quota.hit", kind, "quota hit recorded");
             }
         }
         result

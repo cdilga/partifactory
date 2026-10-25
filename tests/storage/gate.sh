@@ -9,6 +9,7 @@ scripts/disk-guard.sh
 export PF_E2E_RUN="${PF_E2E_RUN:-storage-$(date +%Y%m%d-%H%M%S)}"
 export PF_RUN_DIR="$repo/target/e2e-runs/$PF_E2E_RUN"
 export PF_HARNESS_MODE=host PF_E2E_RENDER=0
+export PF_BIN="${PF_BIN:-$repo/target/debug/partifactory}"
 # The quota loop is the subject of this isolated lane; its requests must reach the writer.
 export PF_INGRESS_RATE_LIMITS=false PF_UNSAFE_RATE_LIMITS=off
 # Scheduled exports are exercised in their own gate; don't allocate a second complete copy
@@ -34,6 +35,8 @@ hdiutil create -size 128m -fs APFS -volname pf-storage-gate -type UDIF "$image" 
 hdiutil attach "$image" -mountpoint "$PF_RUN_DIR/data" -nobrowse -quiet
 attached=1
 "$repo/tests/e2e/harness/up.sh" >/dev/null
+set -a; source "$PF_RUN_DIR/env"; set +a
+python3 tests/e2e/harness/seed-part.py
 python3 tests/storage/seed-pressure.py "$PF_RUN_DIR/data" > "$repo/target/e2e-logs/$PF_E2E_RUN/stores.txt" 2>&1 &
 seed_pid=$!
 # Browser containers already have an exact host resolver and CA; no host /etc/hosts edits.
