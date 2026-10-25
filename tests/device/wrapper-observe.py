@@ -30,8 +30,11 @@ def main():
     def observed(item):return any(r.get('item')==item and r.get('outcome')=='pass' for r in reports())
     def frames():return sum(r.get('item')=='wrapper_frame_loaded' and r.get('outcome')=='pass' for r in reports())
     def logs():
+        # Read the container itself after restart: a Docker log-follow process can exit
+        # on stop, and cannot be the authority for the new process's boot epoch.
+        snapshot=subprocess.run(['tests/e2e/harness/compose.sh','--profile','container','logs','--no-color','--no-log-prefix','partifactory'],env={**os.environ,'PF_RUN_DIR':str(args.run)},capture_output=True,text=True,check=True,timeout=20).stdout
         result=[]
-        for line in (args.run/'server.jsonl').read_text().splitlines():
+        for line in snapshot.splitlines():
             if line.startswith('{'):
                 try:result.append(json.loads(line))
                 except ValueError:pass
