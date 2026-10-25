@@ -27,7 +27,8 @@ site config or the Docker context used for compose) to the new host.
    complete, then retire only the old deployment's resources.
 
 Deployments bump the boot epoch, so an open browser tab may silently re-grant
-once. Full exports can restore retained local identities and encrypted secret
-records; parts-only exports require access to be granted again. The external
+once. Full exports restore retained local identities, sessions and OAuth token
+records; `--include-secrets` adds part/backend secret values and requires
+encryption. Parts-only exports require access to be granted again. The external
 IdP must be restored independently to preserve its original issuer/subject
 pairs, or the admin must review identity regrant proposals.

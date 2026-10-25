@@ -17,7 +17,8 @@ partifactory export cannot recover an external IdP.
 
 Create a portable export with `partifactory export --output latest.tar.zst`.
 Use `--encrypt RECIPIENT` for age encryption. `--include-secrets` requires
-encryption; ordinary exports strip sessions and other secret records. A
+encryption; ordinary full exports strip part/backend secret values and retain
+browser sessions and OAuth token records. A
 `--parts-only` export preserves content/history and audience-name proposals,
 but access must be granted again and agents reconnected after importing it.
 Keep the most recent complete export when pruning: a failed new export must

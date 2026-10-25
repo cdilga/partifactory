@@ -128,6 +128,15 @@ def main():
                     time.sleep(.1)
                 path = urlsplit(old["url"])
                 assert request(ports[1], path.path, path.hostname)[0] in [302, 401]
+                # Full exports preserve browser sessions (only part_secrets are
+                # omitted without --include-secrets). Prove that recovery property,
+                # then exercise a fresh real dev sign-in for the fresh grant gate.
+                assert request(ports[0], "/api/session", cookie=True)[0] == 200, "full export lost its retained session"
+                signed_in = subprocess.run([str(binary), "dev", "--socket", str(dest / "run/dev.sock"), "request", "sign-in"],
+                                           input=json.dumps({"username": "admin"}), capture_output=True,
+                                           text=True, env=restore_env, timeout=30)
+                assert signed_in.returncode == 0, "restored server fresh sign-in failed"
+                session = json.loads(signed_in.stdout)
                 status, headers, _ = request(ports[0], "/grant?part=notes", cookie=True)
                 assert status == 302 and "/c/" in headers.get("location", ""), "fresh grant failed"
                 fresh = urlsplit(headers["location"])
