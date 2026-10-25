@@ -5,8 +5,10 @@
 //! Ops take and return the agent contract's JSON shapes (`part_create`, `part_get`, the
 //! mutation shape), so the HTTP, MCP and CLI surfaces are thin.
 
+pub mod builds;
 pub mod create;
 pub mod error;
+pub mod events;
 pub mod idem;
 pub mod jcs;
 pub mod lifecycle;
@@ -134,6 +136,10 @@ pub struct PartService {
     pub epochs: Arc<EpochStore>,
     /// The clock (unix ms); replaceable in tests.
     pub clock: Arc<dyn Fn() -> i64 + Send + Sync>,
+    /// Committed events, fanned out per part after each commit.
+    pub events: events::EventBus,
+    /// Called after every committed version (the build queue wakes on it). Default: nothing.
+    pub on_commit: Arc<dyn Fn(&version::Committed) + Send + Sync>,
 }
 
 impl PartService {
@@ -151,7 +157,30 @@ impl PartService {
             policy,
             epochs,
             clock: Arc::new(pf_db::ids::now_ms),
+            events: events::EventBus::new(),
+            on_commit: Arc::new(|_| {}),
         }
+    }
+
+    /// Share an event bus (the server's one bus).
+    pub fn with_events(mut self, bus: events::EventBus) -> Self {
+        self.events = bus;
+        self
+    }
+
+    /// Run `f` after every committed version (outside the transaction).
+    pub fn with_on_commit(
+        mut self,
+        f: impl Fn(&version::Committed) + Send + Sync + 'static,
+    ) -> Self {
+        self.on_commit = Arc::new(f);
+        self
+    }
+
+    /// The post-commit step for a committed version: the log line, then the hook.
+    pub(crate) fn committed(&self, c: &version::Committed, principal: &Principal) {
+        version::log_committed(c, principal);
+        (self.on_commit)(c);
     }
 
     pub fn with_clock(mut self, clock: impl Fn() -> i64 + Send + Sync + 'static) -> Self {

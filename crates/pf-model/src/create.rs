@@ -540,7 +540,7 @@ impl PartService {
             .await?;
         let (out, committed) = result;
         if let Some(c) = &committed {
-            crate::version::log_committed(c, &caller.principal);
+            self.committed(c, &caller.principal);
         }
         idem::log_write(
             "part_create",
@@ -623,7 +623,7 @@ impl PartService {
             })
             .await?;
         if let Some(c) = &committed {
-            crate::version::log_committed(c, &caller.principal);
+            self.committed(c, &caller.principal);
         }
         idem::log_write(
             "part_put",

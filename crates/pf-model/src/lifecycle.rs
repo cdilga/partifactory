@@ -134,7 +134,7 @@ impl PartService {
             self.epochs.set(&key, e);
         }
         if let Some(c) = &committed {
-            crate::version::log_committed(c, &caller.principal);
+            self.committed(c, &caller.principal);
         }
         let replayed = out.get("replayed").is_some();
         idem::log_write(

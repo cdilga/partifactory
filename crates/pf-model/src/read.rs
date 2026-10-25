@@ -85,8 +85,8 @@ fn live_n(c: &Connection, part_id: &str) -> pf_db::rusqlite::Result<Option<i64>>
     .optional()
 }
 
-/// The mutation shape: `{name, url, head, live, build}`. `build` is `null` until the build
-/// worker lands (it is the builds bead's).
+/// The mutation shape: `{name, url, head, live, build}`. `build` is the head version's newest
+/// build (`{status, id, warnings, errors}`), or `null` for the v0 placeholder.
 pub fn mutation(c: &Connection, part_id: &str, url: &str) -> pf_db::rusqlite::Result<Value> {
     let (name, head): (String, i64) = c.query_row(
         "SELECT name, head_n FROM parts WHERE id = ?1",
@@ -94,7 +94,7 @@ pub fn mutation(c: &Connection, part_id: &str, url: &str) -> pf_db::rusqlite::Re
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
     Ok(
-        json!({"name": name, "url": url, "head": head, "live": live_n(c, part_id)?, "build": Value::Null}),
+        json!({"name": name, "url": url, "head": head, "live": live_n(c, part_id)?, "build": crate::builds::head_build(c, part_id)?}),
     )
 }
 
@@ -115,7 +115,8 @@ pub struct GetRequest {
 
 fn history(c: &Connection, part_id: &str) -> pf_db::rusqlite::Result<Value> {
     let mut s = c.prepare(
-        "SELECT v.n, u.username, v.actor_conn, v.via, v.message, v.created_at, v.id
+        "SELECT v.n, u.username, v.actor_conn, v.via, v.message, v.created_at, v.id,
+                (SELECT b.status FROM builds b WHERE b.version_id = v.id ORDER BY b.id DESC LIMIT 1)
          FROM versions v JOIN users u ON u.id = v.author_user WHERE v.part_id = ?1 ORDER BY v.n",
     )?;
     let rows = s.query_map([part_id], |r| {
@@ -127,7 +128,7 @@ fn history(c: &Connection, part_id: &str) -> pf_db::rusqlite::Result<Value> {
             "message": r.get::<_, Option<String>>(4)?,
             "created_at": iso(r.get::<_, i64>(5)?),
             "version_id": r.get::<_, String>(6)?,
-            "build_status": Value::Null,
+            "build_status": r.get::<_, Option<String>>(7)?,
         }))
     })?;
     Ok(Value::Array(rows.collect::<Result<_, _>>()?))
@@ -259,6 +260,7 @@ impl PartService {
                         ));
                     }
                 };
+                let mut build = Value::Null;
                 let files = if n == 0 {
                     BTreeMap::new()
                 } else {
@@ -266,6 +268,13 @@ impl PartService {
                         PfError::not_found(format!("{} has no version {n}", row.name))
                             .with("path", "version")
                     })?;
+                    let bid = match req.build {
+                        Some(b) => crate::builds::of_version(c, b, &vid)?,
+                        None => crate::builds::latest_for_version(c, &vid)?,
+                    };
+                    if let Some(b) = bid {
+                        build = crate::builds::summary(c, b)?.unwrap_or(Value::Null);
+                    }
                     version_files(c, &vid)?
                 };
                 let total: u64 = files.values().map(|f| f.size).sum();
@@ -314,7 +323,7 @@ impl PartService {
                     "version": n,
                     "head": row.head_n,
                     "live": live,
-                    "build": Value::Null,
+                    "build": build,
                     "files": files_json(&files),
                     "runtime_errors": runtime_errors(c, &row.id)?,
                 });

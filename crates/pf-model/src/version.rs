@@ -141,6 +141,9 @@ pub fn commit_version(
             json!({"n": n, "version": version_id}).to_string()
         ],
     )?;
+    // Every kind is built (§2 Kinds): queue the build in the same transaction, superseding
+    // the part's older queued builds.
+    crate::builds::enqueue(tx, &part.id, &version_id, &part.kind, meta.now)?;
     Ok(Committed {
         part_id: part.id.clone(),
         version_id,
