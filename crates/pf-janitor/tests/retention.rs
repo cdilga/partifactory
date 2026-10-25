@@ -372,3 +372,123 @@ async fn gc_inventories_abandoned_physical_puts_even_when_blob_store_is_full() {
         0
     );
 }
+
+#[tokio::test]
+async fn scratch_expiry_revokes_caps_and_bin_purge_keeps_names_and_blob_grace() {
+    let f = fixture();
+    let now = f.now;
+    let source = f.ctx.blobs.put(b"binned source").unwrap();
+    let hash = source.hash.clone();
+    f.ctx.main.write(move|tx|{
+        tx.execute("UPDATE parts SET expires_at=?1 WHERE id='daily'",[now-1])?;
+        tx.execute("INSERT INTO names(name,part_id,state,created_at) VALUES('daily','daily','active',0)",[])?;
+        // A long rename history must not become one unbounded final transaction.
+        for n in 0..1001 {tx.execute("INSERT INTO names(name,part_id,state,created_at) VALUES(?1,'daily','redirect',0)",[format!("old-{n}")])?;}
+        tx.execute("INSERT INTO blobs(hash,size,created_at) VALUES(?1,13,0)",[&hash])?;
+        tx.execute("INSERT INTO versions(id,part_id,n,manifest_hash,entry,author_user,via,created_at) VALUES('v','daily',1,'v','index.html','u','api',0)",[])?;
+        tx.execute("INSERT INTO version_files(version_id,path,blob_hash,size,mime) VALUES('v','index.html',?1,13,'text/html')",[&hash])?;
+        tx.execute("INSERT INTO builds(id,version_id,cache_key,toolchain,method,status,queued_at) VALUES(1,'v','fixture','fixture','server_build','ok',0)",[])?;
+        tx.execute("INSERT INTO build_files(build_id,path,blob_hash,content_type) VALUES(1,'index.html',?1,'text/html')",[&hash])?;
+        tx.execute("INSERT INTO build_deps(build_id,ecosystem,name,blob_hash) VALUES(1,'unknown','fixture',?1)",[&hash])?;
+        tx.execute("UPDATE parts SET head_version_id='v',live_version_id='v',live_build_id=1 WHERE id='daily'",[])?;
+        tx.execute("UPDATE parts SET forked_from='v' WHERE id='hourly'",[])?;
+        Ok::<_,DbError>(())
+    }).await.unwrap();
+    let j = janitor(&f).await;
+    j.run_now(Some("scratch_expiry"), now).await.unwrap();
+    assert_eq!(f.ctx.epochs.part_epoch("daily"), 1);
+    j.run_now(Some("bin"), now + 29 * DAY).await.unwrap();
+    assert_eq!(
+        f.ctx
+            .main
+            .read(|c| Ok::<_, DbError>(c.query_row(
+                "SELECT count(*) FROM versions WHERE part_id='daily'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )?))
+            .await
+            .unwrap(),
+        1
+    );
+    j.run_now(Some("bin"), now + 31 * DAY).await.unwrap();
+    f.ctx.main.read(|c|{
+        for table in ["versions","builds","build_files","build_deps"] {assert_eq!(c.query_row(&format!("SELECT count(*) FROM {table}"),[],|r|r.get::<_,i64>(0))?,0,"{table}");}
+        assert_eq!(c.query_row("SELECT count(*) FROM names WHERE state='tombstone' AND retired_at IS NOT NULL",[],|r|r.get::<_,i64>(0))?,1002);
+        assert_eq!(c.query_row("SELECT count(*) FROM parts WHERE id='daily' AND purged_at IS NOT NULL AND title=''",[],|r|r.get::<_,i64>(0))?,1);
+        assert!(c.query_row("SELECT forked_from IS NULL FROM parts WHERE id='hourly'",[],|r|r.get::<_,bool>(0))?);
+        Ok::<_,DbError>(())
+    }).await.unwrap();
+    assert!(
+        f.ctx.blobs.has(&source.hash),
+        "bin purge never directly removes physical blobs"
+    );
+    j.run_now(Some("blobs"), now + 31 * DAY).await.unwrap();
+    assert!(
+        f.ctx.blobs.has(&source.hash),
+        "newly unreferenced content gets the full GC grace"
+    );
+    j.run_now(Some("blobs"), now + 39 * DAY).await.unwrap();
+    assert!(!f.ctx.blobs.has(&source.hash));
+}
+
+#[tokio::test]
+async fn build_log_retention_keeps_twenty_terminal_logs_and_does_not_touch_running() {
+    let f = fixture();
+    let now = f.now;
+    f.ctx.main.write(move|tx|{
+        for n in 0..26 {
+            let version=format!("version-{n}");let hash=format!("log-{n}");
+            tx.execute("INSERT INTO blobs(hash,size,created_at) VALUES(?1,1,0)",[&hash])?;
+            tx.execute("INSERT INTO versions(id,part_id,n,manifest_hash,entry,author_user,via,created_at) VALUES(?1,'daily',?2,?1,'index.html','u','api',0)",params![version,n])?;
+            tx.execute("INSERT INTO builds(version_id,cache_key,toolchain,method,status,log_hash,queued_at) VALUES(?1,?1,'fixture','server_build',?2,?3,?4)",params![version,if n==25 {"running"} else {"ok"},hash,now+n])?;
+        }
+        Ok::<_,DbError>(())
+    }).await.unwrap();
+    let j = janitor(&f).await;
+    let reports = j.run_now(Some("build_logs"), now).await.unwrap();
+    assert_eq!(reports[0].items, 5);
+    f.ctx
+        .main
+        .read(move |c| {
+            assert_eq!(
+                c.query_row(
+                    "SELECT count(*) FROM builds WHERE status='ok' AND log_hash IS NOT NULL",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                20
+            );
+            assert_eq!(
+                c.query_row(
+                    "SELECT count(*) FROM builds WHERE status='running' AND log_hash IS NOT NULL",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                1
+            );
+            assert_eq!(
+                c.query_row(
+                    "SELECT count(*) FROM builds WHERE queued_at<?1 AND log_hash IS NOT NULL",
+                    [now + 5],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                0
+            );
+            Ok::<_, DbError>(())
+        })
+        .await
+        .unwrap();
+    j.run_now(Some("build_logs"), now + 31 * DAY).await.unwrap();
+    assert_eq!(
+        f.ctx
+            .main
+            .read(|c| Ok::<_, DbError>(c.query_row(
+                "SELECT count(*) FROM builds WHERE status='ok' AND log_hash IS NOT NULL",
+                [],
+                |r| r.get::<_, i64>(0)
+            )?))
+            .await
+            .unwrap(),
+        0
+    );
+}
