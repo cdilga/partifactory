@@ -98,15 +98,39 @@ def main():
             require(logging.get("driver") == "json-file", f"{name}: wrong logging driver")
             require(logging.get("options", {}).get("max-size") == "10m", f"{name}: wrong max-size")
             require(str(logging.get("options", {}).get("max-file")) == "3", f"{name}: wrong max-file")
+        proxy = config["services"].get("proxy", {})
+        # The pinned Caddy binary carries cap_net_bind_service=ep. With ALL dropped
+        # and no capability restored, Linux rejects exec before Caddy can even log.
+        require(set(proxy.get("cap_drop", [])) == {"ALL"}
+                and {value.removeprefix("CAP_") for value in proxy.get("cap_add", [])} == {"NET_BIND_SERVICE"},
+                "proxy must restore only the capability required by the actual Caddy binary")
+        require(proxy.get("read_only") is True and
+                any(value.startswith("no-new-privileges") for value in proxy.get("security_opt", [])),
+                "proxy hardening differs from the shipped contract")
         ids = command(compose + ["--profile", "proxy", "--profile", "render", "ps", "-q"]).stdout.decode().split()
         require(ids, "no running compose services")
         observed = []
+        running_services = set()
         for container in ids:
             doc = inspect(container)
-            logging = doc["HostConfig"]["LogConfig"]
+            host = doc["HostConfig"]
+            logging = host["LogConfig"]
             require(logging["Type"] == "json-file" and logging["Config"].get("max-size") == "10m"
                     and logging["Config"].get("max-file") == "3", "running container log limits differ from compose")
-            observed.append({"id": doc["Id"], "service": doc["Config"]["Labels"].get("com.docker.compose.service"), "logging": logging})
+            service = doc["Config"]["Labels"].get("com.docker.compose.service")
+            if doc["State"]["Running"]:
+                running_services.add(service)
+            row = {"id": doc["Id"], "service": service, "logging": logging}
+            if service == "proxy":
+                require(set(host.get("CapDrop") or []) == {"ALL"}
+                        and {value.removeprefix("CAP_") for value in host.get("CapAdd") or []} == {"NET_BIND_SERVICE"},
+                        "running proxy capability set differs from the shipped contract")
+                require(host["ReadonlyRootfs"] and any(value.startswith("no-new-privileges") for value in host.get("SecurityOpt") or []),
+                        "running proxy lost read-only or no-new-privileges protection")
+                row["security"] = {"cap_drop": host["CapDrop"], "cap_add": host["CapAdd"],
+                                   "read_only": host["ReadonlyRootfs"], "security_opt": host["SecurityOpt"]}
+            observed.append(row)
+        require({"partifactory", "proxy"} <= running_services, "application and actual Caddy proxy must both be running")
         (args.evidence_dir / "log-limits.json").write_text(json.dumps(observed, indent=2) + "\n")
 
     if args.mode in ("smoke", "rollback"):

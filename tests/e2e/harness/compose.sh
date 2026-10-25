@@ -12,6 +12,10 @@ if [ -f "$PF_RUN_DIR/compose.env" ]; then
   set +a
 fi
 export PF_DOMAIN_APEX="${PF_APEX:-pf.test}"
+case "$(uname -m)" in
+  arm64|aarch64) export PF_HARNESS_NATIVE_PLATFORM=linux/arm64 ;;
+  *) export PF_HARNESS_NATIVE_PLATFORM=linux/amd64 ;;
+esac
 if [ "${PF_E2E_RENDER:-0}" = 1 ]; then export PF_RENDER_ENABLED=true; else export PF_RENDER_ENABLED=false; fi
 export PF_SITE_CONFIG="$PF_RUN_DIR/site.toml"
 export PF_IMAGE="${PF_HARNESS_IMAGE:-pf-harness-dev:local}"
