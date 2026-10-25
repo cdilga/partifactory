@@ -1,7 +1,16 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
-exclude = ["spikes"]
+exclude = ["spikes", "vendor/*"]
+
+# Leptos stays pinned; these exact releases use the maintained pastey macro successor.
+# See vendor/README.md for the manifest-only patch and removal criteria.
+[patch.crates-io]
+leptos = { path = "vendor/leptos" }
+either_of = { path = "vendor/either_of" }
+reactive_graph = { path = "vendor/reactive_graph" }
+reactive_stores = { path = "vendor/reactive_stores" }
+tachys = { path = "vendor/tachys" }
 
 [workspace.package]
 version = "0.1.0"
