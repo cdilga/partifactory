@@ -12,6 +12,7 @@ test('create a private wrapper probe with a real scoped device agent',async({pag
   await page.goto(device.verification_uri_complete);
   await page.getByRole('button',{name:'Continue',exact:true}).click();
   await page.getByRole('button',{name:'Allow',exact:true}).click();
+  await expect(page.getByRole('status')).toHaveText('Agent connected. You can return to your terminal.');
   const granted=await request.post('/oauth/token',{form:{client_id:'part-cli',grant_type:'urn:ietf:params:oauth:grant-type:device_code',device_code:device.device_code}});
   expect(granted.status()).toBe(200);
   const headers={Authorization:`Bearer ${(await granted.json()).access_token}`};
