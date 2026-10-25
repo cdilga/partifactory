@@ -109,6 +109,7 @@ pub fn start_builds(
     store: &Store,
     loaded: &pf_config::Loaded,
     _env: &pf_config::Env,
+    renderer: Arc<pf_render::RenderService>,
 ) -> Result<pf_build::queue::Engine, String> {
     let mut egress = pf_build::egress::Egress::new(loaded.site.mirror.allowlist.clone());
     #[cfg(feature = "dev")]
@@ -136,6 +137,7 @@ pub fn start_builds(
         }
     }
     let host = store.host.clone();
+    let previews = renderer.clone();
     let cfg = pf_build::queue::Config {
         db: store.db.clone(),
         blobs: store.blobs.clone(),
@@ -144,15 +146,19 @@ pub fn start_builds(
         events: store.parts.events.clone(),
         on_live: Arc::new(move |part| {
             let host = host.clone();
+            let previews = previews.clone();
             Box::pin(async move {
                 // Refresh shared assets before exposing the new live manifest.
                 if host.seed().await.is_err() {
                     tracing::error!(event = "build.assets", outcome = "refresh_failed");
                 }
                 host.live_changed(&part);
+                if previews.promote_preview(part).await.is_err() {
+                    tracing::warn!(event = "render.preview", outcome = "promotion_failed");
+                }
             })
         }),
-        check: Arc::new(pf_build::queue::NoRenderer),
+        check: renderer,
     };
     let engine =
         pf_build::queue::Engine::start(cfg, &std::env::current_exe().map_err(|e| e.to_string())?)

@@ -24,7 +24,7 @@ if [ -n "$run" ] && [ -d "$run" ]; then
   fi
 fi
 
-docker compose -f "$h/compose.yaml" --profile container --profile browsers down -v --remove-orphans 2>&1 \
+docker compose -f "$h/compose.yaml" --profile container --profile browsers --profile render down -v --remove-orphans 2>&1 \
   | grep -vE 'Stopp|Remov|Stopped|Removed' >&2 || true
 
 # Only this compose project's objects: other harnesses (the sandbox spike) share the label.

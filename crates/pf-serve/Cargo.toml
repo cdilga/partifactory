@@ -17,6 +17,10 @@ fs4 = "0.13"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 governor = "0.10"
 http = "1"
+sha2 = "0.10"
+hyper-util = { version = "0.1", features = ["tokio", "server-auto", "service"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 ipnet = "2"
 pf-config = { path = "../pf-config" }
 pf-obs = { path = "../pf-obs" }

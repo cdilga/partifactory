@@ -21,7 +21,8 @@ export PF_HTTPS_PORT="${PF_HTTPS_PORT:-18443}"
 export PF_BIN="${PF_BIN:-${CARGO_TARGET_DIR:-$repo/target}/debug/partifactory}"
 export PF_RUN_DIR="${PF_RUN_DIR:-$repo/target/e2e-runs/$(date +%Y%m%d-%H%M%S)}"
 run="$PF_RUN_DIR"
-mkdir -p "$run"/{certs,dex,secrets,data}
+mkdir -p "$run"/{certs,dex,secrets,data,render-public}
+export PF_RENDER_GATEWAY="${PF_RENDER_GATEWAY:-partifactory}"
 cleanup_failed_start() {
   local rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -49,6 +50,7 @@ printf '%s' 'harness-client-secret' > "$run/secrets/idp_client_secret"
 chmod 644 "$run/secrets/"*
 
 if [ "$mode" = host ]; then
+  export PF_RENDER_GATEWAY=render-host-relay:8443
   # Docker Desktop delivers container -> host.docker.internal connections from loopback.
   trusted='["127.0.0.1", "::1"]'
   export PF_UPSTREAM_WORKSPACE="host.docker.internal:18080"
@@ -93,6 +95,10 @@ subject = "oidc:https://dex.$PF_APEX/dex#$admin_sub"
 "fonts.gstatic.com" = "$mirror_addr"
 EOF
 
+if [ "${PF_E2E_RENDER:-0}" = 1 ]; then
+  printf '\n[render]\nenabled = true\n' >> "$run/site.toml"
+fi
+
 if [ "$mode" = host ]; then
   PF_SITE_TOML="$run/site.toml" PF_DATA_DIR="$run/data" \
   PF_DEV_API_TOKEN_FILE="$run/secrets/api_token" PF_DEV_IDENTITY="$run/identity.toml" \
@@ -100,6 +106,8 @@ if [ "$mode" = host ]; then
   PF_SESSION_KEY_FILE="$run/secrets/session_key" \
   PF_CAP_HMAC_KEY_FILE="$run/secrets/cap_hmac_key" \
   PF_METRICS_TOKEN_FILE="$run/secrets/metrics_token" \
+  PF_RENDER_PUBLIC_DIR="$run/render-public" PF_LISTEN_RENDER=127.0.0.1:18445 \
+  PF_RENDER_CDP=http://127.0.0.1:19222 PF_RENDER_CONTROL=http://127.0.0.1:19223 \
   PF_LISTEN_WORKSPACE=127.0.0.1:18080 PF_LISTEN_CONTENT=127.0.0.1:18081 PF_LISTEN_OPS=127.0.0.1:19090 \
   PF_LOG="${PF_LOG:-info}" PF_DEV_LOG_RING=20000 SSL_CERT_FILE="$run/certs/ca.pem" \
     nohup "$PF_BIN" serve > "$run/server.jsonl" 2> "$run/server.stderr" &
@@ -112,6 +120,13 @@ fi
 touch "$run/server.jsonl"
 docker compose -f "$h/compose.yaml" "${compose_profiles[@]}" up -d --quiet-pull caddy dex dex2 \
   $([ "$mode" = container ] && echo partifactory) >&2
+if [ "${PF_E2E_RENDER:-0}" = 1 ]; then
+  render_files=(-f "$h/compose.yaml")
+  if [ "$mode" = host ]; then render_files+=(-f "$h/compose.render-host.yaml"); fi
+  render_services=(partifactory-render)
+  if [ "$mode" = host ]; then render_services+=(render-host-relay); fi
+  docker compose "${render_files[@]}" --profile render up -d --quiet-pull "${render_services[@]}" >&2
+fi
 if [ "$mode" = container ]; then
   # Follow the server's stdout into the run's JSONL, as host mode writes it directly.
   nohup docker compose -f "$h/compose.yaml" --profile container logs -f --no-color --no-log-prefix partifactory \
@@ -123,6 +138,7 @@ cat > "$run/env" <<EOF
 PF_RUN_DIR=$run
 PF_APEX=$PF_APEX
 PF_HARNESS_MODE=$mode
+PF_E2E_RENDER=${PF_E2E_RENDER:-0}
 PF_HTTPS_PORT=$PF_HTTPS_PORT
 PF_OPS_URL=$ops_url
 PF_CA=$run/certs/ca.pem

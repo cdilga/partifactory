@@ -4,6 +4,7 @@
 mod api;
 #[cfg(feature = "dev")]
 mod dev;
+mod render;
 mod store;
 
 use clap::{Parser, Subcommand};
@@ -196,8 +197,15 @@ fn serve() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let renderer = match render::Renderer::new(&st, &loaded, &env) {
+        Ok(renderer) => renderer,
+        Err(error) => {
+            tracing::error!(event="render.init", outcome="error", %error);
+            return ExitCode::FAILURE;
+        }
+    };
     // Keep the engine alive until the HTTP listeners have stopped.
-    let _builds = match store::start_builds(&st, &loaded, &env) {
+    let _builds = match store::start_builds(&st, &loaded, &env, renderer.service.clone()) {
         Ok(engine) => engine,
         Err(error) => {
             tracing::error!(event = "build.queue", outcome = "startup_error", %error);
@@ -245,7 +253,18 @@ fn serve() -> ExitCode {
         }
     };
     let result = pf_serve::run_blocking(&loaded, &env, |b| {
-        pf_api::install(b, pf_ops::Registry::new(st.parts.clone()), api_auth);
+        pf_api::install(
+            b,
+            pf_ops::Registry::new(st.parts.clone()).with_extension(renderer.service.clone()),
+            api_auth,
+        );
+        pf_api::install_screenshots(
+            b,
+            std::sync::Arc::new(render::Screenshots(renderer.service.clone())),
+        );
+        if let Some(tls) = renderer.tls {
+            b.internal_content_tls(tls);
+        }
         pf_auth::install(b, auth);
         pf_oauth::web::install(b, &tokens);
         pf_parthost::install(b, &st.host);

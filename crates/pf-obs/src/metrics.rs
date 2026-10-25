@@ -68,6 +68,7 @@ pub struct Metrics {
     pub store_bytes: IntGaugeVec,
     pub disk_headroom_ratio_permille: IntGauge,
     pub build_duration: Histogram,
+    pub render_up: IntGauge,
 }
 
 fn build() -> Metrics {
@@ -144,6 +145,8 @@ fn build() -> Metrics {
     ))
     .expect("metric");
 
+    let render_up =
+        IntGauge::new("pf_render_up", "Whether the render browser is running").expect("metric");
     for m in [
         Box::new(http_requests.clone()) as Box<dyn prometheus::core::Collector>,
         Box::new(http_duration.clone()),
@@ -155,6 +158,7 @@ fn build() -> Metrics {
         Box::new(store_bytes.clone()),
         Box::new(disk_headroom_ratio_permille.clone()),
         Box::new(build_duration.clone()),
+        Box::new(render_up.clone()),
     ] {
         registry.register(m).expect("register metric");
     }
@@ -170,6 +174,7 @@ fn build() -> Metrics {
         store_bytes,
         disk_headroom_ratio_permille,
         build_duration,
+        render_up,
     }
 }
 

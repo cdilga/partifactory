@@ -48,3 +48,12 @@ panic = "abort"
 lto = "fat"
 codegen-units = 1
 strip = true
+
+# The embedded Stockroom hydration bundle, built by scripts/build-ui.sh.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+debug = false

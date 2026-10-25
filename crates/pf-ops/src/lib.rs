@@ -110,6 +110,9 @@ impl Registry {
         let wait = input["wait"].as_bool().unwrap_or(true);
         let check =
             input["check"].as_bool() == Some(true) || input["live"].as_str() == Some("after_check");
+        let check_name = input["name"].clone();
+        let deadline = tokio::time::Instant::now()
+            + std::time::Duration::from_secs(if check { 15 } else { 2 });
         let result = match name {
             "part_create" => self.parts.create(&ctx.caller, parse(input)?).await,
             "part_edit" => self.parts.edit(&ctx.caller, parse(input)?).await,
@@ -158,25 +161,51 @@ impl Registry {
         };
         let mut out = result?;
         if wait && name == "part_edit" && out.get("replayed").is_none() {
-            self.wait_build(&mut out, check).await?;
+            self.wait_build(&mut out, deadline).await?;
+        }
+        if wait && name == "part_edit" && check && out["build"]["status"] == "ok" {
+            if let Some(extension) = &self.extension {
+                let request = json!({"name":check_name,"version":out["head"]});
+                match tokio::time::timeout_at(deadline, extension.run(ctx, "part_check", request))
+                    .await
+                {
+                    Ok(Ok(result)) => out["check"] = result,
+                    Ok(Err(error)) => {
+                        out["check"] = json!({"passed":false,"error":error.to_json()["error"],"skipped":error.code=="renderer_unavailable"})
+                    }
+                    Err(_) => out["check"] = json!({"passed":false,"pending":true}),
+                }
+            } else {
+                out["check"] = json!({"passed":false,"skipped":true});
+            }
         }
         tracing::info!(event="op",op=def.name,surface=ctx.caller.via,principal=%ctx.caller.principal.key(),outcome="ok","operation complete");
         Ok(out)
     }
-    async fn wait_build(&self, out: &mut Value, check: bool) -> Result<(), PfError> {
+    async fn wait_build(
+        &self,
+        out: &mut Value,
+        deadline: tokio::time::Instant,
+    ) -> Result<(), PfError> {
         let Some(id) = out["build"]["id"].as_i64() else {
             return Ok(());
         };
-        let deadline = tokio::time::Instant::now()
-            + std::time::Duration::from_secs(if check { 15 } else { 2 });
         loop {
             let build = self
                 .parts
                 .db
-                .read(move |c| pf_model::builds::summary(c, id).map_err(PfError::from))
+                .read(move |c| {
+                    let pending: bool = c.query_row(
+                        "SELECT coalesce(gate_check='pending',0) FROM builds WHERE id=?1",
+                        [id],
+                        |r| r.get(0),
+                    )?;
+                    Ok::<_, PfError>((pf_model::builds::summary(c, id)?, pending))
+                })
                 .await?;
-            if let Some(build) = build {
-                let done = !matches!(build["status"].as_str(), Some("queued" | "running"));
+            if let (Some(build), pending) = build {
+                let done =
+                    !pending && !matches!(build["status"].as_str(), Some("queued" | "running"));
                 out["build"] = build;
                 if done {
                     break;

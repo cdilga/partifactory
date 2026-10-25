@@ -460,6 +460,7 @@ async fn handle(store: &Store, dir: &StaticDirectory, req: &Value) -> Result<Val
                 host: name()?,
                 subject: caller.principal.key(),
                 role,
+                data_write: true,
                 minter: format!("sess:dev-{}", caller.principal.user_id),
                 ..Default::default()
             };

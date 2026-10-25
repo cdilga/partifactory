@@ -48,7 +48,8 @@ fn raw_document() -> Value {
         paths.insert(format!("/api/v1/{}",d.name),json!({"post":{"operationId":d.name,"summary":d.description,"description":d.hints,"security":[{"bearerAuth":[]}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":format!("#/components/schemas/{}Input",d.name)},"example":d.examples[0]}}},"responses":{"200":{"description":"Operation result; failed builds are successful writes.","content":{"application/json":{"schema":{"type":"object","additionalProperties":true}}}},"default":{"description":"Correct the error using hint and details.","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}}}}}));
     }
     let result = json!({"200":{"description":"Successful result","content":{"application/json":{"schema":{"type":"object","additionalProperties":true}}}},"default":{"description":"Operation error","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}}});
-    let parameter = |name: &str| json!({"name":name,"in":"path","required":true,"schema":{"type":"string"}});
+    let parameter =
+        |name: &str| json!({"name":name,"in":"path","required":true,"schema":{"type":"string"}});
     let binary = |mime: &str| json!({"200":{"description":"File bytes","content":{mime:{"schema":{"type":"string","format":"binary"}}}},"default":{"description":"Operation error","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}}});
     paths.insert("/api/v1/parts/{name}".into(), json!({"get":{"operationId":"getPart","summary":"Read a part (part_get alias)","security":[{"bearerAuth":[]}],"parameters":[parameter("name")],"responses":result}}));
     paths.insert("/api/v1/parts/{name}/files/{path}".into(), json!({"parameters":[parameter("name"),parameter("path")],"get":{"operationId":"getFile","summary":"Read exact source bytes","security":[{"bearerAuth":[]}],"responses":binary("application/octet-stream")},"put":{"operationId":"putFile","summary":"Atomically write UTF-8 source with compare-and-set","security":[{"bearerAuth":[]}],"parameters":[{"name":"If-Match","in":"header","required":true,"description":"Current SHA-256, or null for a new file","schema":{"type":"string"}},{"name":"Idempotency-Key","in":"header","required":true,"schema":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9._:-]+$"}}],"requestBody":{"required":true,"content":{"text/plain":{"schema":{"type":"string","maxLength":2097152}}}},"responses":result}}));
@@ -63,8 +64,13 @@ mod tests {
     use super::*;
     #[test]
     fn schemas_match() {
-        let baseline: Value = serde_json::from_str(include_str!("../tests/openapi.snapshot.json")).unwrap();
-        assert_eq!(document(), baseline, "review the schema change and regenerate with the openapi example");
+        let baseline: Value =
+            serde_json::from_str(include_str!("../tests/openapi.snapshot.json")).unwrap();
+        assert_eq!(
+            document(),
+            baseline,
+            "review the schema change and regenerate with the openapi example"
+        );
     }
     #[test]
     fn gpt_actions_lint() {

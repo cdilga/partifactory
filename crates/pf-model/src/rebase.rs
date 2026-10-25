@@ -13,7 +13,9 @@ pub fn anchor_error(text: &str, anchor: &str, file: &str, count: usize) -> PfErr
         let candidate = window.join("\n");
         let candidate: String = candidate.chars().take(1024).collect();
         let cells = candidate.chars().count().max(1) * anchor_preview.chars().count().max(1);
-        if cells > cells_left { break; }
+        if cells > cells_left {
+            break;
+        }
         cells_left -= cells;
         let ratio = similarity(&candidate, &anchor_preview);
         if ratio > best.1 {

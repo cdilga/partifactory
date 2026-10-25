@@ -29,13 +29,16 @@ pub mod error_page;
 pub mod health;
 pub mod hosts;
 pub mod ingress;
+pub mod og;
 pub mod ops;
 pub mod ratelimit;
 pub mod state;
+pub mod tls;
 
 pub use access::{AccessInfo, AccessSlot, Listener};
 pub use config::ServeConfig;
 pub use error_page::error_page;
+pub use error_page::not_shared;
 pub use health::{CheckKind, ReadyRegistry};
 pub use hosts::{HostClass, HostRules, PartHost};
 pub use ingress::{ClientAddr, IngressPolicy, RequestId};
@@ -62,6 +65,7 @@ pub struct ServerBuilder {
     part: Router<AppState>,
     blobs: Router<AppState>,
     log: Option<pf_obs::LogHandle>,
+    internal_tls: Option<tls::Config>,
 }
 
 impl ServerBuilder {
@@ -89,6 +93,7 @@ impl ServerBuilder {
             part: Router::new(),
             blobs: Router::new(),
             log: pf_obs::log_handle(),
+            internal_tls: None,
         };
         #[cfg(feature = "dev")]
         {
@@ -101,6 +106,12 @@ impl ServerBuilder {
 
     pub fn config(&self) -> &ServeConfig {
         &self.config
+    }
+
+    /// Serve the identical content router over TLS on the isolated render network.
+    pub fn internal_content_tls(&mut self, config: tls::Config) -> &mut Self {
+        self.internal_tls = Some(config);
+        self
     }
 
     /// Add a typed extension, readable as `state.ext::<T>()`.
@@ -201,6 +212,7 @@ impl ServerBuilder {
             workspace,
             content,
             ops,
+            internal_tls: self.internal_tls,
         }
     }
 
@@ -212,11 +224,16 @@ impl ServerBuilder {
             self.config.ops_addr,
         );
         let server = self.build();
+        let internal_tls = match &server.internal_tls {
+            Some(config) => Some(TcpListener::bind(config.address).await?),
+            None => None,
+        };
         Ok(Bound {
             workspace: TcpListener::bind(w).await?,
             content: TcpListener::bind(c).await?,
             ops: TcpListener::bind(o).await?,
             server,
+            internal_tls,
         })
     }
 
@@ -271,6 +288,7 @@ pub struct Server {
     pub workspace: Router,
     pub content: Router,
     pub ops: Router,
+    internal_tls: Option<tls::Config>,
 }
 
 /// Bound listeners.
@@ -279,6 +297,7 @@ pub struct Bound {
     pub content: TcpListener,
     pub ops: TcpListener,
     pub server: Server,
+    internal_tls: Option<TcpListener>,
 }
 
 impl Bound {
@@ -333,6 +352,14 @@ impl Bound {
                 rates.shrink();
             }
         });
+        let internal = match (self.internal_tls, self.server.internal_tls) {
+            (Some(listener), Some(config)) => {
+                let router = self.server.content.clone();
+                let receiver = tx.subscribe();
+                Some(tokio::spawn(tls::serve(listener, config, router, receiver)))
+            }
+            _ => None,
+        };
         let hs = [
             mk(self.workspace, self.server.workspace),
             mk(self.content, self.server.content),
@@ -347,6 +374,9 @@ impl Bound {
                 Ok(r) => r?,
                 Err(e) => return Err(std::io::Error::other(e)),
             }
+        }
+        if let Some(task) = internal {
+            task.await.map_err(std::io::Error::other)??;
         }
         Ok(())
     }

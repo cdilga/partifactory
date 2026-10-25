@@ -1,0 +1,25 @@
+# Native Mac server: only the host process may reach CDP/controller through loopback.
+services:
+  render-host-relay:
+    profiles: ["render"]
+    image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
+    labels: {pf.harness: "1"}
+    user: "1000:1000"
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    pids_limit: 64
+    cpus: 0.5
+    command: ["python3", "/opt/pf-render/host-relay.py"]
+    volumes:
+      - ../../../deploy/render/host-relay.py:/opt/pf-render/host-relay.py:ro
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    networks:
+      harness: {}
+      render:
+        ipv4_address: 172.30.78.40
+    ports:
+      - "127.0.0.1:19222:9222"
+      - "127.0.0.1:19223:9223"

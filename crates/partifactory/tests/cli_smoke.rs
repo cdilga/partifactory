@@ -1,4 +1,4 @@
-//! The binary's surface: every subcommand stub is listed, `part` reaches the CLI, stubs exit 64,
+//! The binary's surface: every subcommand is listed, `part` reaches the CLI, stubs exit 64,
 //! and `config check` reports a missing secret as a JSON log line and exits 2.
 
 use std::process::Command;
@@ -62,15 +62,34 @@ fn argv0_part_dispatches_to_cli() {
     let out = Command::new(&part).arg("--help").output().unwrap();
     assert!(out.status.success());
     let help = String::from_utf8(out.stdout).unwrap();
-    assert!(help.starts_with("part: "), "{help}");
-    assert!(help.contains("create") && help.contains("link-for"));
-    let out = Command::new(&part).arg("create").output().unwrap();
-    assert_eq!(out.status.code(), Some(64));
+    let help: serde_json::Value = serde_json::from_str(&help).unwrap();
+    assert!(
+        help["ops"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|op| op == "part_create")
+    );
+    assert!(
+        help["ops"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|op| op == "part_link_for")
+    );
+    let out = Command::new(&part)
+        .env_clear()
+        .arg("create")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["error"]["code"], "invalid_input");
 }
 
 #[test]
 fn stub_exits_64() {
-    for args in [&["export"][..], &["admin", "bootstrap"], &["logs"]] {
+    for args in [&["export"][..], &["logs"]] {
         let out = Command::new(BIN).args(args).output().unwrap();
         assert_eq!(out.status.code(), Some(64), "{args:?}");
         assert!(String::from_utf8_lossy(&out.stderr).contains("not implemented yet"));
