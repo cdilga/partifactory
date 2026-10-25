@@ -99,7 +99,7 @@ pub fn mutation(c: &Connection, part_id: &str, url: &str) -> pf_db::rusqlite::Re
 }
 
 /// The `part_get` arguments.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub struct GetRequest {
     pub name: String,
@@ -274,6 +274,18 @@ impl PartService {
                     };
                     if let Some(b) = bid {
                         build = crate::builds::summary(c, b)?.unwrap_or(Value::Null);
+                        if req.build.is_some() {
+                            let log: Option<String> =
+                                c.query_row("SELECT log_hash FROM builds WHERE id=?1", [b], |r| {
+                                    r.get(0)
+                                })?;
+                            build["log"] = match log {
+                                Some(hash) => {
+                                    json!(String::from_utf8_lossy(&blobs.get(&hash)?).into_owned())
+                                }
+                                None => Value::Null,
+                            };
+                        }
                     }
                     version_files(c, &vid)?
                 };

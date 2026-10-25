@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 pub const BIN_MS: i64 = 30 * 24 * 3600 * 1000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Mode {
+pub(crate) enum Mode {
     Delete,
     Undelete,
     Restore(i64),
@@ -28,7 +28,8 @@ impl PartService {
         name: &str,
         request_id: Option<&str>,
     ) -> Result<Value, PfError> {
-        self.mode(caller, name, request_id, Mode::Delete).await
+        self.mode(caller, name, request_id, Mode::Delete, None)
+            .await
     }
 
     /// `part_edit {undelete: true}`: bring a part back from the bin (within 30 days).
@@ -38,7 +39,8 @@ impl PartService {
         name: &str,
         request_id: Option<&str>,
     ) -> Result<Value, PfError> {
-        self.mode(caller, name, request_id, Mode::Undelete).await
+        self.mode(caller, name, request_id, Mode::Undelete, None)
+            .await
     }
 
     /// `part_edit {restore: n}`: a new version whose files equal version `n`'s.
@@ -49,15 +51,17 @@ impl PartService {
         n: i64,
         request_id: Option<&str>,
     ) -> Result<Value, PfError> {
-        self.mode(caller, name, request_id, Mode::Restore(n)).await
+        self.mode(caller, name, request_id, Mode::Restore(n), None)
+            .await
     }
 
-    async fn mode(
+    pub(crate) async fn mode(
         &self,
         caller: &Caller,
         name: &str,
         request_id: Option<&str>,
         mode: Mode,
+        request: Option<crate::edit::EditRequest>,
     ) -> Result<Value, PfError> {
         let now = self.now();
         let request_id = idem::check_request_id(request_id)?;
@@ -65,6 +69,10 @@ impl PartService {
             Mode::Delete => json!({"name": name, "delete": true}),
             Mode::Undelete => json!({"name": name, "undelete": true}),
             Mode::Restore(n) => json!({"name": name, "restore": n}),
+        };
+        let args = match &request {
+            Some(req) => serde_json::to_value(req).map_err(|e| PfError::internal(e.to_string()))?,
+            None => args,
         };
         let hash = idem::args_hash("part_edit", &args);
         let p = caller.principal.clone();
@@ -112,9 +120,9 @@ impl PartService {
                         let meta = CommitMeta {
                             principal: &p,
                             via: "restore",
-                            message: Some(format!("Restored v{n}")),
+                            message: request.as_ref().and_then(|r|r.message.clone()).or_else(||Some(format!("Restored v{n}"))),
                             restored_from: Some(vid),
-                            live_gate: "always",
+                            live_gate: request.as_ref().and_then(|r|r.live.as_deref()).unwrap_or("always"),
                             now,
                         };
                         committed = Some(commit_version(tx, &blobs, &head, &entry, &files, &meta)?);

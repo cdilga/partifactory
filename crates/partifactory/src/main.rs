@@ -216,6 +216,8 @@ fn serve() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let clock_host = st.host.clone();
+    auth.set_clock(move || clock_host.now());
     let _maintenance = match store::start_maintenance(&st) {
         Ok(task) => task,
         Err(error) => {
@@ -230,7 +232,12 @@ fn serve() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let api_auth = match api::authenticator(st.db.clone(), auth.workspace_origin(), &env) {
+    let tokens = pf_oauth::TokenService::new(st.db.clone(), st.epochs.clone(), auth.clone());
+    if let Err(error) = tokens.seed() {
+        tracing::error!(event="tokens.init",outcome="error",%error);
+        return ExitCode::FAILURE;
+    }
+    let api_auth = match api::authenticator(tokens.clone(), &env) {
         Ok(auth) => auth,
         Err(error) => {
             tracing::error!(event="api.init",outcome="error",%error);
@@ -240,6 +247,7 @@ fn serve() -> ExitCode {
     let result = pf_serve::run_blocking(&loaded, &env, |b| {
         pf_api::install(b, pf_ops::Registry::new(st.parts.clone()), api_auth);
         pf_auth::install(b, auth);
+        pf_oauth::web::install(b, &tokens);
         pf_parthost::install(b, &st.host);
         let db = st.db.clone();
         b.ready_check("db", pf_serve::CheckKind::Required, move || {

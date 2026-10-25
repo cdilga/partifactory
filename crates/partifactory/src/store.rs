@@ -126,7 +126,8 @@ pub fn start_builds(
         {
             let pem = std::fs::read(path).map_err(|e| e.to_string())?;
             let mut roots = pf_build::egress::root_store();
-            for cert in rustls_pemfile::certs(&mut pem.as_slice()) {
+            use rustls_pki_types::pem::PemObject;
+            for cert in rustls_pki_types::CertificateDer::pem_slice_iter(&pem) {
                 roots
                     .add(cert.map_err(|e| e.to_string())?)
                     .map_err(|e| e.to_string())?;

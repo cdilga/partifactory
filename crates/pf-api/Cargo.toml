@@ -6,5 +6,28 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+dev = []
+
+[dependencies]
+axum = "0.8"
+aide = "0.15.1"
+http = "1"
+pf-ops = { path = "../pf-ops" }
+pf-model = { path = "../pf-model" }
+pf-blobs = { path = "../pf-blobs" }
+pf-serve = { path = "../pf-serve" }
+pf-obs = { path = "../pf-obs" }
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+pf-db = { path = "../pf-db" }
+pf-caps = { path = "../pf-caps" }
+tempfile.workspace = true
+tokio = { version = "1", features = ["macros","rt-multi-thread"] }
+tower = { version = "0.5", features = ["util"] }
+
 [lints]
 workspace = true

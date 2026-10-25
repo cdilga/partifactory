@@ -8,6 +8,15 @@ publish = false
 
 [dependencies]
 clap.workspace = true
+pf-ops = { path = "../pf-ops" }
+pf-model = { path = "../pf-model" }
+pf-blobs = { path = "../pf-blobs" }
+serde_json.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
 /// One file in a write: inline text, or a blob already uploaded.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum FileInput {
     Text(String),
@@ -23,7 +23,7 @@ pub enum FileInput {
 
 /// `{path: str | {blob}}`, refusing duplicate keys (a JSON object may repeat a key; we don't
 /// let the last one silently win).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(transparent)]
 pub struct FileMap(pub BTreeMap<String, FileInput>);
 
@@ -73,7 +73,7 @@ impl Caller {
 }
 
 /// The `part_create` arguments, exactly as the contract lists them.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub struct CreateRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -109,7 +109,7 @@ pub struct CreateRequest {
 }
 
 /// Replace a part's whole file set as its next version.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub struct PutRequest {
     pub name: String,

@@ -19,6 +19,7 @@ cap = "0.1.2"
 pf-build = { path = "../pf-build" }
 clap.workspace = true
 pf-api = { path = "../pf-api" }
+pf-oauth = { path = "../pf-oauth" }
 pf-ops = { path = "../pf-ops" }
 pf-auth = { path = "../pf-auth" }
 pf-blobs = { path = "../pf-blobs" }
@@ -31,7 +32,7 @@ pf-obs = { path = "../pf-obs" }
 pf-parthost = { path = "../pf-parthost" }
 pf-policy = { path = "../pf-policy" }
 pf-serve = { path = "../pf-serve" }
-rustls-pemfile = "2"
+rustls-pki-types = "1"
 serde_json.workspace = true
 tokio = { version = "1", features = ["rt", "net", "io-util", "macros", "sync"] }
 tracing.workspace = true
