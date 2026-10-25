@@ -52,6 +52,13 @@ jobs:
         env:
           NEXTEST_PROFILE: ci
         run: ci/${{ matrix.script }}.sh
+      - name: native execution evidence
+        if: always() && matrix.script == 'test'
+        uses: actions/upload-artifact@v3
+        with:
+          name: native-test-evidence
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: error
       - name: clean
         if: always()
         run: PF_CLEAN_NO_DOCKER=1 scripts/clean-build.sh --apply || true
@@ -125,6 +132,75 @@ jobs:
         with:
           name: e2e-logs
           path: target/e2e-logs/
+      - name: security execution evidence
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: e2e-test-evidence
+          path: |
+            target/e2e-logs/run-*/results-main.json
+            target/e2e-logs/run-*/security/report.json
+            target/e2e-logs/run-*/summary.txt
+            target/e2e-logs/run-*/proxy-runtime-log-gate.json
+      - name: clean
+        if: always()
+        run: |
+          tests/e2e/harness/down.sh || true
+          if [ -f /tmp/pf-ci-docker.pid ]; then kill "$(cat /tmp/pf-ci-docker.pid)" || true; fi
+          PF_CLEAN_NO_DOCKER=1 scripts/clean-build.sh --apply || true
+
+  shipping-gates:
+    # Each matrix job owns a daemon and a fresh harness. Pressure never shares live data
+    # with the normal browser/device gates, and cannot satisfy its gate by being skipped.
+    if: github.event_name != 'schedule' && (github.event_name != 'workflow_dispatch' || inputs.job == '')
+    runs-on: [browser, rust-truenas]
+    strategy:
+      fail-fast: false
+      matrix:
+        script: [devices, storage-pressure]
+    name: ${{ matrix.script }}
+    container:
+      image: catthehacker/ubuntu:act-22.04@sha256:3cdab37904fc1798c460f1fadd47fd2c4d24fa2f292d1b57fc12eff072b415ec
+      options: --cap-add=SYS_ADMIN --cap-add=NET_ADMIN --cap-add=SYS_RESOURCE --security-opt=seccomp=unconfined --security-opt=apparmor=unconfined
+    env:
+      DOCKER_HOST: unix:///var/run/pf-ci-docker.sock
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: 1.97.1
+      - name: cache dirs
+        run: |
+          if [ -d /cargo-cache ]; then
+            echo "CARGO_HOME=/cargo-cache/partifactory/cargo" >> "$GITHUB_ENV"
+          fi
+      - name: tools
+        run: |
+          need=""
+          command -v node >/dev/null || need="$need nodejs npm"
+          command -v zstd >/dev/null || need="$need zstd"
+          if [ -n "$need" ]; then
+            task_sudo=""; [ "$(id -u)" = 0 ] || task_sudo=sudo
+            $task_sudo apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive $task_sudo apt-get install -y -qq $need >/dev/null
+          fi
+      - name: run
+        run: |
+          bash ci/docker-daemon.sh
+          ci/${{ matrix.script }}.sh
+      - name: execution evidence
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.script }}-test-evidence
+          path: |
+            target/e2e-logs/devices-*/results.json
+            target/e2e-logs/devices-*/device-reports/
+            target/e2e-logs/pressure-*/results.json
+            target/e2e-logs/pressure-*/stores.txt
+            target/e2e-logs/pressure-*/tests/**/*.png
+            target/e2e-logs/pressure-*/tests/**/metrics-*.txt
       - name: clean
         if: always()
         run: |

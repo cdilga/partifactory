@@ -95,6 +95,19 @@ subject = "oidc:https://dex.$PF_APEX/dex#$admin_sub"
 "fonts.gstatic.com" = "$mirror_addr"
 EOF
 
+if [ "${PF_STORAGE_GATE:-0}" = 1 ]; then
+  # The disposable small-volume lane tests quotas and physical pressure, so requests must
+  # reach those guards rather than the unrelated ingress limiter. Avoid allocating a second
+  # complete scheduled export while intentionally filling a 128MiB test filesystem.
+  python3 - "$run/site.toml" <<'PYSTORAGE'
+import pathlib,sys
+p=pathlib.Path(sys.argv[1])
+s=p.read_text().replace('[ingress]\n','[ingress]\nrate_limits = false\n')
+s+='\n[backup]\nexport_schedule = "off"\n\n[unsafe]\nrate_limits = "off"\nnightly_export = "off"\n'
+p.write_text(s)
+PYSTORAGE
+fi
+
 if [ "${PF_E2E_RENDER:-0}" = 1 ]; then
   printf '\n[render]\nenabled = true\n' >> "$run/site.toml"
 fi

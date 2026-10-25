@@ -13,7 +13,7 @@ test('real volume pressure refuses writes while content reads and deletion conti
   const token=fs.readFileSync('/run/pf/run/secrets/api_token','utf8').trim();
   const metricsToken=fs.readFileSync('/run/pf/run/secrets/metrics_token','utf8').trim();
   const metrics=async()=>{
-    const r=await request.get('http://host.docker.internal:19090/metrics',{headers:{Authorization:`Bearer ${metricsToken}`}});
+    const r=await request.get(process.env.PF_STORAGE_METRICS_URL??'http://host.docker.internal:19090/metrics',{headers:{Authorization:`Bearer ${metricsToken}`}});
     expect(r.status()).toBe(200);return r.text();
   };
   const metric=(body:string,name:string)=>{const hit=body.match(new RegExp('^'+name+' ([0-9]+)$','m'));expect(hit,name).not.toBeNull();return Number(hit![1]);};
