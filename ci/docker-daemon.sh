@@ -13,6 +13,11 @@ if docker info >/dev/null 2>&1; then exit 0; fi
 if [ -d /sys/fs/cgroup ] && [ ! -w /sys/fs/cgroup ]; then
   mount -o remount,rw /sys/fs/cgroup
 fi
+# Docker's bridge setup writes interface sysctls after entering a child's network
+# namespace. Make only network sysctls writable in this job's mount namespace;
+# retain the other masked/read-only proc paths and the runner's non-privileged mode.
+mount --bind /proc/sys/net /proc/sys/net
+mount -o remount,bind,rw /proc/sys/net
 nohup dockerd --host="$DOCKER_HOST" --data-root=/tmp/pf-ci-docker \
   --exec-root=/tmp/pf-ci-docker-exec --pidfile=/tmp/pf-ci-docker.pid \
   --storage-driver=vfs > target/e2e-logs/docker-daemon.log 2>&1 &

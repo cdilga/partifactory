@@ -117,7 +117,8 @@ jobs:
       image: catthehacker/ubuntu:act-22.04@sha256:3cdab37904fc1798c460f1fadd47fd2c4d24fa2f292d1b57fc12eff072b415ec
       # act_runner deliberately overrides --privileged with its host policy. Grant the
       # capabilities needed by this job's private daemon explicitly instead.
-      options: --cap-add=SYS_ADMIN --cap-add=NET_ADMIN --cap-add=SYS_RESOURCE --security-opt=seccomp=unconfined --security-opt=apparmor=unconfined
+      # SYS_PTRACE lets dockerd bind /proc/<non-root child>/ns/net during bridge setup.
+      options: --cap-add=SYS_ADMIN --cap-add=NET_ADMIN --cap-add=SYS_RESOURCE --cap-add=SYS_PTRACE --security-opt=seccomp=unconfined --security-opt=apparmor=unconfined
     env:
       DOCKER_HOST: unix:///var/run/pf-ci-docker.sock
       PF_E2E_RENDER: "1"
@@ -199,7 +200,7 @@ jobs:
     name: ${{ matrix.script }}
     container:
       image: catthehacker/ubuntu:act-22.04@sha256:3cdab37904fc1798c460f1fadd47fd2c4d24fa2f292d1b57fc12eff072b415ec
-      options: --cap-add=SYS_ADMIN --cap-add=NET_ADMIN --cap-add=SYS_RESOURCE --security-opt=seccomp=unconfined --security-opt=apparmor=unconfined
+      options: --cap-add=SYS_ADMIN --cap-add=NET_ADMIN --cap-add=SYS_RESOURCE --cap-add=SYS_PTRACE --security-opt=seccomp=unconfined --security-opt=apparmor=unconfined
     env:
       DOCKER_HOST: unix:///var/run/pf-ci-docker.sock
     steps:
@@ -274,7 +275,7 @@ jobs:
     runs-on: [browser, rust-truenas]
     container:
       image: catthehacker/ubuntu:act-22.04@sha256:3cdab37904fc1798c460f1fadd47fd2c4d24fa2f292d1b57fc12eff072b415ec
-      options: --cap-add=SYS_ADMIN --cap-add=NET_ADMIN --cap-add=SYS_RESOURCE --security-opt=seccomp=unconfined --security-opt=apparmor=unconfined
+      options: --cap-add=SYS_ADMIN --cap-add=NET_ADMIN --cap-add=SYS_RESOURCE --cap-add=SYS_PTRACE --security-opt=seccomp=unconfined --security-opt=apparmor=unconfined
     env:
       DOCKER_HOST: unix:///var/run/pf-ci-docker.sock
     steps:
