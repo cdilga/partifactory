@@ -592,6 +592,7 @@ async fn grant_route(
                 .append_pair("return", &format!("/grant?{query}"));
             Redirect::to(u.as_str()).into_response()
         }
+        Err(e) if e.code == "forbidden" => pf_serve::not_shared(&a.0.origin),
         Err(e) => fail(e),
     }
 }
