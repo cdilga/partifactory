@@ -22,7 +22,12 @@ tests/deploy/compose_smoke.sh --compose /private/normalized-compose.json \
 ```
 
 Smoke requires expected bytes from a real public part URL through Caddy. It
-also checks readiness on the local ops listener, refuses published application
+accepts a stable `/l/<token>` URL: each observation performs the actual signed-out
+`POST /go` flow, then fetches the content entry (`--part-entry`, default
+`index.html`) using that fresh capability. This remains valid across boot-epoch
+bumps and checks actual part bytes rather than the wrapper's title. A direct
+content URL remains suitable when the caller does not restart the application.
+It also checks readiness on the local ops listener, refuses published application
 ports or public ops bindings, and checks that ops routes do not pass through
 the proxy. TLS verification remains enabled. A client connection override
 preserves the original hostname/SNI without editing `/etc/hosts`.
@@ -48,7 +53,8 @@ Prepare faults from the real release with the small fixture build (after the
 shared harness/build slot is available):
 
 ```sh
-tests/deploy/fault-image.sh "$GOOD_IMAGE" "$PINNED_STATIC_BUSYBOX_IMAGE" \
+PF_RELEASE_ASSETS=target/release-assets \
+  tests/deploy/fault-image.sh "$GOOD_IMAGE" "$PINNED_STATIC_BUSYBOX_IMAGE" \
   localhost:25000/partifactory-deploy-fixture
 ```
 
@@ -65,13 +71,50 @@ alive so restart policy cannot hide the failure. The fixture is labelled
 `pf.harness=1` and must never be used as a
 release. Keep the disposable registry, fixture image digests and any image
 IDs in the caller's exact-resource cleanup list.
+The local-assets form verifies the release checksums and uses its extracted OCI
+layout as a named build context. The host uploads the exported fixture bytes to
+the disposable registry, so the builder does not need access to host loopback.
+`PF_FIXTURE_REGISTRY_SCHEME` defaults to `http` for this local registry.
 
 All drivers accept `--host` as a Docker endpoint or context and `--env-file`
 when required. When using the e2e overlay, first materialize the merged config
 with `docker compose … config --format json`, then pass that one normalized
 file: the deploy CLI intentionally accepts one compose file. Its service must
 still be called `partifactory`.
+For the harness's normalized config, remove only the application's fixed network
+addresses before deploying a candidate beside it; retain the proxy address that
+matches `trusted_proxies`. The shipped production compose uses dynamic application
+addresses already. `deploy --image` applies an authoritative final image override
+to literal normalized inputs as well as `${PF_IMAGE}` inputs.
 
 Evidence contains private deployment details. Directories are mode 700 and raw
 logs mode 600. Keep private logs out of public CI artifacts. A passed script
 prints `event=deploy.check`; no script reports an unrun gate as passing.
+
+`ci/deploy.sh` runs these gates in order using the checksummed `PF_RELEASE_ASSETS`
+from the release-security job, without rebuilding the release or rerunning its
+whole browser security suite. It requires an empty caller-owned source daemon by
+default. `PF_DEPLOY_REQUIRE_FRESH_SOURCE=0` allows a local observation on an existing
+daemon and explicitly records `fresh_source_daemon: false`; that does not satisfy
+the fresh-context gate. An already running shared harness is always refused.
+
+The driver tests successful deployment, both faults, and running log limits with
+the renderer started and stopped. It then exports with the actual release CLI and
+restores twice on a distinct empty daemon: an intentionally failing external test
+must produce a failure report and metric 0, then the real restored-host checks must
+complete within 900 seconds and produce metric 1. Both outcomes must appear on
+Health. The daemon is pinned, limited to two CPUs, 2 GiB with no swap, 512 processes
+and a 2 GiB tmpfs-backed labelled volume. Its API and HTTPS mapping bind only to
+loopback. Teardown removes its exact resources and always tears down the source
+compose deployment.
+
+`drill-e2e.py` rejects the pre-import cap, follows the restored link's real go flow,
+checks exact content, signs in through the actual independent Dex, obtains a new
+scoped device token through real member consent, and creates a part in that
+member's authorized space. It runs every external security probe and requires
+each to pass. A caller-supplied argv capture hook obtains fresh logs and consistent
+database/Insights exports after the canaries, before scanning them. Private ops
+requests are transported through the target's actual proxy container, never
+published at ingress. The broader accumulated browser suite remains a separate
+required e2e job. Only explicit public report files are uploaded; sessions, tokens,
+capabilities, offline config, database exports and raw logs remain private.

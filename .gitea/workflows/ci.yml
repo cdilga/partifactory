@@ -91,9 +91,7 @@ jobs:
 
   e2e:
     # pf-kurh: the e2e harness (Caddy with deploy/proxy/Caddyfile and a per-run CA, two Dex,
-    # partifactory in a container, Playwright on the four projects). Non-blocking until it has
-    # been seen green on the shared runners (Docker bind mounts of the checkout must reach the
-    # daemon); drop continue-on-error then.
+    # partifactory in a container, Playwright on the four projects). Every failure blocks CI.
     if: github.event_name != 'schedule' && (github.event_name != 'workflow_dispatch' || inputs.job == '')
     runs-on: [browser, rust-truenas]
     container:
@@ -104,7 +102,6 @@ jobs:
     env:
       DOCKER_HOST: unix:///var/run/pf-ci-docker.sock
       PF_E2E_RENDER: "1"
-    continue-on-error: true
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Python harness runtime
@@ -218,6 +215,18 @@ jobs:
             target/e2e-logs/pressure-*/stores.txt
             target/e2e-logs/pressure-*/tests/**/*.png
             target/e2e-logs/pressure-*/tests/**/metrics-*.txt
+      - name: exact release assets for downstream deployment gate
+        if: always() && matrix.script == 'security-release'
+        uses: actions/upload-artifact@v3
+        with:
+          name: shipping-release-assets
+          path: |
+            target/release-assets/RELEASE.json
+            target/release-assets/digest.txt
+            target/release-assets/SHA256SUMS
+            target/release-assets/part-linux-amd64.tar.gz
+            target/release-assets/partifactory-linux-amd64.oci.tar
+          if-no-files-found: error
       - name: clean
         if: always()
         run: |
@@ -225,11 +234,64 @@ jobs:
           if [ -f /tmp/pf-ci-docker.pid ]; then kill "$(cat /tmp/pf-ci-docker.pid)" || true; fi
           PF_CLEAN_NO_DOCKER=1 scripts/clean-build.sh --apply || true
 
+  deploy:
+    # Reuse the exact checksummed image/CLI bytes observed by the release lane.
+    if: github.event_name != 'schedule' && (github.event_name != 'workflow_dispatch' || inputs.job == '')
+    needs: [shipping-gates]
+    runs-on: [browser, rust-truenas]
+    container:
+      image: catthehacker/ubuntu:act-22.04@sha256:3cdab37904fc1798c460f1fadd47fd2c4d24fa2f292d1b57fc12eff072b415ec
+      options: --cap-add=SYS_ADMIN --cap-add=NET_ADMIN --cap-add=SYS_RESOURCE --security-opt=seccomp=unconfined --security-opt=apparmor=unconfined
+    env:
+      DOCKER_HOST: unix:///var/run/pf-ci-docker.sock
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/download-artifact@v3
+        with:
+          name: shipping-release-assets
+          path: target/release-assets
+      - name: Python harness runtime
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: 1.97.1
+      - name: cache dirs
+        run: |
+          if [ -d /cargo-cache ]; then echo "CARGO_HOME=/cargo-cache/partifactory/cargo" >> "$GITHUB_ENV"; fi
+      - name: tools
+        run: |
+          need=""
+          command -v node >/dev/null || need="$need nodejs npm"
+          command -v zstd >/dev/null || need="$need zstd"
+          if [ -n "$need" ]; then
+            task_sudo=""; [ "$(id -u)" = 0 ] || task_sudo=sudo
+            $task_sudo apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive $task_sudo apt-get install -y -qq $need >/dev/null
+          fi
+      - name: actual release deploy, rollback and second-daemon drill
+        run: |
+          bash ci/docker-daemon.sh
+          ci/deploy.sh
+      - name: public deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-test-evidence
+          path: target/e2e-logs/deploy-*/public/
+          if-no-files-found: error
+      - name: clean
+        if: always()
+        run: |
+          if [ -f /tmp/pf-ci-docker.pid ]; then kill "$(cat /tmp/pf-ci-docker.pid)" || true; fi
+          PF_CLEAN_NO_DOCKER=1 scripts/clean-build.sh --apply || true
+
   security-evidence:
     # Merge only artifacts of this workflow. Missing/skipped expected Linux gates fail;
     # the separately observed Mac Simulator lane remains explicitly outside this platform.
     if: always() && github.event_name != 'schedule' && (github.event_name != 'workflow_dispatch' || inputs.job == '')
-    needs: [checks, e2e, shipping-gates]
+    needs: [checks, e2e, shipping-gates, deploy]
     runs-on: [rust, rust-truenas]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683

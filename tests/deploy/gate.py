@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 import subprocess
 import time
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -36,6 +36,7 @@ def main():
     parser.add_argument("--base-url")
     parser.add_argument("--part-url", help="Stable public restored-part URL, followed through redirects")
     parser.add_argument("--part-marker", help="Expected response body text from the public part")
+    parser.add_argument("--part-entry", default="index.html", help="Content entry fetched after a stable public link's real go flow")
     parser.add_argument("--ca-cert", type=Path)
     parser.add_argument("--connect-to", help="Actual Caddy address:port; preserves hostname/SNI")
     parser.add_argument("--binary", type=Path, default=REPO / "target/debug/partifactory")
@@ -70,13 +71,18 @@ def main():
     def inspect(container):
         return json.loads(command(engine + ["inspect", container]).stdout)[0]
 
-    def request(url, follow=False):
+    def request(url, follow=False, method="GET", headers=None):
         parsed = urlsplit(url)
         require(parsed.scheme == "https" and parsed.hostname and not parsed.username, "TLS URL required")
         argv = ["curl", "--silent", "--show-error", "--connect-timeout", "1", "--max-time", "3",
                 "--proto", "=https", "--proto-redir", "=https", "--write-out", "\n%{http_code}", "--noproxy", "*"]
         if follow:
             argv += ["--location", "--max-redirs", "5"]
+        if method != "GET":
+            argv += ["--request", method, "--data", ""]
+        for name, value in (headers or {}).items():
+            require(not any(c in name + value for c in "\r\n"), "invalid request header")
+            argv += ["--header", name + ": " + value]
         if args.ca_cert:
             argv += ["--cacert", str(args.ca_cert.resolve())]
         if args.connect_to:
@@ -87,7 +93,25 @@ def main():
         return result.returncode, int(status or b"0"), body
 
     def observed_part():
-        code, status, body = request(args.part_url, follow=True)
+        url = args.part_url
+        parsed = urlsplit(url)
+        if re.fullmatch(r"/l/[^/]+/?", parsed.path):
+            # Deploy/import bump the boot epoch. Mint through the real public
+            # link each time, rather than testing wrapper text or a stale cap.
+            origin = urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+            go = origin + parsed.path.rstrip("/") + "/go"
+            code, status, body = request(go, method="POST", headers={"Origin": origin})
+            if code or status != 200:
+                return False
+            try:
+                cap = json.loads(body)["cap"]
+                require(re.fullmatch(r"[A-Za-z0-9_.-]+", cap), "unexpected guest capability encoding")
+            except (ValueError, KeyError, TypeError):
+                return False
+            require(args.part_entry and not args.part_entry.startswith("/") and
+                    ".." not in args.part_entry.split("/"), "relative content entry required")
+            url = origin + "/c/" + cap + "/" + args.part_entry
+        code, status, body = request(url, follow=True)
         return code == 0 and status == 200 and args.part_marker.encode() in body
 
     def log_limits():

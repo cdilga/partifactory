@@ -13,6 +13,7 @@ import secrets
 import socket
 import sqlite3
 import ssl
+import subprocess
 import sys
 import time
 from urllib.parse import quote, urlencode, urljoin, urlsplit
@@ -413,6 +414,9 @@ class Suite:
             raise Unobserved("--logs-file or --logs-url needed to observe redaction")
         # Allow the asynchronous access line to land; this is bounded and intentionally short.
         time.sleep(0.3)
+        if self.args.capture_sinks_command:
+            captured = subprocess.run(self.args.capture_sinks_command, capture_output=True, timeout=90)
+            require(captured.returncode == 0, "explicit sink capture command failed")
         sources = []
         for path in self.args.logs_file:
             data = Path(path).read_bytes()
@@ -505,6 +509,8 @@ def main():
     parser.add_argument("--canary-values-file", action="append", default=[], help="private JSON string values from executed agent-surface scenarios to scan across sinks")
     parser.add_argument("--guest-content-url")
     parser.add_argument("--view-content-url")
+    parser.add_argument("--capture-sinks-command", nargs=argparse.REMAINDER, default=[],
+                        help="Explicit argv to refresh protected logs/DB snapshots after actual canaries; no shell is used")
     parser.add_argument("--prepare-device-file", help="only create a live code from this client's network; private browser input, not an artifact")
     args = parser.parse_args()
     suite = Suite(args)

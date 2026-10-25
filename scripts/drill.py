@@ -6,6 +6,7 @@ import argparse
 import gzip
 import hashlib
 import io
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -37,6 +38,10 @@ def main():
     parser.add_argument("--identity-file", type=Path, action="append", default=[])
     parser.add_argument("--https-port", type=int, default=19443)
     parser.add_argument("--address", default="127.0.0.1", help="Published target proxy address, including outer dind mapping")
+    parser.add_argument("--extra-host", action="append", default=[], metavar="HOST=ADDRESS",
+                        help="Explicit offline IdP name mapping for the restored application; never changes system hosts")
+    parser.add_argument("--ingress-subnet", help="Optional dedicated recovery proxy network CIDR")
+    parser.add_argument("--proxy-address", help="Optional proxy IP inside --ingress-subnet, matching the offline config's trusted proxy")
     parser.add_argument("--e2e-command", nargs=argparse.REMAINDER, required=True,
                         help="External test argv; receives PF_BASE_URL, PF_CA, PF_CONNECT_TO and PF_DRILL_EVIDENCE")
     args = parser.parse_args()
@@ -108,6 +113,14 @@ def main():
         config = tomllib.loads(args.site.read_text())
         require(not config.get("mirror", {}).get("test_resolve"), "dev_config_not_allowed")
         apex = config["domain"]["apex"]
+        extra_hosts = {}
+        for mapping in args.extra_host:
+            name, separator, address = mapping.partition("=")
+            require(separator and name and address and not any(c.isspace() for c in mapping), "invalid_extra_host")
+            extra_hosts[name] = address
+        require(bool(args.ingress_subnet) == bool(args.proxy_address), "recovery_network_pair_required")
+        if args.ingress_subnet:
+            require(ipaddress.ip_address(args.proxy_address) in ipaddress.ip_network(args.ingress_subnet), "invalid_recovery_network")
         workspace = config["domain"].get("workspace_host", "parts")
         if "." not in workspace:
             workspace += "." + apex
@@ -179,7 +192,8 @@ def main():
             stage = "transfer_offline_files"
             data_volume = stage_volume("data", [])
             secret_names = ["session_key", "cap_hmac_key", "metrics_token", "idp_client_secret"]
-            secret_volume = stage_volume("secrets", [(name, args.secrets_dir / name, 0o600) for name in secret_names] + [("site.toml", args.site, 0o600)])
+            secret_volume = stage_volume("secrets", [(name, args.secrets_dir / name, 0o600) for name in secret_names] +
+                                         [("site.toml", args.site, 0o600), ("ca.pem", args.ca_cert, 0o644)])
             restore_entries = [("archive", args.export, 0o600), ("part", temp / "part", 0o755)]
             restore_entries += [(f"identity-{i}", path, 0o600) for i, path in enumerate(args.identity_file)]
             restore_volume = stage_volume("restore", restore_entries)
@@ -208,6 +222,9 @@ def main():
             app["image"], app["ports"] = image, []
             app["environment"]["PF_RENDER_ENABLED"] = "false"
             app["environment"]["PF_SITE_TOML"] = "/run/secrets/site.toml"
+            app["environment"]["SSL_CERT_FILE"] = "/run/secrets/ca.pem"
+            if extra_hosts:
+                app["extra_hosts"] = extra_hosts
             app["environment"].update(PF_LISTEN_WORKSPACE="0.0.0.0:8080", PF_LISTEN_CONTENT="0.0.0.0:8081", PF_LISTEN_OPS="0.0.0.0:9090")
             # Archive verification stages every entry before touching /data. A
             # normal 64MiB runtime tmpfs must not cap the size of a recovery.
@@ -215,6 +232,9 @@ def main():
             app["volumes"] = [{"type": "volume", "source": source, "target": dest, "read_only": readonly} for source, dest, readonly in
                               [(data_volume, "/data", False), (secret_volume, "/run/secrets", True), (restore_volume, "/restore", True), (scratch_volume, "/tmp", False)]]
             proxy = normalized["services"]["proxy"]
+            if args.ingress_subnet:
+                normalized["networks"]["ingress"]["ipam"] = {"config": [{"subnet": args.ingress_subnet}]}
+                proxy["networks"]["ingress"] = {"ipv4_address": args.proxy_address}
             proxy["volumes"] = [{"type": "volume", "source": proxy_volume, "target": "/etc/pf-drill", "read_only": True}]
             proxy["command"] = ["caddy", "run", "--config", "/etc/pf-drill/Caddyfile", "--adapter", "caddyfile"]
             proxy["environment"].update(PF_TLS_CERT="/etc/pf-drill/cert.pem", PF_TLS_KEY="/etc/pf-drill/key.pem")
