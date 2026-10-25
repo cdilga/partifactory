@@ -8,7 +8,8 @@ site config or the Docker context used for compose) to the new host.
 1. Either stop the old server and copy all of `/data` (a consistent host
    snapshot is also suitable), or make a portable export and import it on the
    stopped new host. Follow [backup and recovery](backup.md) for encrypted
-   archives, offline identities and regrant. Do not copy a live SQLite database
+   archives, offline identities, sufficient separate verification scratch space
+   and regrant. Do not copy a live SQLite database
    without its coordinated snapshot/WAL state.
 2. Deploy using `deploy/compose.yaml`, mount the offline site config and supply
    `_FILE` secrets. Wait for `/readyz` on the new host; this checks local

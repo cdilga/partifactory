@@ -32,6 +32,15 @@ Old capabilities therefore fail even if their signed bytes were in a browser;
 a newly granted capability works. A corrupt archive exits 3. Replacing an
 existing data directory requires the explicit `--force` option.
 
+Import first expands and verifies the complete archive in temporary storage.
+Set `TMPDIR` to a private scratch directory with at least the uncompressed
+archive size available, separate from the destination `/data`. For an offline
+container restore, mount a writable scratch volume at `/tmp`; the published
+compose file's 64 MiB `/tmp` tmpfs is for the running server and is too small
+for larger recovery archives. The drill provisions and removes this scratch
+volume automatically. Never stage an unverified archive inside destination
+data: corruption must leave the destination untouched.
+
 If identities changed, generate `partifactory import regrant --plan`, review
 the proposed username/email and audience-name matches, then run
 `partifactory import regrant --apply reviewed-plan.json` while the server is

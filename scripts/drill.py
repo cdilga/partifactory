@@ -177,12 +177,13 @@ def main():
             require(docker("image", "inspect", "--format", "{{.Id}}", image).stdout.decode().strip() == image, "loaded_image_mismatch")
 
             stage = "transfer_offline_files"
-            data_volume = stage_volume("data", [("site.toml", args.site, 0o600)])
+            data_volume = stage_volume("data", [])
             secret_names = ["session_key", "cap_hmac_key", "metrics_token", "idp_client_secret"]
-            secret_volume = stage_volume("secrets", [(name, args.secrets_dir / name, 0o600) for name in secret_names])
+            secret_volume = stage_volume("secrets", [(name, args.secrets_dir / name, 0o600) for name in secret_names] + [("site.toml", args.site, 0o600)])
             restore_entries = [("archive", args.export, 0o600), ("part", temp / "part", 0o755)]
             restore_entries += [(f"identity-{i}", path, 0o600) for i, path in enumerate(args.identity_file)]
             restore_volume = stage_volume("restore", restore_entries)
+            scratch_volume = stage_volume("scratch", [])
             proxy_volume = stage_volume("proxy", [("Caddyfile", REPO / "deploy/proxy/Caddyfile", 0o644),
                                                     ("maintenance.html", REPO / "deploy/proxy/maintenance.html", 0o644),
                                                     ("cert.pem", args.tls_cert, 0o644), ("key.pem", args.tls_key, 0o600)], uid=0)
@@ -206,9 +207,13 @@ def main():
             app = normalized["services"]["partifactory"]
             app["image"], app["ports"] = image, []
             app["environment"]["PF_RENDER_ENABLED"] = "false"
+            app["environment"]["PF_SITE_TOML"] = "/run/secrets/site.toml"
             app["environment"].update(PF_LISTEN_WORKSPACE="0.0.0.0:8080", PF_LISTEN_CONTENT="0.0.0.0:8081", PF_LISTEN_OPS="0.0.0.0:9090")
+            # Archive verification stages every entry before touching /data. A
+            # normal 64MiB runtime tmpfs must not cap the size of a recovery.
+            app["tmpfs"] = []
             app["volumes"] = [{"type": "volume", "source": source, "target": dest, "read_only": readonly} for source, dest, readonly in
-                              [(data_volume, "/data", False), (secret_volume, "/run/secrets", True), (restore_volume, "/restore", True)]]
+                              [(data_volume, "/data", False), (secret_volume, "/run/secrets", True), (restore_volume, "/restore", True), (scratch_volume, "/tmp", False)]]
             proxy = normalized["services"]["proxy"]
             proxy["volumes"] = [{"type": "volume", "source": proxy_volume, "target": "/etc/pf-drill", "read_only": True}]
             proxy["command"] = ["caddy", "run", "--config", "/etc/pf-drill/Caddyfile", "--adapter", "caddyfile"]
@@ -245,7 +250,9 @@ def main():
             stage = "cleanup"
             run(compose + ["down", "-v", "--remove-orphans"], timeout=90)
             compose = None
-    except (Failed, OSError, ValueError, KeyError, subprocess.TimeoutExpired, tarfile.TarError) as error:
+    except KeyboardInterrupt:
+        failures.append("interrupted")
+    except Exception as error:
         failures.append(str(error) if isinstance(error, Failed) else stage)
     finally:
         # Cleanup uses its own timeout after the recovery timer expires. Never prune.
@@ -255,9 +262,12 @@ def main():
         cleanup_commands += [target + ["rm", "-f", container] for container in containers]
         cleanup_commands += [target + ["volume", "rm", volume] for volume in reversed(volumes)]
         for image_id in dict.fromkeys(reversed(created_images)):
-            inspected = subprocess.run(target + ["image", "inspect", image_id], capture_output=True, env=environment, timeout=20)
-            if inspected.returncode == 0:
-                cleanup_commands.append(target + ["image", "rm", image_id])
+            try:
+                inspected = subprocess.run(target + ["image", "inspect", image_id], capture_output=True, env=environment, timeout=20)
+                if inspected.returncode == 0:
+                    cleanup_commands.append(target + ["image", "rm", image_id])
+            except (OSError, subprocess.TimeoutExpired):
+                failures.append("cleanup_failed")
         for command in cleanup_commands:
             try:
                 result = subprocess.run(command, capture_output=True, env=environment, timeout=90)
