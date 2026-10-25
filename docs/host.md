@@ -37,8 +37,11 @@ digest, pulls the candidate, applies forward migrations, and checks a temporary
 container beside the running service. The temporary container publishes no ports.
 After it passes readiness, Compose replaces the application service. A two-minute
 readiness watch restores the previous digest if the new service fails. The proxy
-stays running and serves its maintenance page during the service switch. Inspect
-`deploy/last-deploy.json` for the result. After an interrupted command, review that
+stays running and serves its maintenance page during the service switch.
+The application has a five-second shutdown grace so an unresponsive candidate
+cannot consume the service replacement budget waiting for SIGTERM. SQLite
+transactions remain atomic if the runtime must stop it forcibly.
+Inspect `deploy/last-deploy.json` for the result. After an interrupted command, review that
 journal and the running service before removing its `.lock` file and retrying.
 Use `--engine podman` or `--host ssh://operator@example.com` for another OCI host;
 the compose bind-mount paths must exist on that host. On a managed appliance, use

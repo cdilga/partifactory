@@ -11,6 +11,9 @@ services:
     image: ${PF_IMAGE:?Set PF_IMAGE to a release image by digest}
     platform: linux/amd64
     restart: unless-stopped
+    # Leave time for readiness detection and recreation within the rollback bound,
+    # even when the failed candidate no longer responds to SIGTERM.
+    stop_grace_period: 5s
     user: "65532:65532"
     read_only: true
     cap_drop: [ALL]

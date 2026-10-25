@@ -120,6 +120,8 @@ def main():
     def log_limits():
         # Validate inactive profiles too, then inspect every actually running service.
         config = json.loads(command(compose + ["--profile", "proxy", "--profile", "render", "config", "--format", "json"]).stdout)
+        require(config["services"]["partifactory"].get("stop_grace_period") == "5s",
+                "application shutdown grace must preserve the rollback switch budget")
         for name, service in config["services"].items():
             logging = service.get("logging", {})
             require(logging.get("driver") == "json-file", f"{name}: wrong logging driver")
@@ -148,6 +150,10 @@ def main():
             if doc["State"]["Running"]:
                 running_services.add(service)
             row = {"id": doc["Id"], "service": service, "logging": logging}
+            if service == "partifactory":
+                require(doc["Config"].get("StopTimeout") == 5,
+                        "running application shutdown grace differs from compose")
+                row["stop_timeout_s"] = doc["Config"]["StopTimeout"]
             if service == "proxy":
                 require(set(host.get("CapDrop") or []) == {"ALL"}
                         and {value.removeprefix("CAP_") for value in host.get("CapAdd") or []} == {"NET_BIND_SERVICE"},
