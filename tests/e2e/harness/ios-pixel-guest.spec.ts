@@ -3,6 +3,7 @@ import {test, expect} from './fixtures';
 import {signIn, nativePasskey} from '../lib/public-auth';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as https from 'node:https';
 
 test('Simulator guest paints and Chromium admin freezes the communal board', async ({page, context, request}, info) => {
   test.skip(!process.env.PF_IOS_PIXEL || info.project.name !== 'chromium-desktop', 'Explicit paired Simulator lane');
@@ -14,15 +15,32 @@ test('Simulator guest paints and Chromium admin freezes the communal board', asy
   const run=path.join('/repo/target/e2e-runs',process.env.PF_E2E_RUN!);
   const dir=path.join(run,'device-pixel');
   fs.mkdirSync(dir,{recursive:true,mode:0o700});
+  // Node's APIRequestContext does not use Chromium's wildcard resolver. Preserve
+  // the collector hostname/SNI and ordinary CA verification, overriding only its IP.
+  const collect=(route:string,row?:Record<string,string>)=>new Promise<{status:number,rows:any[]}>((resolve,reject)=>{
+    const operation=https.request(collector+route,{
+      method:row?'POST':'GET',headers:row?{'Content-Type':'text/plain'}:{},
+      lookup:(_hostname,options,callback)=>{
+        const address=process.env.PF_HARNESS_IP!;
+        if((options as any).all)(callback as any)(null,[{address,family:4}]);
+        else callback(null,address,4);
+      },
+    },response=>{
+      let body='';response.setEncoding('utf8');response.on('data',chunk=>body+=chunk);
+      response.on('end',()=>{try{resolve({status:response.statusCode!,rows:body?JSON.parse(body):[]});}catch(error){reject(error);}});
+    });
+    operation.setTimeout(35_000,()=>operation.destroy(new Error('Collector barrier timed out')));
+    operation.on('error',reject);operation.end(row?JSON.stringify(row):undefined);
+  });
   const report=async(item:string,extra:Record<string,string>={})=>{
-    const response=await request.post(collector+'/report',{data:{event:'device.check',item,lane:'chromium-admin',outcome:'pass',run:nonce,...extra}});
-    expect(response.status()).toBe(204);
+    const response=await collect('/report',{event:'device.check',item,lane:'chromium-admin',outcome:'pass',run:nonce,...extra});
+    expect(response.status).toBe(204);
   };
   const wait=async(item:string)=>{
     for(let attempt=0;attempt<15;attempt++) {
-      const response=await request.get(collector+'/wait',{params:{run:nonce,item},timeout:35_000});
-      expect(response.status()).toBe(200);
-      const rows=await response.json();
+      const response=await collect('/wait?'+new URLSearchParams({run:nonce,item}));
+      expect(response.status).toBe(200);
+      const rows=response.rows;
       if(rows.length)return rows[0];
     }
     throw new Error('No Simulator collector barrier: '+item);
