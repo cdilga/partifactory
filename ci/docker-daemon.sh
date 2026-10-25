@@ -48,9 +48,11 @@ fi
 # retain the other masked/read-only proc paths and the runner's non-privileged mode.
 mount --bind /proc/sys/net /proc/sys/net
 mount -o remount,bind,rw /proc/sys/net
-nohup dockerd --host="$DOCKER_HOST" --data-root=/tmp/pf-ci-docker \
+# Keep overlay upper directories on the private checkout volume: /tmp may be
+# overlay-backed itself, while vfs copies every layer and stalls cold workloads.
+nohup dockerd --host="$DOCKER_HOST" --data-root="$PWD/target/ci-docker" \
   --exec-root=/tmp/pf-ci-docker-exec --pidfile=/tmp/pf-ci-docker.pid \
-  --storage-driver=vfs "${cgroup_args[@]}" > target/e2e-logs/docker-daemon.log 2>&1 &
+  --storage-driver=overlay2 "${cgroup_args[@]}" > target/e2e-logs/docker-daemon.log 2>&1 &
 for _ in $(seq 1 60); do
   if docker info >/dev/null 2>&1; then
     echo 'ci docker: isolated daemon ready; checkout bind mounts stay inside the job'
