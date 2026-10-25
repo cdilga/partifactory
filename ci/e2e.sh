@@ -92,7 +92,7 @@ note "ok   application OIDC discovery reaches the real provider through verified
 # A sampler runtime which stops polling can strand later browser sign-in requests.
 SSL_CERT_FILE="$PF_CA" PF_LIVE_POOL_ISSUER="https://dex.pf.test:$PF_HTTPS_PORT/dex" \
   PF_LIVE_POOL_ADDRESS="127.0.0.1:$PF_HTTPS_PORT" \
-  cargo test --workspace --features "$PF_FEATURES" --test live_identity_pool -- --ignored --nocapture \
+  cargo test --workspace --features "$PF_FEATURES" --test recovery background_health_probe -- --ignored --nocapture \
   2>&1 | tee "$logs/identity-pool-regression.txt"
 [ "${PIPESTATUS[0]}" = 0 ] || { note "FAIL live maintenance OIDC pool regression"; exit 1; }
 note "ok   actual maintenance health probe leaves shared and independent real OIDC connections responsive"

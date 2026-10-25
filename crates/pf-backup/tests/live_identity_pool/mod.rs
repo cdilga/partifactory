@@ -1,6 +1,6 @@
 //! Real-network regression: run with the harness's verified TLS Dex, never an HTTP stub.
 //! SSL_CERT_FILE=<run>/certs/ca.pem PF_LIVE_POOL_ISSUER=https://dex.pf.test:18443/dex
-//! cargo test --workspace --features partifactory/dev --test live_identity_pool -- --ignored --nocapture
+//! cargo test --workspace --features partifactory/dev --test recovery background_health_probe -- --ignored --nocapture
 use std::{sync::Arc, time::Duration};
 
 #[tokio::test(flavor = "current_thread")]

@@ -1,3 +1,6 @@
+#[path = "live_identity_pool/mod.rs"]
+mod live_identity_pool;
+
 use pf_backup::{BackupService, ExportOptions, ImportOptions};
 use pf_db::{
     Db,
