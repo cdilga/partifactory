@@ -44,7 +44,10 @@ def main():
     parser.add_argument("--bad-image")
     parser.add_argument("--delayed-image")
     parser.add_argument("--deploy-image", help="Smoke also performs and observes a successful good-image deployment")
+    parser.add_argument("--without-proxy", action="store_true", help="Logs only: require the application running with both proxy and render services stopped")
     args = parser.parse_args()
+    if args.without_proxy and args.mode != "logs":
+        parser.error("--without-proxy is only supported by the logs gate")
     args.evidence_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     private = args.evidence_dir / "private.log"
     private.touch(mode=0o600)
@@ -154,7 +157,12 @@ def main():
                 row["security"] = {"cap_drop": host["CapDrop"], "cap_add": host["CapAdd"],
                                    "read_only": host["ReadonlyRootfs"], "security_opt": host["SecurityOpt"]}
             observed.append(row)
-        require({"partifactory", "proxy"} <= running_services, "application and actual Caddy proxy must both be running")
+        if args.without_proxy:
+            require("partifactory" in running_services, "application must be running without optional profiles")
+            require(not {"proxy", "partifactory-render"} & running_services,
+                    "proxy and render services must both be stopped for the app-only log gate")
+        else:
+            require({"partifactory", "proxy"} <= running_services, "application and actual Caddy proxy must both be running")
         (args.evidence_dir / "log-limits.json").write_text(json.dumps(observed, indent=2) + "\n")
 
     if args.mode in ("smoke", "rollback"):

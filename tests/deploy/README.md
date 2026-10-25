@@ -12,7 +12,11 @@ non-root user, native healthcheck and release-only command/config behavior.
 It removes its own temporary container. `log_limits.sh` checks the delivered
 compose definitions with both optional profiles enabled and checks the actual
 `json-file`, `10m` / `3` settings on every running container. Run it both with
-and without the render/proxy profiles.
+and without the render/proxy profiles. The default requires the application and
+actual Caddy proxy running. Stop both `proxy` and `partifactory-render` and pass
+`--without-proxy` for the app-only log gate: it requires the application running,
+both optional services absent, and log limits on every remaining running service.
+The flag is accepted only by `log_limits.sh`; smoke always requires real Caddy.
 
 ```sh
 tests/deploy/compose_smoke.sh --compose /private/normalized-compose.json \
@@ -99,7 +103,7 @@ daemon and explicitly records `fresh_source_daemon: false`; that does not satisf
 the fresh-context gate. An already running shared harness is always refused.
 
 The driver tests successful deployment, both faults, and running log limits with
-the renderer started and stopped. It then exports with the actual release CLI and
+the proxy and renderer started, then both stopped. It then exports with the actual release CLI and
 restores twice on a distinct empty daemon: an intentionally failing external test
 must produce a failure report and metric 0, then the real restored-host checks must
 complete within 900 seconds and produce metric 1. Both outcomes must appear on

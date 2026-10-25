@@ -107,11 +107,11 @@ connection=(--compose "$PF_RUN_DIR/deploy-compose.json" --base-url https://parts
 tests/deploy/compose_smoke.sh "${connection[@]}" --deploy-image "$PF_HARNESS_IMAGE" \
   --evidence-dir "$logs/private/smoke" | tee "$logs/public/smoke.txt"
 cp "$logs/private/smoke/smoke.json" "$logs/private/smoke/log-limits.json" "$logs/public/"
-docker compose -f "$PF_RUN_DIR/deploy-compose.json" stop partifactory-render >> "$private" 2>&1
-tests/deploy/log_limits.sh --compose "$PF_RUN_DIR/deploy-compose.json" --evidence-dir "$logs/private/logs-without-render" \
-  | tee "$logs/public/logs-without-render.txt"
-cp "$logs/private/logs-without-render/log-limits.json" "$logs/public/log-limits-without-render.json"
-docker compose -f "$PF_RUN_DIR/deploy-compose.json" up -d partifactory-render >> "$private" 2>&1
+docker compose -f "$PF_RUN_DIR/deploy-compose.json" stop proxy partifactory-render >> "$private" 2>&1
+tests/deploy/log_limits.sh --compose "$PF_RUN_DIR/deploy-compose.json" --without-proxy \
+  --evidence-dir "$logs/private/logs-app-only" | tee "$logs/public/logs-app-only.txt"
+cp "$logs/private/logs-app-only/log-limits.json" "$logs/public/log-limits-app-only.json"
+docker compose -f "$PF_RUN_DIR/deploy-compose.json" up -d --wait proxy partifactory-render >> "$private" 2>&1
 PF_RELEASE_ASSETS="$PF_RELEASE_ASSETS" tests/deploy/fault-image.sh "$PF_HARNESS_IMAGE" \
   busybox:1.37.0-musl@sha256:dc88b80842580654294472735332ec7c7789a4010ec9a68b69f9b88c19abede6 \
   localhost:25000/partifactory-deploy-fixture > "$PF_RUN_DIR/fault-images" 2>> "$private"
