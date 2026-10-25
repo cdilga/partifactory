@@ -150,6 +150,20 @@ jobs:
         run: |
           bash ci/docker-daemon.sh
           ci/e2e.sh
+      - name: communal pixel editor acceptance
+        # The normal suite tears down its seeded harness first. This gate creates the
+        # contract board through real scoped HTTP and rmcp device agents on a fresh one.
+        run: tests/device/communal-pixel.sh
+      - name: communal pixel editor evidence
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: communal-pixel-editor-evidence
+          path: |
+            target/e2e-logs/cpx-*/communal_pixel_editor/report.json
+            target/e2e-logs/cpx-*/communal_pixel_editor/*/report.json
+            target/e2e-logs/cpx-*/communal_pixel_editor/*/*.png
+          if-no-files-found: error
       - name: logs
         if: failure()
         uses: actions/upload-artifact@v3

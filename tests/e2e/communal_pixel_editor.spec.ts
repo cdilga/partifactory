@@ -26,7 +26,7 @@ test('communal_pixel_editor: real device agents, exact admin budgets and signed-
   const offset=(await serverLog()).length;
   await signIn(page);
   const {cdp}=await nativePasskey(page,context);
-  const hardware=countAssertions(cdp);
+  const hardware=await countAssertions(cdp,page);
   const agents:any[]=[];
   for(const surface of ['http','mcp'] as const) {
     const device=await (await request.post('/oauth/device_authorization',{form:{client_id:'part-cli',agent_name:`Pixel test agent ${surface} ${info.project.name}`,scope:'parts:read parts:write data:read data:write'}})).json();
@@ -66,7 +66,7 @@ test('communal_pixel_editor: real device agents, exact admin budgets and signed-
   const url=await link.inputValue();budgets.push(await share.check());
   const createdLinks=await (await page.request.get(base+`/api/chrome/v1/${primary.name}/links`,{headers:{Origin:new URL(primary.url).origin}})).json();
   const linkId=createdLinks.links.find((value:any)=>value.mode==='contribute').id;
-  await page.screenshot({path:path.join(evidence,'admin-share.png')});
+  await page.screenshot({path:path.join(evidence,'admin-share.png'),mask:[link]});
   // Each independently budgeted action starts with the sheet closed.
   await page.keyboard.press('Escape');
   const guests:Awaited<ReturnType<typeof signedOutGuest>>[]=[];
@@ -133,7 +133,7 @@ test('communal_pixel_editor: real device agents, exact admin budgets and signed-
       ordered('Freeze epoch committed',row=>row.event==='epoch.bump'&&row.key===`minter:link:${linkId}`),
       ordered('next guest write refused',row=>row.event==='rt.op'&&row.op==='storage.set'&&row.principal?.startsWith(`guest:${linkId}:`)&&row.outcome==='forbidden_view_only'),
     ];
-    await page.screenshot({path:path.join(evidence,'admin-after-freeze.png')});
+    await page.screenshot({path:path.join(evidence,'admin-after-freeze.png'),mask:[page.getByLabel('Public link',{exact:true})]});
     // A fresh real session makes the deep-link's actual in-sheet biometric observable.
     const posted=await primary.call('part_link_for',{name:primary.name,action:'contribute'});
     expect(posted.url).toBe(primary.url+'#share=contribute');

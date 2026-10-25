@@ -38,10 +38,10 @@ export async function signedOutGuest(playwright:Playwright,kind:string,apex:stri
   if(kind==='firefox') {
     const profile=fs.mkdtempSync(path.join(os.tmpdir(),'pf-pixel-firefox-'));
     fs.cpSync(process.env.PF_FIREFOX_PROFILE!,profile,{recursive:true});
-    context=await playwright.firefox.launchPersistentContext(profile,{viewport:{width:1280,height:800}});
+    context=await playwright.firefox.launchPersistentContext(profile,{args:[],viewport:{width:1280,height:800}});
     close=async()=>{await context.close();fs.rmSync(profile,{recursive:true,force:true});};
   } else {
-    const browser=kind==='webkit'?await playwright.webkit.launch():await playwright.chromium.launch({args:[`--host-resolver-rules=MAP *.${apex} ${process.env.PF_HARNESS_IP}, EXCLUDE localhost`]});
+    const browser=kind==='webkit'?await playwright.webkit.launch({args:[]}):await playwright.chromium.launch({args:[`--host-resolver-rules=MAP *.${apex} ${process.env.PF_HARNESS_IP}, EXCLUDE localhost`]});
     context=await browser.newContext(kind==='webkit'?devices['iPhone 15']:devices['Pixel 7']);
     close=async()=>{await context.close();await browser.close();};
   }
