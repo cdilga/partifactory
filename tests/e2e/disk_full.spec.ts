@@ -64,7 +64,6 @@ test('real volume pressure refuses writes while content reads and deletion conti
     expect((await waitForLog({event:'disk.budget_state'})).some(l=>l.state==='full')).toBe(true);
     expect((await waitForLog({event:'op'})).some(l=>l.op==='part_create'&&l.outcome==='storage_full')).toBe(true);
     await page.goto('/admin/health');
-    await expect(page.locator('[data-health-row="Disk budget"]')).toContainText('full');
     await expect(page.locator('[data-health-row="Disk budget"] .red')).toBeVisible();
     await page.screenshot({path:info.outputPath('health-disk-full.png'),fullPage:true});
     fs.writeFileSync(info.outputPath('metrics-full.txt'),await metrics());

@@ -326,11 +326,27 @@ async fn finish_failed(cfg: &Config, job: &Job, error: &PfError) -> Result<(), P
         "failed"
     };
     let errors = json!([error.to_json()["error"]]);
-    let log = cfg.blobs.put(
-        &serde_json::to_vec(&json!({"event":"build.finished","outcome":status,"code":error.code}))
-            .map_err(|_| PfError::internal("cannot serialize build log"))?,
-    )?;
-    let event=cfg.db.write(move|db|->Result<_,PfError>{record_blob(db,&log.hash,log.size,now)?;db.execute("UPDATE builds SET status=?2,toolchain=?3,errors=?4,log_hash=?5,finished_at=?6 WHERE id=?1",params![id,status,TOOLCHAIN,errors.to_string(),log.hash,now])?;Ok(append_event(db,now,Some(&part),"build.finished","system",&json!({"id":id,"status":status}))?)}).await?;
+    let bytes =
+        serde_json::to_vec(&json!({"event":"build.finished","outcome":status,"code":error.code}))
+            .map_err(|_| PfError::internal("cannot serialize build log"))?;
+    // Completing an already-claimed job must not require allocating another blob after the
+    // budget fills. The bounded diagnostic stays on the build row and the old live is untouched.
+    let log = match cfg.blobs.put(&bytes) {
+        Ok(log) => Some(log),
+        Err(pf_blobs::BlobError::StorageFull) => None,
+        Err(error) => return Err(error.into()),
+    };
+    let event=cfg.db.write(move|db|->Result<_,PfError>{
+        let log_hash=if let Some(log)=log {
+            match record_blob(db,&log.hash,log.size,now).map_err(PfError::from) {
+                Ok(())=>Some(log.hash),
+                Err(error) if error.code=="storage_full"=>None,
+                Err(error)=>return Err(error),
+            }
+        } else {None};
+        db.execute("UPDATE builds SET status=?2,toolchain=?3,errors=?4,log_hash=?5,finished_at=?6 WHERE id=?1",params![id,status,TOOLCHAIN,errors.to_string(),log_hash,now])?;
+        Ok(append_event(db,now,Some(&part),"build.finished","system",&json!({"id":id,"status":status}))?)
+    }).await?;
     cfg.events.publish([event]);
     Ok(())
 }
@@ -422,5 +438,86 @@ pub async fn wait_for_build(db: &pf_db::Db, id: i64, with_check: bool) -> Result
             return Ok(summary);
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[cfg(test)]
+mod storage_full_tests {
+    use super::*;
+    struct Full;
+    impl pf_blobs::DiskBudget for Full {
+        fn is_full(&self, _: u64) -> bool {
+            true
+        }
+    }
+    #[tokio::test]
+    async fn full_budget_finishes_claimed_build_failed_without_replacing_last_live() {
+        let db = pf_db::temp_db();
+        let dir = tempfile::tempdir().unwrap();
+        db.write_blocking(|tx|{
+            tx.execute("INSERT INTO users(id,auth_source,username,display_name,created_at,synced_at) VALUES('u','local','fixture','Fixture',0,0)",[])?;
+            tx.execute("INSERT INTO spaces(id,slug,kind,title,owner_user_id,created_at) VALUES('s','~fixture','personal','Fixture','u',0)",[])?;
+            tx.execute("INSERT INTO parts(id,name,space_id,title,kind,owner_user_id,created_by_user,created_at,updated_at) VALUES('p','fixture','s','Fixture','html','u','u',0,0)",[])?;
+            for (v,n) in [("old",1),("new",2)] {tx.execute("INSERT INTO versions(id,part_id,n,manifest_hash,entry,author_user,via,created_at) VALUES(?1,'p',?2,?1,'index.html','u','api',0)",params![v,n])?;}
+            tx.execute("INSERT INTO builds(id,version_id,cache_key,toolchain,method,status,queued_at) VALUES(1,'old','old','fixture','server_build','ok',0),(2,'new','new','fixture','server_build','running',0)",[])?;
+            tx.execute("UPDATE parts SET head_version_id='new',head_n=2,live_version_id='old',live_build_id=1 WHERE id='p'",[])?;
+            Ok::<_,pf_db::DbError>(())
+        }).unwrap();
+        let cfg = Config {
+            db: db.db.clone(),
+            blobs: pf_blobs::BlobStore::with_budget(dir.path(), Arc::new(Full)).unwrap(),
+            egress: Egress::new(vec![]),
+            blob_origin: "https://blobs-part.pf.test".into(),
+            events: EventBus::default(),
+            on_live: Arc::new(|_| Box::pin(async {})),
+            check: Arc::new(NoRenderer),
+        };
+        let job = Job {
+            id: 2,
+            part: "p".into(),
+            version: "new".into(),
+            entry: "index.html".into(),
+            kind: "html".into(),
+            gate: "always".into(),
+        };
+        finish_failed(
+            &cfg,
+            &job,
+            &PfError::new("storage_full", "disk budget used up"),
+        )
+        .await
+        .unwrap();
+        db.read(|c| {
+            let (status, finished, log, errors): (String, Option<i64>, Option<String>, String) = c
+                .query_row(
+                    "SELECT status,finished_at,log_hash,errors FROM builds WHERE id=2",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                )?;
+            assert_eq!(status, "failed");
+            assert!(finished.is_some());
+            assert!(log.is_none());
+            assert!(errors.contains("storage_full"));
+            assert_eq!(
+                c.query_row("SELECT live_build_id FROM parts WHERE id='p'", [], |r| r
+                    .get::<_, i64>(0))?,
+                1
+            );
+            assert_eq!(
+                c.query_row("SELECT count(*) FROM blobs", [], |r| r.get::<_, i64>(0))?,
+                0
+            );
+            assert_eq!(
+                c.query_row(
+                    "SELECT count(*) FROM events WHERE type='build.finished'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                1
+            );
+            Ok::<_, pf_db::DbError>(())
+        })
+        .await
+        .unwrap();
     }
 }
