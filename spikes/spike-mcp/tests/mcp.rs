@@ -1,6 +1,6 @@
 use std::{
     io::Write,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use rmcp::{
@@ -13,23 +13,11 @@ use rmcp::{
 };
 use serde_json::{Value, json};
 use spike_mcp::{PartGet, PartMeta, Wrapped};
-use tracing::instrument::WithSubscriber;
-
 async fn spawn() -> String {
-    spawn_with_dispatch(tracing::dispatcher::get_default(Clone::clone)).await
-}
-
-async fn spawn_with_dispatch(dispatch: tracing::Dispatch) -> String {
+    test_logs();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    // Hyper spawns connection tasks; a thread-local default at the test boundary does not
-    // follow those tasks. Bind each request future to this test's dispatch explicitly.
-    let app = spike_mcp::app().layer(axum::middleware::from_fn(
-        move |request: axum::extract::Request, next: axum::middleware::Next| {
-            next.run(request).with_subscriber(dispatch.clone())
-        },
-    ));
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    tokio::spawn(async move { axum::serve(listener, spike_mcp::app()).await.unwrap() });
     format!("http://{addr}/mcp")
 }
 
@@ -57,6 +45,25 @@ impl Write for Buf {
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }
+}
+
+fn test_logs() -> Buf {
+    // One subscriber for this test binary follows Hyper's spawned connection tasks.
+    // Per-test defaults can disappear between polls on concurrent Tokio runtimes.
+    static LOGS: OnceLock<Buf> = OnceLock::new();
+    LOGS.get_or_init(|| {
+        let logs = Buf::default();
+        let writer = logs.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .json()
+            .flatten_event(true)
+            .with_max_level(tracing::Level::INFO)
+            .with_writer(move || writer.clone())
+            .finish();
+        tracing::subscriber::set_global_default(subscriber).expect("test log subscriber");
+        logs
+    })
+    .clone()
 }
 
 #[tokio::test]
@@ -143,14 +150,8 @@ async fn rmcp_client_legacy_initialize_also_works() {
 
 #[tokio::test]
 async fn missing_token_is_http_401_not_tool_result() {
-    let logs = Buf::default();
-    let w = logs.clone();
-    let sub = tracing_subscriber::fmt()
-        .json()
-        .flatten_event(true)
-        .with_writer(move || w.clone())
-        .finish();
-    let url = spawn_with_dispatch(tracing::Dispatch::new(sub)).await;
+    let logs = test_logs();
+    let url = spawn().await;
     let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"_meta":meta(),"name":"part_get","arguments":{"name":"demo"}}});
     for auth in [None, Some("Bearer wrong")] {
         let mut req = reqwest::Client::new()
@@ -183,7 +184,8 @@ async fn missing_token_is_http_401_not_tool_result() {
         let complete = String::from_utf8(logs.0.lock().unwrap().clone())
             .unwrap()
             .lines()
-            .any(|l| l.contains("\"event\":\"http.request\""));
+            .filter(|l| l.contains("\"event\":\"http.request\"") && l.contains("\"status\":401"))
+            .count() == 2;
         if complete || tokio::time::Instant::now() >= deadline {
             break;
         }
@@ -192,7 +194,7 @@ async fn missing_token_is_http_401_not_tool_result() {
     let logs = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
     let line = logs
         .lines()
-        .find(|l| l.contains("\"event\":\"http.request\""))
+        .find(|l| l.contains("\"event\":\"http.request\"") && l.contains("\"status\":401"))
         .expect("http.request log");
     let l: Value = serde_json::from_str(line).unwrap();
     assert_eq!(

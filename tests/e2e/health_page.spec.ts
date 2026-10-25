@@ -1,5 +1,7 @@
 import { test, expect } from './harness/fixtures';
 import { signIn } from './lib/public-auth';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 test('admin Health exposes readiness, backup layers, budget and every capped store', async ({ page }, info) => {
   await signIn(page);
@@ -11,7 +13,11 @@ test('admin Health exposes readiness, backup layers, budget and every capped sto
   }
   await expect(page.locator('[data-health-row="Same disk"]')).toContainText('amber');
   if (process.env.PF_IDP_DOWN === '1') await expect(page.locator('[data-health-row="idp"]')).toContainText('amber');
-  await page.screenshot({ path: info.outputPath(process.env.PF_IDP_DOWN === '1' ? 'admin-health-idp-down.png' : 'admin-health.png'), fullPage: true });
+  // Keep verification screenshots outside Playwright's failures-only output folder.
+  const evidence = path.resolve('../../target/e2e-logs', process.env.PF_E2E_RUN ?? 'local', 'health');
+  fs.mkdirSync(evidence, { recursive: true });
+  const state = process.env.PF_IDP_DOWN === '1' ? 'idp-down' : 'ready';
+  await page.screenshot({ path: path.join(evidence, `${info.project.name}-${state}.png`), fullPage: true });
   const wrongOrigin = await page.request.post('/admin/health/run-now', { headers: { Origin: 'https://notes-part.pf.test' }, form: { store: 'exports' } });
   expect(wrongOrigin.status()).toBe(403);
 });
