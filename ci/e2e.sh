@@ -43,7 +43,7 @@ teardown() {
     cp "$run"/caddy.log "$run"/dex.log "$logs/" 2>/dev/null || true
     if [ "$status" = 0 ]; then
       # Passing: keep only the summary and the results file.
-      find "$logs" -type f ! -name 'results*.json' ! -name summary.txt ! -name '*.png' ! -name report.json -delete 2>/dev/null || true
+      find "$logs" -type f ! -name 'results*.json' ! -name summary.txt ! -name '*.png' ! -name report.json ! -name proxy-runtime-log-gate.json -delete 2>/dev/null || true
       find "$logs" -depth -type d -empty -delete 2>/dev/null || true
       rm -rf "$run"
     fi
@@ -152,6 +152,12 @@ python3 "$repo/tests/security/run.py" --base-url https://parts.pf.test \
   --ca-cert "$run/certs/ca.pem" --connect-to "127.0.0.1:$PF_HTTPS_PORT" \
   --fixture "$run/part-fixture.json" --sibling-origin https://pixel-part.pf.test \
   --logs-url https://parts.pf.test/_dev/logs --database-file "$run/data/partifactory.db" \
+  --metrics-url "$PF_OPS_URL/metrics" --metrics-token-file "$PF_METRICS_TOKEN_FILE" \
+  --insights-db "$run/data/insights.db" \
+  --canary-values-file "$run/agent-surface-private/redaction-canaries.json" \
+  --secret-file "$run/secrets/session_key" --secret-file "$run/secrets/cap_hmac_key" \
+  --secret-file "$run/secrets/idp_client_secret" --secret-file "$run/secrets/metrics_token" \
+  --secret-file "$run/secrets/api_token" \
   --playwright-report "$logs/results-main.json" --evidence-dir "$logs/security" \
   2>&1 | tee "$logs/security.txt"
 note "--- CLI export/import recovery"

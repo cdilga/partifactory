@@ -97,9 +97,12 @@ def observations(junit_paths=(), playwright_paths=(), script_paths=()):
                 symbol = ref["test"]
                 if name == symbol or name.endswith("::" + symbol):
                     # A source file in reports is preferred; crate-qualified names also disambiguate.
-                    crate = Path(ref["file"]).parts[1].replace("-", "_")
-                    qualifier = classname + " " + name
-                    if crate in qualifier or case.get("file") == ref["file"]:
+                    crate = Path(ref["file"]).parts[1]
+                    aliases = (crate, crate.replace("-", "_"))
+                    qualified = classname.split("::", 1)[0] in aliases or name.split("::", 1)[0] in aliases
+                    if ref.get("junit_classname"):
+                        qualified = classname == ref["junit_classname"]
+                    if qualified or case.get("file") == ref["file"]:
                         evidence[("native", ref["file"], symbol)].add("native")
     for path in playwright_paths:
         data = json.loads(Path(path).read_text())

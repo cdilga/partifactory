@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 from coverage import CHECKLIST, check_mapping, observations
+from aggregate import aggregate
 
 
 class EvidenceTests(unittest.TestCase):
@@ -46,6 +47,21 @@ class EvidenceTests(unittest.TestCase):
             self.assertFalse(observations(junit_paths=[path]))
             path.write_text('<testsuite><testcase classname="pf_caps" name="host_bound"/></testsuite>')
             self.assertTrue(observations(junit_paths=[path]))
+            path.write_text('<testsuite><testcase classname="pf-caps" name="tests::host_bound"/></testsuite>')
+            self.assertTrue(observations(junit_paths=[path]))
+
+    def test_aggregation_never_overwrites_an_observed_failure_or_hides_an_absent_platform(self):
+        checklist = {"checks": [{"id": "SEC-001", "components": [
+            {"kind": "external", "probe": "discovery", "proves": "public discovery"},
+            {"kind": "script", "file": "tests/device/ios-sim.sh", "test": "device_pass", "platform": "macos", "proves": "Mobile Safari simulator"},
+        ]}]}
+        passed = {"checks": [{"id": "SEC-001", "components": [{"outcome": "pass", "proves": "public discovery"}]}]}
+        failed = {"checks": [{"id": "SEC-001", "components": [{"outcome": "fail", "proves": "public discovery"}]}]}
+        self.assertFalse(aggregate(checklist, [passed, failed], {}, "linux")["complete"])
+        linux = aggregate(checklist, [passed], {}, "linux")
+        self.assertTrue(linux["complete"])
+        self.assertEqual(linux["outside_platform"][0]["platform"], "macos")
+        self.assertFalse(aggregate(checklist, [passed], {}, "all")["complete"])
 
 
 if __name__ == "__main__":

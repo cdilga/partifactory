@@ -269,6 +269,11 @@
       "requirement": "Part blobs always carry `Cache-Control: private` and the shared blob host serves only hashes in `shared_blobs`. *(adapter)* Private part blobs are never in Cloudflare's cache (`cf-cache-status` \u2260 `HIT`).",
       "components": [
         {
+          "kind": "external",
+          "probe": "blob_policies",
+          "proves": "Through ingress: private content/asset cache policy, immutable cookie-free shared prelude, and known private asset hash rejected on shared blob host."
+        },
+        {
           "kind": "native",
           "file": "crates/pf-parthost/tests/listener.rs",
           "test": "listener_security_headers_hot_path_and_blob_classification",
@@ -285,6 +290,11 @@
       "id": "SEC-012",
       "requirement": "Shared blobs carry `public, max-age=31536000, immutable` and never `Set-Cookie`. *(adapter)* A shared blob on `blobs-part/b/<hash>` shows `cf-cache-status: HIT` on the second fetch (the cache rule works).",
       "components": [
+        {
+          "kind": "external",
+          "probe": "blob_policies",
+          "proves": "Through ingress: private content/asset cache policy, immutable cookie-free shared prelude, and known private asset hash rejected on shared blob host."
+        },
         {
           "kind": "native",
           "file": "crates/pf-parthost/tests/listener.rs",
@@ -358,7 +368,8 @@
           "kind": "native",
           "file": "tests/agent_surfaces/run.rs",
           "test": "four_drivers_times_personal_and_device_tokens",
-          "proves": "All four agent surfaces with PAT/device cannot create outward-sharing state."
+          "proves": "All four agent surfaces with PAT/device cannot create outward-sharing state.",
+          "junit_classname": "pf-mcp::protocol"
         },
         {
           "kind": "playwright",
@@ -502,7 +513,8 @@
           "kind": "native",
           "file": "tests/agent_surfaces/run.rs",
           "test": "four_drivers_times_personal_and_device_tokens",
-          "proves": "Four surfaces cannot write outward sharing; link_for yields navigation only."
+          "proves": "Four surfaces cannot write outward sharing; link_for yields navigation only.",
+          "junit_classname": "pf-mcp::protocol"
         },
         {
           "kind": "external",
@@ -872,6 +884,13 @@
           "proves": "Sensitive canary inputs absent in supplied logs,metrics,Insights."
         },
         {
+          "kind": "script",
+          "file": "deploy/proxy/test-runtime-logs.py",
+          "test": "runtime_proxy_log_redaction",
+          "source_anchor": "shipped logger exposed a credential canary",
+          "proves": "Real truncated-stream Caddy warning retains diagnostics but removes URI/header canaries, with an unfiltered positive control."
+        },
+        {
           "kind": "native",
           "file": "crates/pf-obs/src/redact.rs",
           "test": "random_caps_never_survive",
@@ -997,7 +1016,8 @@
           "file": "tests/device/ios-sim.sh",
           "test": "device_pass",
           "source_anchor": "device-pass",
-          "proves": "Mac Mobile Safari simulator self-report + screenshots."
+          "proves": "Mac Mobile Safari simulator self-report + screenshots.",
+          "platform": "macos"
         },
         {
           "kind": "manual",

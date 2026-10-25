@@ -2,6 +2,10 @@
 # Runners are chosen by the generic labels `rust` and `browser`; the forge is incidental.
 name: ci
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}-${{ github.event.schedule }}-${{ inputs.job }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [main]
@@ -207,6 +211,26 @@ jobs:
           tests/e2e/harness/down.sh || true
           if [ -f /tmp/pf-ci-docker.pid ]; then kill "$(cat /tmp/pf-ci-docker.pid)" || true; fi
           PF_CLEAN_NO_DOCKER=1 scripts/clean-build.sh --apply || true
+
+  security-evidence:
+    # Merge only artifacts of this workflow. Missing/skipped expected Linux gates fail;
+    # the separately observed Mac Simulator lane remains explicitly outside this platform.
+    if: always() && github.event_name != 'schedule' && (github.event_name != 'workflow_dispatch' || inputs.job == '')
+    needs: [checks, e2e, shipping-gates]
+    runs-on: [rust, rust-truenas]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/download-artifact@v3
+        with:
+          path: target/security-inputs
+      - name: verify observed evidence
+        run: ci/security-evidence.sh
+      - name: report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-evidence-report
+          path: target/e2e-logs/security-aggregate/
 
   advisories:
     if: (github.event_name == 'schedule' && github.event.schedule == '17 3 * * *') || (github.event_name == 'workflow_dispatch' && inputs.job == 'advisories')

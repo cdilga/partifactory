@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import http.client
 import json
 import os
@@ -17,7 +18,7 @@ import time
 from urllib.parse import quote, urlencode, urljoin, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from coverage import check_mapping, observations  # noqa: E402
+from coverage import CHECKLIST, check_mapping, observations  # noqa: E402
 
 
 class Unobserved(Exception):
@@ -84,10 +85,12 @@ class Suite:
         self.content = args.content_url
         self.part = args.part_url
         self.expired = None
+        self.private_asset_path = args.private_asset_path
         if args.fixture:
             fixture = json.loads(Path(args.fixture).read_text())
             self.content = self.content or fixture["notes"]["url"]
             self.expired = fixture.get("expired", {}).get("url")
+            self.private_asset_path = self.private_asset_path or "data.json"
         if self.content and not self.part:
             parsed = urlsplit(self.content)
             self.part = f"{parsed.scheme}://{parsed.netloc}/"
@@ -154,6 +157,25 @@ class Suite:
         for path in ("/", "/api/v1/part_get", "/mcp"):
             _, h, _ = self.get(path, headers={"Origin": "null"})
             require(h.get("access-control-allow-origin") != "null", "workspace allowed null CORS")
+
+    def blob_policies(self):
+        headers, body = self.content_headers()
+        require("private" in [value.strip() for value in headers.get("cache-control", "").split(",")], "private content cache policy missing")
+        require(headers.get("cf-cache-status", "").upper() != "HIT", "private content was served from edge cache")
+        match = re.search(rb'<script\s+src=["\'](https://[^"\']+/b/[a-f0-9]{64})["\']', body)
+        require(match, "shared prelude URL missing from content")
+        status, shared_headers, _ = self.client.request(match[1].decode())
+        require(status == 200, "shared prelude unavailable")
+        require(shared_headers.get("cache-control") == "public, max-age=31536000, immutable" and
+                "set-cookie" not in shared_headers, "shared blob caching/cookie policy differs")
+        asset = need(self.private_asset_path, "--private-asset-path or --fixture required for known-private hash test")
+        status, private_headers, private_bytes = self.client.request(urljoin(self.content, asset))
+        require(status == 200 and "private" in [value.strip() for value in private_headers.get("cache-control", "").split(",")],
+                "known private asset unavailable or publicly cacheable")
+        require(private_headers.get("cf-cache-status", "").upper() != "HIT", "private asset was served from edge cache")
+        digest = hashlib.sha256(private_bytes).hexdigest()
+        status, _, _ = self.client.request(self.blob_origin + "/b/" + digest)
+        require(status == 404, "known private blob hash was served by shared host")
 
     def cap_rejection(self):
         url = need(self.content, "--content-url or --fixture required")
@@ -363,12 +385,30 @@ class Suite:
 
     def redaction_canaries(self):
         # Place each canary only in a sensitive input, never in a path/query/loggable field.
+        request_ids = []
         for token in self.canaries:
-            self.get("/api/v1/part_get", method="POST", headers={"Authorization": "Bearer " + token,
+            response = self.get("/api/v1/part_get", method="POST", headers={"Authorization": "Bearer " + token,
                 "Cookie": "__Host-pf_session=" + self.cookie_canary, "Content-Type": "application/json"},
                 body=json.dumps({"name": self.content_canary}).encode())
+            if response[1].get("x-request-id"):
+                request_ids.append(response[1]["x-request-id"])
+            response = self.get("/mcp", method="POST", headers={"Authorization": "Bearer " + token,
+                "Cookie": "__Host-pf_session=" + self.cookie_canary, "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream"},
+                body=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "part_get", "arguments": {"name": self.content_canary}}}).encode())
+            if response[1].get("x-request-id"):
+                request_ids.append(response[1]["x-request-id"])
+        live_token = Path(self.args.token_file).read_text().strip() if self.args.token_file else None
+        if live_token:
+            response = self.get("/api/v1/part_list", method="POST", headers={"Authorization": "Bearer " + live_token,
+                "Content-Type": "application/json"}, body=b"{}")
+            require(response[0] != 401, "supplied live token is not authenticated")
+            if response[1].get("x-request-id"):
+                request_ids.append(response[1]["x-request-id"])
         if self.content:
-            self.client.request(self.content, headers={"Cookie": "__Host-pf_cap=" + self.cookie_canary})
+            response = self.client.request(self.content, headers={"Cookie": "__Host-pf_cap=" + self.cookie_canary})
+            if response[1].get("x-request-id"):
+                request_ids.append(response[1]["x-request-id"])
         if not (self.args.logs_file or self.args.logs_url):
             raise Unobserved("--logs-file or --logs-url needed to observe redaction")
         # Allow the asynchronous access line to land; this is bounded and intentionally short.
@@ -382,26 +422,69 @@ class Suite:
             status, _, data = self.client.request(self.args.logs_url)
             require(status == 200 and data not in (b"", b"[]"), "log evidence unavailable")
             sources.append(data)
+        log_bytes = b"\n".join(sources)
+        require(request_ids and all(identifier.encode() in log_bytes for identifier in request_ids),
+                "log evidence does not contain the actual canary request IDs")
+        missing_sinks = []
         if self.args.metrics_url:
             token = Path(need(self.args.metrics_token_file, "metrics token file required")).read_text().strip()
-            status, _, data = self.client.request(self.args.metrics_url, headers={"Authorization": "Bearer " + token})
+            parsed = urlsplit(self.args.metrics_url)
+            if parsed.scheme == "http":
+                require(parsed.hostname in ("127.0.0.1", "::1", "localhost") and not parsed.username,
+                        "plaintext metrics input must be an explicit loopback ops listener")
+                connection = http.client.HTTPConnection(parsed.hostname, parsed.port or 80, timeout=10)
+                try:
+                    connection.request("GET", parsed.path or "/", headers={"Authorization": "Bearer " + token})
+                    response = connection.getresponse()
+                    status, data = response.status, response.read(8 * 1024 * 1024)
+                finally:
+                    connection.close()
+            else:
+                status, _, data = self.client.request(self.args.metrics_url, headers={"Authorization": "Bearer " + token})
             require(status == 200, "authenticated metrics unavailable")
             sources.append(data)
+        else:
+            missing_sinks.append("--metrics-url and --metrics-token-file")
         if self.args.insights_db:
             db = sqlite3.connect(Path(self.args.insights_db).resolve().as_uri() + "?mode=ro", uri=True)
             try:
                 sources.append("\n".join(db.iterdump()).encode())
             finally:
                 db.close()
+        else:
+            missing_sinks.append("--insights-db")
         needles = [s.encode() for s in self.canaries + [self.cookie_canary, self.content_canary]] + self.secret_canaries
+        if live_token:
+            needles.append(live_token.encode())
+        def strings(value):
+            if isinstance(value, str):
+                return [value]
+            if isinstance(value, list):
+                return [s for item in value for s in strings(item)]
+            if isinstance(value, dict):
+                return [s for item in value.values() for s in strings(item)]
+            return []
+        for path in self.args.canary_values_file:
+            needles.extend(value.encode() for value in strings(json.loads(Path(path).read_text())) if value)
         if self.content:
             needles.append(re.search(r"/c/([^/]+)/", self.content)[1].encode())
+        variants = []
+        for marker in needles:
+            if not marker:
+                continue
+            variants.append(marker)
+            # JSON logs escape newlines/quotes; SQLite dumps encode BLOBs as hex literals.
+            variants.append(json.dumps(marker.decode("utf-8", errors="replace"), ensure_ascii=False)[1:-1].encode())
+            variants.append(marker.hex().upper().encode())
+            variants.append(marker.replace(b"'", b"''"))
         for data in sources:
-            require(all(not marker or marker not in data for marker in needles), "sensitive canary survived redaction")
+            require(all(marker not in data for marker in variants), "sensitive canary survived redaction")
+        if missing_sinks:
+            raise Unobserved("missing live redaction sinks: " + ", ".join(missing_sinks))
 
 
 PROBES = {name: getattr(Suite, name) for name in (
-    "canonical_csp", "no_part_cookies", "null_cors", "cap_rejection", "runtime_origin",
+    "canonical_csp", "no_part_cookies", "null_cors", "blob_policies", "cap_rejection", "runtime_origin",
     "grant_redirects", "wrapper_headers", "chrome_cors", "no_referrer", "signed_out_cards",
     "workspace_redirect", "schema_boundaries", "guest_boundaries", "authentication_boundary", "discovery", "ingress_metrics", "redaction_canaries")}
 
@@ -418,6 +501,8 @@ def main():
     parser.add_argument("--evidence-dir", default="target/e2e-logs/security")
     parser.add_argument("--require-complete", action="store_true", help="fail on unobserved existing checks; skipped tests never pass")
     parser.add_argument("--database-file")
+    parser.add_argument("--private-asset-path")
+    parser.add_argument("--canary-values-file", action="append", default=[], help="private JSON string values from executed agent-surface scenarios to scan across sinks")
     parser.add_argument("--guest-content-url")
     parser.add_argument("--view-content-url")
     parser.add_argument("--prepare-device-file", help="only create a live code from this client's network; private browser input, not an artifact")
@@ -473,7 +558,8 @@ def main():
         (folder / "result.json").write_text(json.dumps(record, indent=2) + "\n")
         print(json.dumps({k: record[k] for k in ("event", "id", "outcome")}))
         results.append(record)
-    report = {"schema": 1, "base_origin": suite.base, "probe_results": probe_results, "checks": results,
+    report = {"schema": 1, "checklist_hash": hashlib.sha256(CHECKLIST.read_bytes()).hexdigest(),
+              "base_origin": suite.base, "probe_results": probe_results, "checks": results,
               "complete": not any(r["outcome"] in ("fail", "unobserved") for r in results)}
     (out / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     return int(any(r["outcome"] == "fail" or (args.require_complete and r["outcome"] == "unobserved") for r in results))

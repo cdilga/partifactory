@@ -47,6 +47,24 @@ def main():
     tokens = json.loads((run / "agent-surface-private/tokens.json").read_text())
     assert set(tokens) == {"pat", "device"}
     scenario = json.loads((repo / "tests/agent_surfaces/scenario.yaml").read_text())
+    # The external security observer runs after all eight live lanes and scans their actual
+    # private inputs across origin logs, metrics and Insights. Never publish this file.
+    private_inputs = []
+    def collect_inputs(value):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in {"content", "title", "old_str", "new_str"} and isinstance(item, str) and len(item) >= 8:
+                    private_inputs.append(item)
+                collect_inputs(item)
+        elif isinstance(value, list):
+            for item in value:
+                collect_inputs(item)
+    collect_inputs(scenario["steps"])
+    private = run / "agent-surface-private/redaction-canaries.json"
+    fd = os.open(private, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as stream:
+        json.dump({"tokens": list(tokens.values()), "part_inputs": sorted(set(private_inputs))}, stream)
+    os.chmod(private, 0o600)
     spec = importlib.util.spec_from_file_location("cli_proxy", repo / "tests/device/cli-login.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
