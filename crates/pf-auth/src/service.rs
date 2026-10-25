@@ -611,17 +611,38 @@ async fn chrome_grant(
 ) -> Response {
     let a = s.ext::<AuthService>().expect("auth");
     if let Err(e) = a.check_chrome_origin(&headers, &part).await {
+        tracing::warn!(
+            event = "chrome.grant",
+            part,
+            outcome = "deny",
+            reason = e.code
+        );
         return fail(e);
     }
     match a.grant(&headers, &part, &q.path, &q.mode).await {
         Ok(v) => {
             let mut r = Json(v).into_response();
             if let Err(e) = a.renew_response(&headers, &mut r).await {
+                tracing::warn!(
+                    event = "chrome.grant",
+                    part,
+                    outcome = "error",
+                    reason = e.code
+                );
                 return fail(e);
             }
+            tracing::info!(event = "chrome.grant", part, outcome = "ok");
             r
         }
-        Err(e) => fail(e),
+        Err(e) => {
+            tracing::warn!(
+                event = "chrome.grant",
+                part,
+                outcome = "deny",
+                reason = e.code
+            );
+            fail(e)
+        }
     }
 }
 

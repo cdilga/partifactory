@@ -27,7 +27,7 @@ test('real sign-in consents device and personal agent tokens, refresh reuse and 
   expect(tokens.expires_in).toBe(3600);
   const name = `device-${info.project.name}`;
   const created = await request.post('/api/v1/part_create', { headers: { Authorization: `Bearer ${tokens.access_token}` }, data: {
-    name, kind: 'text', content: 'Made by the consenting person’s agent.', request_id: `${name}-create`,
+    name, title: name, kind: 'text', content: 'Made by the consenting person’s agent.', request_id: `${name}-create`,
   } });
   expect(created.status(), await created.text()).toBe(200);
   const get = (token: string) => request.post('/api/v1/part_get', { headers: { Authorization: `Bearer ${token}` }, data: { name } });

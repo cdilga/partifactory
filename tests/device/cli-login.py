@@ -98,7 +98,7 @@ def main():
                     def command(*arguments):
                         completed = subprocess.run([str(part), *arguments], env=env, capture_output=True, text=True, check=True, timeout=40)
                         return json.loads(completed.stdout)
-                    command("part_create", "--name", name, "--kind", "text", "--content", "Created by the real device-connected CLI.")
+                    command("part_create", "--name", name, "--title", name, "--kind", "text", "--content", "Created by the real device-connected CLI.")
                     saved = json.loads(config.read_text())
                     old_refresh = saved["refresh_token"]
                     saved["expires_at"] = 0
