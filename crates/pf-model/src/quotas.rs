@@ -193,6 +193,35 @@ impl PartService {
     }
 }
 
+/// Stop-on-cap stores check in the same writer transaction as their metadata replacement.
+/// `used` excludes the reference being replaced; a delete never calls this helper.
+pub fn check_store(
+    tx: &Connection,
+    name: &str,
+    used: u64,
+    incoming: u64,
+    default_cap: u64,
+) -> Result<(), PfError> {
+    let cap = tx
+        .query_row(
+            "SELECT CAST(value AS INTEGER) FROM kv WHERE key=?1",
+            [format!("store_cap:{name}")],
+            |r| r.get::<_, i64>(0),
+        )
+        .optional()?
+        .map(|n| n.max(0) as u64)
+        .unwrap_or(default_cap);
+    if used.saturating_add(incoming) > cap {
+        return Err(PfError::new(
+            "storage_full",
+            "the store cap is used up; delete content before retrying",
+        )
+        .with("store", name)
+        .with("limit", cap));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,33 +356,4 @@ mod tests {
     fn pf_janitor_budget_test() -> Arc<BudgetTest> {
         Arc::new(BudgetTest(std::sync::atomic::AtomicU64::new(0)))
     }
-}
-
-/// Stop-on-cap stores check in the same writer transaction as their metadata replacement.
-/// `used` excludes the reference being replaced; a delete never calls this helper.
-pub fn check_store(
-    tx: &Connection,
-    name: &str,
-    used: u64,
-    incoming: u64,
-    default_cap: u64,
-) -> Result<(), PfError> {
-    let cap = tx
-        .query_row(
-            "SELECT CAST(value AS INTEGER) FROM kv WHERE key=?1",
-            [format!("store_cap:{name}")],
-            |r| r.get::<_, i64>(0),
-        )
-        .optional()?
-        .map(|n| n.max(0) as u64)
-        .unwrap_or(default_cap);
-    if used.saturating_add(incoming) > cap {
-        return Err(PfError::new(
-            "storage_full",
-            "the store cap is used up; delete content before retrying",
-        )
-        .with("store", name)
-        .with("limit", cap));
-    }
-    Ok(())
 }
