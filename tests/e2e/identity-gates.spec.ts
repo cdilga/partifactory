@@ -54,7 +54,9 @@ test('second provider, real directory refresh, and one-use console recovery', as
   expect(location.search).not.toContain('pf=');
   const canary = location.hash.slice(4);
   const mintedBefore = (await serverLog({ event: 'grant.minted' })).length;
-  fs.writeFileSync(run + '/identity-private/group-before.json', JSON.stringify({ user: session.user }), { mode: 0o600 });
+  // Opaque fixture user id only. The host runner must read a file written by container root;
+  // the enclosing directory remains private, and this marker carries no credential.
+  fs.writeFileSync(run + '/identity-private/group-before.json', JSON.stringify({ user: session.user }), { mode: 0o644 });
   await expect.poll(() => fs.existsSync(run + '/identity-private/group-after.ready'), { timeout: 45_000 }).toBe(true);
   const denied = await page.request.get('/grant?part=identity&mode=wrap', { maxRedirects: 0 });
   expect(denied.status()).toBe(403);
