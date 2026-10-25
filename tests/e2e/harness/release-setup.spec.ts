@@ -4,7 +4,7 @@ import { signIn, nativePasskey } from '../lib/public-auth';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-test('release compose setup uses real OIDC and scoped agent operations', async ({ page, context, request }, info) => {
+test('release compose setup uses real OIDC and scoped agent operations', async ({ page, context, request, browser }, info) => {
   test.skip(process.env.PF_HARNESS_RELEASE !== '1', 'Production-image lane only');
   test.skip(info.project.name !== 'chromium-desktop', 'One real setup session');
   test.setTimeout(120_000);
@@ -64,5 +64,18 @@ test('release compose setup uses real OIDC and scoped agent operations', async (
   const deviceDir = path.join(run, 'device-pass');
   fs.mkdirSync(deviceDir, {recursive: true, mode: 0o700});
   fs.writeFileSync(path.join(deviceDir, 'guest-link.json'), JSON.stringify({url: linkBody.url}), {mode: 0o600});
+  // Obtain the actual guest capability through the signed-out wrapper/go flow.
+  // An authenticated owner's direct capability cannot prove the guest wall.
+  const guestContext = await browser.newContext();
+  try {
+    const guest = await guestContext.newPage();
+    await guest.goto(linkBody.url);
+    await expect(guest.frameLocator('#pf-frame').getByRole('heading', {name: 'Serving fixture'})).toBeVisible();
+    const guestContent = guest.frames().find(frame => new URL(frame.url()).pathname.startsWith('/c/'))?.url();
+    expect(guestContent).toBeTruthy();
+    fs.writeFileSync(path.join(privateDir, 'guest-content.json'), JSON.stringify({url: guestContent}), {mode: 0o600});
+  } finally {
+    await guestContext.close();
+  }
   console.log(JSON.stringify({event: 'release.fixture', outcome: 'pass', auth: 'real_oidc_device_consent', parts: Object.keys(fixtures)}));
 });

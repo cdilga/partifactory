@@ -73,11 +73,20 @@ python3 tests/agent_surfaces/harness.py "$PF_RUN_DIR" --binary "$PF_BIN" \
   2>&1 | tee "$logs/conformance.txt"
 python3 tests/render/isolation.py "$PF_RUN_DIR" | tee "$logs/summary.txt"
 python3 deploy/proxy/test-runtime-logs.py | tee "$logs/proxy-runtime-log-gate.json"
+guest_content="$(python3 - "$PF_RUN_DIR/release-private/guest-content.json" <<'PY'
+import json,pathlib,sys,urllib.parse
+url=json.loads(pathlib.Path(sys.argv[1]).read_text())['url']
+parsed=urllib.parse.urlsplit(url)
+assert parsed.scheme=='https' and parsed.path.startswith('/c/') and not parsed.username
+print(url)
+PY
+)"
 python3 tests/security/run.py --base-url https://parts.pf.test \
   --ca-cert "$PF_CA" --connect-to "127.0.0.1:$PF_HTTPS_PORT" \
   --fixture "$PF_RUN_DIR/part-fixture.json" --sibling-origin https://pixel-part.pf.test \
   --session-file "$PF_RUN_DIR/release-private/session.json" \
   --token-file "$PF_RUN_DIR/release-private/agent-token" \
+  --guest-content-url "$guest_content" --view-content-url "$guest_content" \
   --logs-file "$PF_RUN_DIR/server.jsonl" --database-file "$PF_RUN_DIR/data/partifactory.db" \
   --metrics-url "$PF_OPS_URL/metrics" --metrics-token-file "$PF_METRICS_TOKEN_FILE" \
   --insights-db "$PF_RUN_DIR/data/insights.db" \
