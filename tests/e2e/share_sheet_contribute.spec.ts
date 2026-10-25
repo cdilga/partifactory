@@ -31,7 +31,7 @@ test('native admin share, mobile guest paint, freeze, undo and revoke', async ({
   expect(await bot.text()).not.toMatch(/v1\.[0-9]+\.|\/go|http-equiv=.*refresh/);
   expect(bot.headers()['x-robots-tag']).toContain('noindex');
 
-  const webkit = await playwright.webkit.launch();
+  const webkit = await playwright.webkit.launch({args:[]});
   const guestContext = await webkit.newContext({ ...devices['iPhone 15'] });
   try {
     const guest = await guestContext.newPage();

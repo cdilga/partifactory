@@ -1,14 +1,36 @@
 import { expect, type Page, type BrowserContext } from '@playwright/test';
 
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+
+// These are real OIDC sessions, shared across browser workers like repeat household visits.
+// The sign-in + callback limiter allows five full logins per IP per minute. Re-authenticating
+// for every isolated test would test that limiter instead of the feature under observation.
 export async function signIn(page: Page, username = 'admin') {
-  await page.goto('https://parts.pf.test/signin?return=/');
-  const email = page.locator('input[name=login]');
-  await expect(email).toBeVisible();
-  await email.fill(`${username}@example.com`);
-  await page.locator('input[name=password]').fill('password');
-  await page.locator('button[type=submit]').click();
-  await page.waitForURL('https://parts.pf.test/**');
-  await expect.poll(async () => (await page.request.get('https://parts.pf.test/api/session')).status()).toBe(200);
+  const directory=process.env.PF_BROWSER_AUTH_DIR??path.join('/repo/target/e2e-runs',process.env.PF_E2E_RUN??'local','browser-auth');
+  fs.mkdirSync(directory,{recursive:true,mode:0o700});
+  const state=path.join(directory,username+'.json'),lock=state+'.lock';
+  const restore=async()=>{const prior=JSON.parse(fs.readFileSync(state,'utf8'));await page.context().addCookies(prior.cookies);await page.goto('https://parts.pf.test/');};
+  if(fs.existsSync(state)){await restore();return;}
+  let acquired=false;
+  for(let i=0;i<200;i++){
+    try{fs.mkdirSync(lock);acquired=true;break;}catch(e){if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e;}
+    if(fs.existsSync(state)){await restore();return;}
+    await new Promise(r=>setTimeout(r,100));
+  }
+  if(!acquired)throw new Error('Timed out waiting for the real OIDC session setup');
+  try {
+    if(fs.existsSync(state)){await restore();return;}
+    await page.goto('https://parts.pf.test/signin?return=/');
+    const email = page.locator('input[name=login]');
+    await expect(email).toBeVisible();
+    await email.fill(`${username}@example.com`);
+    await page.locator('input[name=password]').fill('password');
+    await page.locator('button[type=submit]').click();
+    await page.waitForURL('https://parts.pf.test/**');
+    await expect.poll(async () => (await page.request.get('https://parts.pf.test/api/session')).status()).toBe(200);
+    fs.writeFileSync(state,JSON.stringify(await page.context().storageState()),{mode:0o600});
+  } finally {fs.rmdirSync(lock);}
 }
 
 // This is a real browser authenticator: the server validates attestation and every later

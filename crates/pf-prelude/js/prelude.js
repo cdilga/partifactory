@@ -88,13 +88,14 @@
     return url.href;
   }
   var nativeFetch = W.fetch.bind(W);
+  function watchReauth(r) { if(r.status===401&&r.headers.get("X-PF-Reauth"))regrant(); return r; }
   W.fetch = function (input, init) {
     if (typeof Request !== 'undefined' && input instanceof Request) {
       var f = fix(input.url);
       if (f !== input.url) input = new Request(f, input);
-      return nativeFetch(input, init);
+      return nativeFetch(input, init).then(watchReauth);
     }
-    return nativeFetch(fix(input), init);
+    return nativeFetch(fix(input), init).then(watchReauth);
   };
   if (W.XMLHttpRequest) {
     var xo = XMLHttpRequest.prototype.open;

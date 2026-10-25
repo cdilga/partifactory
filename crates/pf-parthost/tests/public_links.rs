@@ -225,9 +225,7 @@ async fn wrapper_headers_deep_paths_and_shared_assets_are_content_free() {
     assert!(!html.contains("Private title"));
     assert!(!html.contains("v1."));
     assert!(html.contains("Sign in to open"));
-    for card in [pf_ui::og::Card::Private] {
-        assert!(html.contains(&card.hash()));
-    }
+    assert!(html.contains(&pf_ui::og::Card::Private.hash()));
     let manifest = req(&router, "/_pf/manifest.webmanifest", "GET", "Mozilla").await;
     let manifest: serde_json::Value =
         serde_json::from_slice(&to_bytes(manifest.into_body(), 4096).await.unwrap()).unwrap();
