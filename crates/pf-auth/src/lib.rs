@@ -182,11 +182,12 @@ fn set_claim_groups(
     for g in groups {
         tx.execute(
             "INSERT INTO groups (name, source, synced_at) VALUES (?1, 'claim', ?2)
-             ON CONFLICT (name) DO UPDATE SET synced_at = excluded.synced_at",
+             ON CONFLICT (name) DO UPDATE SET synced_at = excluded.synced_at WHERE groups.source='claim'",
             params![g, now],
         )?;
         tx.execute(
-            "INSERT OR IGNORE INTO group_members (group_name, user_id) VALUES (?1, ?2)",
+            "INSERT OR IGNORE INTO group_members (group_name, user_id)
+             SELECT ?1, ?2 WHERE EXISTS(SELECT 1 FROM groups WHERE name=?1 AND source='claim')",
             params![g, user_id],
         )?;
     }

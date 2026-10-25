@@ -90,14 +90,15 @@ async fn session_created_is_logged_with_principal() {
         .flatten_event(true)
         .with_writer(move || w.clone())
         .finish();
-    let _g = tracing::subscriber::set_default(sub);
-    // Other tests in this process may have cached "no interest" for the callsite.
+    // A process-wide subscriber keeps callsite interest stable while other tests sign in on
+    // their own threads. A thread-local subscriber could race a cached "no interest" decision.
+    tracing::subscriber::set_global_default(sub).unwrap();
     tracing::callsite::rebuild_interest_cache();
     let s = TestSession::sign_in(&db, &dir, "member-a").await.unwrap();
     let logs = String::from_utf8(buf.0.lock().unwrap().clone()).unwrap();
     let line = logs
         .lines()
-        .find(|l| l.contains("\"event\":\"session.created\""))
+        .find(|l| l.contains("\"event\":\"session.created\"") && l.contains(&s.principal))
         .expect(&logs);
     assert!(
         line.contains(&format!("\"principal\":\"{}\"", s.principal)),

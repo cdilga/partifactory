@@ -153,23 +153,20 @@ async fn grant_hosts_are_derived_and_signout_revokes_caps_immediately() {
             .unwrap()
             .starts_with("https://notes-part.pf.test/#pf=")
     );
-    assert!(pf_caps::verify(&auth.0.keys, &auth.0.epochs, cap, "notes-part.pf.test", now).is_ok());
+    assert!(pf_caps::verify(&auth.0.keys, &auth.0.epochs, cap, "notes", now).is_ok());
+    assert!(
+        pf_caps::verify(&auth.0.keys, &auth.0.epochs, cap, "notes", now)
+            .unwrap()
+            .dw
+    );
+    assert!(pf_caps::verify(&auth.0.keys, &auth.0.epochs, cap, "notes-part.pf.test", now).is_err());
     assert!(
         auth.grant(&h, "notes", "//evil.example/", "wrap")
             .await
             .is_err()
     );
     auth.signout(&h, false).await.unwrap();
-    assert!(
-        pf_caps::verify(
-            &auth.0.keys,
-            &auth.0.epochs,
-            cap,
-            "notes-part.pf.test",
-            ids::now_ms()
-        )
-        .is_err()
-    );
+    assert!(pf_caps::verify(&auth.0.keys, &auth.0.epochs, cap, "notes", ids::now_ms()).is_err());
     assert!(auth.require_session(&h).await.is_err());
 }
 #[tokio::test]
@@ -193,16 +190,7 @@ async fn relogin_removal_bumps_only_reached_parts_and_outsider_gets_no_title() {
     member.groups.clear();
     auth.login(&member, None, now + 1).await.unwrap();
     assert_eq!(auth.0.epochs.part_epoch("p_notes"), 1);
-    assert!(
-        pf_caps::verify(
-            &auth.0.keys,
-            &auth.0.epochs,
-            &cap,
-            "notes-part.pf.test",
-            ids::now_ms()
-        )
-        .is_err()
-    );
+    assert!(pf_caps::verify(&auth.0.keys, &auth.0.epochs, &cap, "notes", ids::now_ms()).is_err());
     let error = auth
         .grant(&headers(&s.token), "notes", "/", "wrap")
         .await
@@ -286,4 +274,20 @@ async fn disabled_account_cannot_reactivate_through_signin() {
         .await
         .unwrap();
     assert!(auth.login(&identity(), None, ids::now_ms()).await.is_err());
+}
+
+#[tokio::test]
+async fn provider_claims_cannot_join_a_local_group_by_name_collision() {
+    let (_db, auth) = setup();
+    auth.db().write(|tx|{
+        tx.execute("INSERT INTO groups(name,source,managed,synced_at) VALUES('pf-household-admins','local',1,1)",[])?;
+        Ok::<_,pf_model::PfError>(())
+    }).await.unwrap();
+    let mut id = identity();
+    id.groups.push("pf-household-admins".into());
+    let session = auth.login(&id, None, auth.now()).await.unwrap();
+    assert_eq!(
+        groups_of(auth.db(), &session.user_id).await.unwrap(),
+        vec!["household"]
+    );
 }

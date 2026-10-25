@@ -471,9 +471,10 @@ impl AuthService {
             &self.0.epochs,
             &Grant {
                 part_id: part_id.clone(),
-                host: host.clone(),
+                host: name,
                 subject: format!("user:{}", actor.user_id),
                 role,
+                data_write: true,
                 minter: format!("sess:{}", actor.session_id),
                 ..Default::default()
             },
