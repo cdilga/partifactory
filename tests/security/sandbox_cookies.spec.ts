@@ -59,11 +59,17 @@ test('SEC sandbox cookie writes are inert and Lax sibling canaries receive no co
     await new Promise(resolve => setTimeout(resolve, 100));
     document.removeEventListener('securitypolicyviolation', violation);
     let cookie = '';
-    try { cookie = document.cookie; } catch { /* blank is the expected observable value */ }
+    try { cookie = document.cookie; } catch { /* engines may reject even the shim */ }
+    let nativeCookieBlocked = false;
+    try { Object.getOwnPropertyDescriptor(Document.prototype, 'cookie')!.get!.call(document); }
+    catch (error) { nativeCookieBlocked = (error as DOMException).name === 'SecurityError'; }
     return { cookie, storage: localStorage.getItem(key), parentDocumentBlocked, parentStorageBlocked,
-      origin: window.origin, reports, workspaceRequests, violations };
+      origin: window.origin, reports, workspaceRequests, violations, nativeCookieBlocked };
   }, { blob, nonce, workspace });
-  expect(result).toMatchObject({ cookie: '', storage: 'shim-value', origin: 'null', parentDocumentBlocked: true, parentStorageBlocked: true });
+  // PLAN §2 deliberately supplies an inert in-memory cookie string for compatibility.
+  // Its readback is not a browser cookie; the native accessor and real jar remain unavailable.
+  expect(result).toMatchObject({ cookie: `sec_cookie_write=${nonce}`, nativeCookieBlocked: true,
+    storage: 'shim-value', origin: 'null', parentDocumentBlocked: true, parentStorageBlocked: true });
   expect(result.reports).toEqual([
     { status: 200, method: 'GET', cookie_present: false, origin: 'null' },
     { status: 200, method: 'POST', cookie_present: false, origin: 'null' },
@@ -71,6 +77,8 @@ test('SEC sandbox cookie writes are inert and Lax sibling canaries receive no co
   expect(result.workspaceRequests).toEqual(['blocked', 'blocked']);
   expect(result.violations.filter(url => url.startsWith(workspace))).toHaveLength(2);
   expect((await context.cookies(own)).some(c => ['sec_cookie_write', 'sec_cookie_store'].includes(c.name))).toBe(false);
+  await frame.goto(fixture.notes.url);
+  expect(await frame.evaluate(() => document.cookie)).toBe('');
   console.log(JSON.stringify({ event: 'sec.check', id: 'SEC-003', lane: info.project.name, outcome: 'pass' }));
 });
 

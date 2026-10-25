@@ -58,5 +58,28 @@ export async function nativePasskey(page: Page, context: BrowserContext) {
     return { status: finish.status, body: await finish.json() };
   });
   expect(result.status, JSON.stringify(result.body)).toBe(200);
+  // Enrollment proves possession when adding the credential; an admin action separately
+  // requires a fresh assertion. Exercise that real ceremony with this authenticator.
+  const stepup = await page.evaluate(async () => {
+    const decode = (s: string) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+    const encode = (b: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const start = await fetch('/admin/stepup/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const challenge = await start.json();
+    if (!start.ok) throw new Error(JSON.stringify(challenge));
+    const publicKey = challenge.publicKey;
+    publicKey.challenge = decode(publicKey.challenge);
+    for (const credential of publicKey.allowCredentials ?? []) credential.id = decode(credential.id);
+    const credential = await navigator.credentials.get({ publicKey }) as PublicKeyCredential;
+    const response = credential.response as AuthenticatorAssertionResponse;
+    const finish = await fetch('/admin/stepup/finish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      flow: challenge.flow, credential: { id: credential.id, rawId: encode(credential.rawId), type: credential.type,
+        response: { authenticatorData: encode(response.authenticatorData), clientDataJSON: encode(response.clientDataJSON),
+          signature: encode(response.signature), userHandle: response.userHandle ? encode(response.userHandle) : null },
+        extensions: credential.getClientExtensionResults() },
+    }) });
+    return { status: finish.status, body: await finish.json() };
+  });
+  expect(stepup.status, JSON.stringify(stepup.body)).toBe(200);
+  expect(stepup.body.step_up_status).toBe(true);
   return { cdp, authenticatorId };
 }
