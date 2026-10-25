@@ -19,10 +19,32 @@ test('the contract board paints across two pages within one second and loads 256
   await Promise.all([page.waitForFunction(()=>!!(window as any).__pfReadyAt),other.waitForFunction(()=>!!(window as any).__pfReadyAt)]);
   await other.evaluate(()=>{(window as any).changes=[];(window as any).partifactory.on('data.changed',(e:any)=>(window as any).changes.push(e));});
   await page.evaluate(()=>{(window as any).echoes=[];(window as any).partifactory.on('data.changed',(e:any)=>(window as any).echoes.push(e));});
-  const started=Date.now();
+  // Observe the real input event and the receiving page's first computed-style change.
+  // Both browsers share the harness host's clock. Starting before the write commits
+  // gives a conservative commit-to-style upper bound without Playwright actionability,
+  // CSS assertion polling or runner round trips in the measured interval.
+  await page.locator('[data-key="px:0:0"]').evaluate(cell=>{
+    cell.addEventListener('click',()=>{(window as any).paintInputAt=Date.now();},{capture:true,once:true});
+  });
+  await other.locator('[data-key="px:0:0"]').evaluate(cell=>{
+    (window as any).paintSeen=new Promise<number>(resolve=>{
+      const observer=new MutationObserver(()=>{
+        if(getComputedStyle(cell).backgroundColor==='rgb(228, 87, 46)'){
+          observer.disconnect();resolve(Date.now());
+        }
+      });
+      observer.observe(cell,{attributes:true,attributeFilter:['style']});
+    });
+  });
   await page.locator('[data-key="px:0:0"]').click();
   await expect(other.locator('[data-key="px:0:0"]')).toHaveCSS('background-color','rgb(228, 87, 46)',{timeout:1000});
-  expect(Date.now()-started).toBeLessThan(1000);
+  const started=await page.evaluate(()=>(window as any).paintInputAt as number);
+  const seen=await other.evaluate(()=>(window as any).paintSeen as Promise<number>);
+  expect(Number.isFinite(started)&&Number.isFinite(seen)).toBe(true);
+  expect(seen).toBeGreaterThanOrEqual(started);
+  const elapsed=seen-started+1; // include millisecond timestamp quantization
+  expect(elapsed,'real input→computed style bounds commit→computed style').toBeLessThan(1000);
+  await info.attach('paint-timing',{body:JSON.stringify({measurement:'same-host input event to receiver computed style',started,seen,elapsedMs:elapsed}),contentType:'application/json'});
   expect(await page.evaluate(()=>(window as any).echoes.length)).toBe(0);
   await page.evaluate(async()=>{await (window as any).storage.delete('px:0:0',true);});
   await expect.poll(()=>other.evaluate(()=>(window as any).changes.some((e:any)=>e.key==='px:0:0'&&e.op==='delete')),{timeout:1000}).toBe(true);

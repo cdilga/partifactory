@@ -47,18 +47,27 @@ test('native admin share, mobile guest paint, freeze, undo and revoke', async ({
       const api=await fetch('/api/private');
       return [comments.status,api.status];
     })).toEqual([403,403]);
-    // Fresh per-open guest identity, then one sub-second burst. This observes the browser's
-    // real 61st request and Retry-After header without waiting for a minute boundary.
+    // Fresh per-open guest identity, then a fixed burst. The bucket holds 60 writes and
+    // refills one per second; real browser scheduling can span a refill boundary.
     await guest.reload();
     await expect(guestBoard.locator('#b')).toBeVisible();
     const refusals: string[]=[];
     guest.on('response',r=>{if(r.status()===429)refusals.push(r.headers()['retry-after']);});
     const burst=await guest.frames().find(f=>f.url().includes('/c/'))!.evaluate(async()=>{
-      const rows=await Promise.allSettled(Array.from({length:61},(_,i)=>(window as any).storage.set('rate:'+i,'blue',true)));
-      return {ok:rows.filter(r=>r.status==='fulfilled').length,failed:rows.filter(r=>r.status==='rejected').length};
+      const started=performance.now();
+      const rows=await Promise.allSettled(Array.from({length:121},(_,i)=>(window as any).storage.set('rate:'+i,'blue',true)));
+      return {ok:rows.filter(r=>r.status==='fulfilled').length,elapsedMs:performance.now()-started,
+        errors:rows.flatMap(r=>r.status==='rejected'?[{name:r.reason.name,code:r.reason.code,retryAfter:r.reason.retry_after}]:[])};
     });
-    expect(burst).toEqual({ok:60,failed:1});
-    await expect.poll(()=>refusals.length).toBe(1);expect(Number(refusals[0])).toBeGreaterThan(0);
+    expect(burst.ok).toBeGreaterThanOrEqual(60);
+    expect(burst.ok).toBeLessThanOrEqual(60+Math.floor(burst.elapsedMs/1000));
+    expect(burst.errors.length).toBeGreaterThan(0);
+    for(const error of burst.errors){
+      expect(error.name).toBe('PfError');expect(error.code).toBe('rate_limited');expect(error.retryAfter).toBeGreaterThan(0);
+    }
+    await expect.poll(()=>refusals.length).toBe(burst.errors.length);
+    expect(refusals.every(value=>Number(value)>0)).toBe(true);
+    await info.attach('guest-rate-burst',{body:JSON.stringify(burst),contentType:'application/json'});
     expect((await waitForLog({event:'ratelimit.trip'})).some(l=>l.route==='guest_write'&&l.outcome==='rate_limited')).toBe(true);
     await guest.reload();
     await expect(guestBoard.locator('#b')).toBeVisible();
