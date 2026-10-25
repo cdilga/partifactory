@@ -392,6 +392,16 @@ fn s(args: &Value, k: &str) -> Result<String, PfError> {
 async fn handle(store: &Store, dir: &StaticDirectory, req: &Value) -> Result<Value, PfError> {
     let op = req["op"].as_str().unwrap_or("");
     let args = &req["args"];
+    if op == "clock" {
+        // Local dev socket only; AuthService uses this same host clock. Keep advancing
+        // wall time rather than freezing it, so concurrent requests retain normal timing.
+        let offset = args["offset_ms"]
+            .as_i64()
+            .filter(|offset| (0..=86_400_000).contains(offset))
+            .ok_or_else(|| PfError::invalid("offset_ms", "expected 0..86400000"))?;
+        store.host.set_clock(move || pf_db::ids::now_ms() + offset);
+        return Ok(json!({"now_ms": store.host.now(), "offset_ms": offset}));
+    }
     if op == "sign-in" {
         let username = s(args, "username")?;
         let t = TestSession::sign_in(&store.db, dir, &username)

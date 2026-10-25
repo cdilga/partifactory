@@ -192,3 +192,10 @@ PF_ORIGIN_DOWN=1 "$h/compose.sh" --profile browsers run --rm -e PF_ORIGIN_DOWN=1
   --grep @origin-down 2>&1 | tee "$logs/playwright-origin-down.txt"
 [ "${PIPESTATUS[0]}" = 0 ] || { note "FAIL maintenance page in the browsers"; exit 1; }
 note "ok   maintenance page served with the origin stopped"
+
+# Provider/directory mutations are deliberately isolated from the accumulated main suite.
+# This lane owns a fresh harness and always tears it down, including on assertion failure.
+"$h/down.sh" "$run"
+note "--- real identity provider, membership refresh and console recovery"
+python3 "$h/identity-gates.py" 2>&1 | tee "$logs/identity-gates.txt"
+[ "${PIPESTATUS[0]}" = 0 ] || { note "FAIL isolated identity gates"; exit 1; }

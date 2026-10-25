@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+"""Isolated real Dex/LDAP identity gates. No host DNS edits or fabricated identities/tokens.
+
+Run after the main harness has stopped: python3 tests/e2e/harness/identity-gates.py.
+Uses the shared dev binary and shipped harness, with teardown on every outcome.
+"""
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import signal
+import sqlite3
+import subprocess
+import time
+import urllib.request
+
+REPO = Path(__file__).resolve().parents[3]
+H = REPO / 'tests/e2e/harness'
+RUN_ID = 'identity-' + time.strftime('%Y%m%d-%H%M%S')
+RUN = REPO / 'target/e2e-runs' / RUN_ID
+LOGS = REPO / 'target/e2e-logs' / RUN_ID
+ENV = dict(os.environ, PF_E2E_RUN=RUN_ID, PF_RUN_DIR=str(RUN), PF_E2E_RENDER='0')
+BIN = Path(os.environ.get('PF_BIN', REPO / 'target/debug/partifactory')).resolve()
+LDAP = 'pf-identity-ldap'
+LDAP_IMAGE = 'ghcr.io/lldap/lldap@sha256:9e605a66c02514bfcffd1b67cafb1e98d50992216bb2871d7ae44622047dd09d'
+
+
+def command(args, **kwargs):
+    return subprocess.run(list(map(str, args)), env=ENV, check=True, **kwargs)
+
+
+def compose(*args, **kwargs):
+    return command([H / 'compose.sh', *args], **kwargs)
+
+
+def stop_server():
+    if ENV['PF_HARNESS_MODE'] == 'host':
+        pid = RUN / 'pf.pid'
+        if pid.exists():
+            os.kill(int(pid.read_text()), signal.SIGTERM)
+            pid.unlink()
+            time.sleep(1)
+    else:
+        compose('--profile', 'container', 'stop', 'partifactory', stdout=subprocess.DEVNULL)
+
+
+def server_env():
+    env = dict(ENV, PF_SITE_TOML=str(RUN / 'site.toml'), PF_DATA_DIR=str(RUN / 'data'))
+    for key, file in [('DEV_API_TOKEN', 'api_token'), ('IDP_CLIENT_SECRET', 'idp_client_secret'),
+                      ('SESSION_KEY', 'session_key'), ('CAP_HMAC_KEY', 'cap_hmac_key'), ('METRICS_TOKEN', 'metrics_token')]:
+        env[f'PF_{key}_FILE'] = str(RUN / 'secrets' / file)
+    env.update(PF_DEV_IDENTITY=str(RUN / 'identity.toml'), PF_RENDER_PUBLIC_DIR=str(RUN / 'render-public'),
+               PF_LISTEN_RENDER='127.0.0.1:18445', PF_LISTEN_WORKSPACE='127.0.0.1:18080',
+               PF_LISTEN_CONTENT='127.0.0.1:18081', PF_LISTEN_OPS='127.0.0.1:19090',
+               PF_DEV_LOG_RING='20000', PF_LOG='info', SSL_CERT_FILE=str(RUN / 'certs/ca.pem'))
+    return env
+
+
+def start_server():
+    if ENV['PF_HARNESS_MODE'] == 'host':
+        with open(RUN / 'server.jsonl', 'ab') as out, open(RUN / 'server.stderr', 'ab') as err:
+            proc = subprocess.Popen([BIN, 'serve'], env=server_env(), stdout=out, stderr=err, start_new_session=True)
+        (RUN / 'pf.pid').write_text(str(proc.pid))
+    else:
+        compose('--profile', 'container', 'start', 'partifactory', stdout=subprocess.DEVNULL)
+    for _ in range(60):
+        result = subprocess.run(['curl', '-fsS', '--max-time', '2', '--cacert', str(RUN / 'certs/ca.pem'),
+                                 '--resolve', 'parts.pf.test:18443:127.0.0.1',
+                                 'https://parts.pf.test:18443/healthz'], capture_output=True)
+        if result.returncode == 0:
+            return
+        time.sleep(1)
+    raise RuntimeError('identity server did not restart')
+
+
+def dev(op, args):
+    if ENV['PF_HARNESS_MODE'] == 'host':
+        cmd = [BIN, 'dev', '--socket', RUN / 'data/run/dev.sock']
+    else:
+        cmd = [H / 'compose.sh', '--profile', 'container', 'exec', '-T', 'partifactory', '/usr/local/bin/partifactory', 'dev']
+    result = subprocess.run(list(map(str, [*cmd, 'request', op])), env=ENV,
+                            input=json.dumps(args), text=True, capture_output=True)
+    if result.returncode:
+        raise RuntimeError(f'dev {op} failed: {result.stderr.strip()}')
+    return json.loads(result.stdout)
+
+
+def browser(phase, project='chromium-desktop', background=False):
+    args = [H / 'compose.sh', '--profile', 'browsers', 'run', '--rm', '-e', f'PF_IDENTITY_PHASE={phase}',
+            'browsers', 'identity-gates.spec.ts', '--project', project, '--workers', '1']
+    if background:
+        return subprocess.Popen(list(map(str, args)), env=ENV)
+    command(args)
+    result = LOGS / 'results.json'
+    if result.exists():
+        result.rename(LOGS / f'results-{phase}-{project}.json')
+
+
+def ldap_request(path, data, token=None):
+    headers = {'Content-Type': 'application/json'}
+    if token:
+        headers['Authorization'] = 'Bearer ' + token
+    req = urllib.request.Request('http://127.0.0.1:19170' + path, json.dumps(data).encode(), headers)
+    with urllib.request.urlopen(req, timeout=10) as response:
+        return json.load(response)
+
+
+def graphql(query, token):
+    result = ldap_request('/api/graphql', {'query': query}, token)
+    assert not result.get('errors'), result
+    return result['data']
+
+
+def main():
+    LOGS.mkdir(parents=True)
+    command([REPO / 'scripts/disk-guard.sh'])
+    command([H / 'up.sh'], stdout=subprocess.DEVNULL)
+    # Read only the non-secret run environment generated by up.sh.
+    for line in (RUN / 'env').read_text().splitlines():
+        key, value = line.split('=', 1)
+        ENV[key] = value
+    assert ENV['PF_APEX'] == 'pf.test' and ENV['PF_HTTPS_PORT'] == '18443'
+    private = RUN / 'identity-private'
+    private.mkdir(mode=0o700)
+    dev('sign-in', {'username': 'admin'})
+    dev('put', {'name': 'identity', 'title': 'Identity group fixture', 'kind': 'html', 'request_id': 'identity-gate-seed',
+                'files': {'index.html': '<!doctype html><h1>Identity group fixture</h1>'}})
+    with sqlite3.connect(RUN / 'data/partifactory.db') as db:
+        part, owner = db.execute("SELECT id,owner_user_id FROM parts WHERE name='identity'").fetchone()
+        db.execute("INSERT INTO grants(target_kind,target_id,subject,role,created_by,created_at) VALUES('part',?,'group:household',0,?,?)",
+                   (part, owner, int(time.time() * 1000)))
+    stop_server()
+    site = (RUN / 'site.toml').read_text().replace('https://dex.pf.test/dex', 'https://dex2.pf.test/dex')
+    site = site.replace('client_id = "partifactory"', 'client_id = "partifactory-second"')
+    # A real provider which has no groups uses a different configured claim key.
+    (RUN / 'site.toml').write_text(site.replace('groups_claim = "groups"', 'groups_claim = "roles"').replace('audience_group = "household"', 'audience_group = ""'))
+    start_server()
+    with sqlite3.connect(RUN / 'data/partifactory.db') as db:
+        assert db.execute("SELECT count(*) FROM users WHERE idp_issuer='https://dex2.pf.test/dex'").fetchone()[0] == 0
+    for project in ['chromium-desktop', 'webkit-mobile']:
+        browser('second', project)
+        with sqlite3.connect(RUN / 'data/partifactory.db') as db:
+            users = db.execute("SELECT id FROM users WHERE idp_issuer='https://dex2.pf.test/dex'").fetchall()
+            assert len(users) == 1
+            assert db.execute("SELECT count(*) FROM spaces WHERE owner_user_id=? AND kind='personal'", users[0]).fetchone()[0] == 1
+    # Actual local console issuance, with no printable code in the report or command line.
+    if ENV['PF_HARNESS_MODE'] == 'host':
+        result = subprocess.run([BIN, 'admin', 'break-glass'], env=server_env(), text=True, capture_output=True, check=True)
+    else:
+        result = compose('--profile', 'container', 'exec', '-T', 'partifactory', '/usr/local/bin/partifactory', 'admin', 'break-glass', text=True, capture_output=True)
+    recovery = private / 'recovery.txt'
+    recovery.write_text(result.stdout)
+    recovery.chmod(0o600)
+    browser('recovery')
+
+    # A real LDAP server and Dex LDAP connector supply mutable, refreshable groups.
+    ldap_data = RUN / 'ldap-data'
+    ldap_data.mkdir()
+    ldap_data.chmod(0o777)
+    command(['docker', 'run', '-d', '--name', LDAP, '--label', 'pf.harness=1', '--network', 'pf-harness_ingress',
+             '-v', f'{ldap_data}:/data',
+             '-p', '127.0.0.1:19170:17170', '-e', 'LLDAP_LDAP_BASE_DN=dc=example,dc=com',
+             '-e', 'LLDAP_LDAP_USER_EMAIL=admin@example.com',
+             '-e', 'LLDAP_LDAP_USER_PASS=test-directory-password', '-e', 'LLDAP_JWT_SECRET=identity-test-only-jwt-secret',
+             '-e', 'LLDAP_KEY_SEED=identity-test-only-key-seed', LDAP_IMAGE], stdout=subprocess.DEVNULL)
+    token = None
+    for _ in range(60):
+        try:
+            token = ldap_request('/auth/simple/login', {'username': 'admin', 'password': 'test-directory-password'})['token']
+            break
+        except Exception:
+            time.sleep(1)
+    assert token, 'real directory did not become ready'
+    group = graphql('mutation { createGroup(name:"household") { id } }', token)['createGroup']['id']
+    stop_server()
+    (RUN / 'site.toml').write_text(site)
+    dex = RUN / 'dex/dex2.yaml'
+    config = dex.read_text().split('staticPasswords:')[0].replace('enablePasswordDB: true', 'enablePasswordDB: false')
+    # Only the application clock advances. The genuine provider's newly issued ID token
+    # must still be valid at that time; refresh-token lifetime is unchanged.
+    config = config.replace('idTokens: 10m', 'idTokens: 1h')
+    config += '''connectors:
+  - type: ldap
+    id: ldap
+    name: Household directory
+    config:
+      host: pf-identity-ldap:3890
+      insecureNoSSL: true
+      bindDN: uid=admin,ou=people,dc=example,dc=com
+      bindPW: test-directory-password
+      userSearch:
+        baseDN: ou=people,dc=example,dc=com
+        username: uid
+        idAttr: uid
+        emailAttr: mail
+        nameAttr: displayName
+        preferredUsernameAttr: uid
+      groupSearch:
+        baseDN: ou=groups,dc=example,dc=com
+        filter: "(objectClass=groupOfUniqueNames)"
+        userMatchers:
+          - userAttr: DN
+            groupAttr: member
+        nameAttr: cn
+'''
+    dex.write_text(config)
+    compose('restart', 'dex2', stdout=subprocess.DEVNULL)
+    start_server()
+    # LDAP uses uid/password instead of the local password connector's email/password.
+    for project in ['chromium-desktop', 'webkit-mobile']:
+        (private / 'group-before.json').unlink(missing_ok=True)
+        (private / 'group-after.ready').unlink(missing_ok=True)
+        graphql(f'mutation {{ addUserToGroup(userId:"admin",groupId:{group}) {{ ok }} }}', token)
+        dev('clock', {'offset_ms': 0})
+        proc = browser('group', project, background=True)
+        try:
+            for _ in range(60):
+                if (private / 'group-before.json').exists():
+                    break
+                if proc.poll() is not None:
+                    raise RuntimeError('browser failed before directory mutation')
+                time.sleep(1)
+            assert (private / 'group-before.json').exists(), 'browser did not request mutation'
+            user = json.loads((private / 'group-before.json').read_text())['user']
+            with sqlite3.connect(RUN / 'data/partifactory.db') as db:
+                assert db.execute("SELECT count(*) FROM group_members WHERE user_id=? AND group_name='household'", (user,)).fetchone()[0] == 1
+                before = db.execute("SELECT coalesce((SELECT epoch FROM epochs WHERE key=?),0)", ('part:' + part,)).fetchone()[0]
+            graphql(f'mutation {{ removeUserFromGroup(userId:"admin",groupId:{group}) {{ ok }} }}', token)
+            dev('clock', {'offset_ms': 16 * 60 * 1000})
+            (private / 'group-after.ready').touch()
+            assert proc.wait(timeout=60) == 0, 'group refresh browser gate failed'
+            (LOGS / 'results.json').rename(LOGS / f'results-group-{project}.json')
+            with sqlite3.connect(RUN / 'data/partifactory.db') as db:
+                assert db.execute("SELECT count(*) FROM group_members WHERE user_id=? AND group_name='household'", (user,)).fetchone()[0] == 0
+                after = db.execute("SELECT epoch FROM epochs WHERE key=?", ('part:' + part,)).fetchone()[0]
+                assert after > before
+            (LOGS / f'directory-refresh-{project}.json').write_text(json.dumps({
+                'real_directory_membership_removed': True, 'claim_membership_before': 1, 'claim_membership_after': 0,
+                'part_epoch_before': before, 'part_epoch_after': after, 'no_cap_minted_on_refusal': True}, indent=2) + '\n')
+        finally:
+            if proc.poll() is None:
+                proc.terminate()
+                proc.wait(timeout=15)
+    with sqlite3.connect(RUN / 'data/partifactory.db') as db:
+        assert db.execute("SELECT count(*) FROM audit WHERE actor='break-glass' AND action='admin.break_glass.used'").fetchone()[0] == 1
+    (LOGS / 'summary.json').write_text(json.dumps({'pass': True, 'source_commit': command(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip(),
+        'dev_binary_sha256': hashlib.sha256(BIN.read_bytes()).hexdigest(),
+        'directory_image': LDAP_IMAGE, 'second_provider': ['chromium-desktop', 'webkit-mobile'],
+        'first_signin_one_personal_space': True, 'console_recovery_once': True,
+        'real_ldap_group_removal_refresh': ['chromium-desktop', 'webkit-mobile'], 'clock_advance_ms': 960000}, indent=2) + '\n')
+    print('identity-gates: PASS second provider, first-signin space, one-use console recovery, real group removal/refresh and grant refusal')
+
+
+if __name__ == '__main__':
+    def interrupted(*_):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, interrupted)
+    try:
+        main()
+    finally:
+        subprocess.run(['docker', 'rm', '-f', '-v', LDAP], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if (RUN / 'env').exists():
+            command([H / 'down.sh', RUN])
+            for name in ['server.jsonl', 'dex.log']:
+                if (RUN / name).exists():
+                    shutil.copyfile(RUN / name, LOGS / name)
