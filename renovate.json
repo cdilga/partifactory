@@ -1,7 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended", ":disableDependencyDashboard"],
-  "platform": "gitea",
   "enabledManagers": ["cargo", "dockerfile", "docker-compose", "github-actions", "custom.regex"],
   "rangeStrategy": "pin",
   "lockFileMaintenance": { "enabled": true, "schedule": ["before 6am on monday"] },
