@@ -34,7 +34,9 @@ test('shipping device matrix: standalone, part root, reload, guest and sign-in',
     await expect.poll(async()=>(await page.request.get('https://parts.pf.test/api/session')).status()).toBe(200);
     await report('sign_in');
     if(browserName==='chromium'){
-      await nativePasskey(page,context);
+      const credentialFile=process.env.PF_HARNESS_RELEASE==='1'
+        ?path.join('/repo/target/e2e-runs',run,'release-private/authenticator.json'):undefined;
+      await nativePasskey(page,context,credentialFile);
       await report('passkey_step_up');
     }else await report('passkey_step_up','not_assertable');
     await page.goto('https://notes-part.pf.test/');

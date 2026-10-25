@@ -36,29 +36,37 @@ export async function signIn(page: Page, username = 'admin') {
 
 // This is a real browser authenticator: the server validates attestation and every later
 // assertion. Automation only supplies the hardware and its successful user-verification signal.
-export async function nativePasskey(page: Page, context: BrowserContext) {
+export async function nativePasskey(page: Page, context: BrowserContext, credentialFile?: string) {
   const cdp = await context.newCDPSession(page);
   await cdp.send('WebAuthn.enable');
   const { authenticatorId } = await cdp.send('WebAuthn.addVirtualAuthenticator', {
     options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true },
   });
-  const result = await page.evaluate(async () => {
-    const decode = (s: string) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
-    const encode = (b: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    const start = await fetch('/admin/passkeys/register/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    const challenge = await start.json();
-    if (!start.ok) throw new Error(JSON.stringify(challenge));
-    const p = challenge.publicKey;
-    p.challenge = decode(p.challenge); p.user.id = decode(p.user.id);
-    (p.excludeCredentials || []).forEach((c: any) => c.id = decode(c.id));
-    const credential = await navigator.credentials.create({ publicKey: p }) as PublicKeyCredential;
-    const response = credential.response as AuthenticatorAttestationResponse;
-    const finish = await fetch('/admin/passkeys/register/finish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-      flow: challenge.flow, credential: { id: credential.id, rawId: encode(credential.rawId), type: credential.type, response: { attestationObject: encode(response.attestationObject), clientDataJSON: encode(response.clientDataJSON), transports: response.getTransports() }, extensions: credential.getClientExtensionResults() },
-    }) });
-    return { status: finish.status, body: await finish.json() };
-  });
-  expect(result.status, JSON.stringify(result.body)).toBe(200);
+  // A release setup and a fresh device session use the same real virtual hardware key.
+  // Keep its private state outside reports; the server still verifies every assertion.
+  if (credentialFile && fs.existsSync(credentialFile)) {
+    const credentials = JSON.parse(fs.readFileSync(credentialFile, 'utf8'));
+    expect(credentials.length).toBeGreaterThan(0);
+    for (const credential of credentials) await cdp.send('WebAuthn.addCredential', { authenticatorId, credential });
+  } else {
+    const result = await page.evaluate(async () => {
+      const decode = (s: string) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+      const encode = (b: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      const start = await fetch('/admin/passkeys/register/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const challenge = await start.json();
+      if (!start.ok) throw new Error(JSON.stringify(challenge));
+      const p = challenge.publicKey;
+      p.challenge = decode(p.challenge); p.user.id = decode(p.user.id);
+      (p.excludeCredentials || []).forEach((c: any) => c.id = decode(c.id));
+      const credential = await navigator.credentials.create({ publicKey: p }) as PublicKeyCredential;
+      const response = credential.response as AuthenticatorAttestationResponse;
+      const finish = await fetch('/admin/passkeys/register/finish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        flow: challenge.flow, credential: { id: credential.id, rawId: encode(credential.rawId), type: credential.type, response: { attestationObject: encode(response.attestationObject), clientDataJSON: encode(response.clientDataJSON), transports: response.getTransports() }, extensions: credential.getClientExtensionResults() },
+      }) });
+      return { status: finish.status, body: await finish.json() };
+    });
+    expect(result.status, JSON.stringify(result.body)).toBe(200);
+  }
   // Enrollment proves possession when adding the credential; an admin action separately
   // requires a fresh assertion. Exercise that real ceremony with this authenticator.
   const stepup = await page.evaluate(async () => {
@@ -82,5 +90,12 @@ export async function nativePasskey(page: Page, context: BrowserContext) {
   });
   expect(stepup.status, JSON.stringify(stepup.body)).toBe(200);
   expect(stepup.body.step_up_status).toBe(true);
+  if (credentialFile) {
+    const { credentials } = await cdp.send('WebAuthn.getCredentials', { authenticatorId });
+    expect(credentials.length).toBeGreaterThan(0);
+    fs.mkdirSync(path.dirname(credentialFile), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(credentialFile, JSON.stringify(credentials), { mode: 0o600 });
+    fs.chmodSync(credentialFile, 0o600);
+  }
   return { cdp, authenticatorId };
 }

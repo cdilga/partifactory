@@ -55,7 +55,7 @@ test('release compose setup uses real OIDC and scoped agent operations', async (
   // The simulator cannot provide a virtual passkey. Create its view-only link through the
   // same actual passkey-guarded browser API used by the Share UI, never by writing SQLite.
   await page.goto(base+'/');
-  await nativePasskey(page, context);
+  await nativePasskey(page, context, path.join(privateDir, 'authenticator.json'));
   const link = await context.request.post('/api/chrome/v1/notes/links', {
     headers: {Origin: `https://notes-part.${apex}`, 'Sec-Fetch-Site': 'same-site'}, data: {name: 'notes', mode: 'view'},
   });
