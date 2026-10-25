@@ -71,19 +71,45 @@ test('native admin share, mobile guest paint, freeze, undo and revoke', async ({
     expect((await waitForLog({event:'ratelimit.trip'})).some(l=>l.route==='guest_write'&&l.outcome==='rate_limited')).toBe(true);
     await guest.reload();
     await expect(guestBoard.locator('#b')).toBeVisible();
+    const linkMutation=(action:string,undo=false)=>page.waitForResponse(response=>{
+      const request=response.request();
+      if(request.method()!=='POST'||!new URL(response.url()).pathname.startsWith('/api/chrome/v1/public-pixel/links/'))return false;
+      const body=request.postDataJSON();
+      return body.action===action && (body.undo===true)===undo;
+    });
+    // A dispatched click does not finish the async mutation. Start the next guest write
+    // only once Freeze has committed and the native UI acknowledges its completion.
+    const frozen=linkMutation('freeze');
     await page.getByRole('button', { name: 'Freeze', exact: true }).click();
+    expect((await frozen).status()).toBe(200);
+    await expect(page.getByText('Frozen.',{exact:true})).toBeVisible();
+    const refused=guest.waitForResponse(response=>{
+      const request=response.request();
+      if(request.method()!=='POST'||!new URL(response.url()).pathname.endsWith('/_rt/v1'))return false;
+      const body=request.postDataJSON();
+      return body.op==='storage.set' && body.args.key==='px:1:0';
+    });
     await guestBoard.locator('[data-key="px:1:0"]').click();
+    const refusal=await refused;
+    expect(refusal.status()).toBe(403);
+    expect((await refusal.json()).error.code).toBe('forbidden_view_only');
     await expect(guestBoard.locator('#s')).not.toHaveText('');
+    await expect(guestBoard.locator('[data-key="px:1:0"]')).not.toHaveCSS('background-color', 'rgb(228, 87, 46)');
     await expect(page.frameLocator('#pf-frame').locator('[data-key="px:1:0"]')).not.toHaveCSS('background-color', 'rgb(228, 87, 46)');
     // A fresh go is now view-only and yields the explicit data policy message.
     await guest.reload();
     await guestBoard.locator('[data-key="px:1:0"]').click();
     await expect(guestBoard.locator('#s')).toHaveText('This board is view only.');
+    const restored=linkMutation('freeze',true);
     await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    expect((await restored).status()).toBe(200);
+    await expect(page.getByText('Restored.',{exact:true})).toBeVisible();
     await guest.reload();
     await guestBoard.locator('[data-key="px:1:0"]').click();
     await expect(page.frameLocator('#pf-frame').locator('[data-key="px:1:0"]')).toHaveCSS('background-color', 'rgb(228, 87, 46)');
+    const revoked=linkMutation('revoke');
     await page.getByRole('button', { name: 'Revoke', exact: true }).click();
+    expect((await revoked).status()).toBe(200);
     expect((await guestContext.request.get(url)).status()).toBe(404);
     await expect(page.locator('.pf-audience')).toHaveText('Only me');
     expect((await waitForLog({ event: 'link.go' })).some(l => l.outcome === 'ok')).toBe(true);
