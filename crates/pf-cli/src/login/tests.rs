@@ -41,6 +41,11 @@ fn persisted_bundle_is_private_and_rejects_links() {
         std::fs::remove_file(&path).unwrap();
         std::os::unix::fs::symlink(dir.path().join("missing"), &path).unwrap();
         assert!(read_config(&path).is_err());
+        assert!(write_config(&path, &saved).is_err());
+        let lock_path = path.with_extension("lock");
+        std::os::unix::fs::symlink(dir.path().join("missing-lock-target"), &lock_path).unwrap();
+        assert!(lock(&path).is_err());
+        assert!(!dir.path().join("missing-lock-target").exists());
     }
 }
 

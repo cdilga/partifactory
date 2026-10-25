@@ -94,7 +94,7 @@ def main():
                     assert result["signed_in"] is True
                     assert "pf_at_" not in stdout and "pf_rt_" not in stdout
                     assert config.stat().st_mode & 0o777 == 0o600
-                    name = f"cli-native-{project}"
+                    name = f"cli-native-{project}-{time.time_ns()}"
                     def command(*arguments):
                         completed = subprocess.run([str(part), *arguments], env=env, capture_output=True, text=True, check=True, timeout=40)
                         return json.loads(completed.stdout)

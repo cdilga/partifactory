@@ -101,7 +101,7 @@ fn prepare_parent(path: &Path) -> Result<()> {
 fn lock(path: &Path) -> Result<File> {
     prepare_parent(path)?;
     let lock_path = path.with_extension("lock");
-    if lock_path.exists() {
+    if std::fs::symlink_metadata(&lock_path).is_ok() {
         private_file(&lock_path)?;
     }
     let mut options = OpenOptions::new();
@@ -121,7 +121,7 @@ fn lock(path: &Path) -> Result<File> {
 }
 fn write_config(path: &Path, value: &Value) -> Result<()> {
     prepare_parent(path)?;
-    if path.exists() {
+    if std::fs::symlink_metadata(path).is_ok() {
         private_file(path)?;
     }
     let parent = path
