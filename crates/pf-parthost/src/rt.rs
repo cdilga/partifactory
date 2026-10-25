@@ -63,7 +63,10 @@ pub async fn handle(s: PartHost, req: Request) -> Response {
                 .unwrap_or_else(|e| e.into_inner())
                 .contains_key(name);
             let principal = if let Some(guest) = &c.g {
-                format!("guest:{}:{guest}", c.s.strip_prefix("link:").unwrap_or(&c.s))
+                format!(
+                    "guest:{}:{guest}",
+                    c.s.strip_prefix("link:").unwrap_or(&c.s)
+                )
             } else {
                 c.s.clone()
             };
