@@ -5,6 +5,12 @@ final class SimulatorDeviceTests: XCTestCase {
     let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
     var environment: [String: String] { ProcessInfo.processInfo.environment }
 
+    func testSafariAutomationAvailable() {
+        safari.launch()
+        safari.open(URL(string: "about:blank")!)
+        XCTAssertTrue(safari.wait(for: .runningForeground, timeout: 15))
+    }
+
     func open(_ item: String) throws {
         let value = try XCTUnwrap(environment["PF_DEVICE_" + item.uppercased()])
         safari.open(try XCTUnwrap(URL(string: value)))

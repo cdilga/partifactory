@@ -37,7 +37,8 @@ with c:
         c.execute("INSERT INTO mirror_cache(url,resolved_url,hash,content_type,pinned,fetched_at) VALUES(?,? ,?,'text/plain',1,?)",(h,h,h,now))
         c.execute("INSERT INTO data_snapshots(part_id,taken_at,blob_hash,docs,bytes) VALUES('storage-fixture',?,?,0,512)",(now,h))
     c.execute("INSERT INTO part_previews(part_id,version_id,source,poster_hash,video_hash,state,updated_at) VALUES('storage-fixture','storage-version','render',?,?,'ready',?)",(hashes['small'],hashes['other'],now))
-    c.execute("INSERT INTO data_docs(part_id,scope,collection,doc_id,body,rev,updated_at,updated_by) VALUES('storage-fixture','shared','fixture','old',zeroblob(1024),1,?,'system')",(now,))
+    c.execute("INSERT INTO data_docs(part_id,scope,collection,doc_id,body,rev,updated_at,updated_by) VALUES('storage-fixture','shared','fixture','old',?,1,?,'system')",(json.dumps('x'*1022).encode(),now))
+    c.execute("INSERT INTO data_snapshot_policies(part_id,mode,keep,set_by,set_at) VALUES('storage-fixture','off',7,'system',?)",(now,))
     queries = {
         'blobs': 'SELECT COALESCE(sum(size),0) FROM blobs',
         'shared_blobs': 'SELECT COALESCE(sum(size),0) FROM blobs WHERE hash IN (SELECT hash FROM shared_blobs)',
