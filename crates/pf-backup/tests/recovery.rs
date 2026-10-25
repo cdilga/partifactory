@@ -6,6 +6,9 @@ use pf_db::{
 use std::path::Path;
 const NOW: i64 = 1_800_000_000_000;
 fn fixture(root: &Path) -> BackupService {
+    fixture_with_db(root).0
+}
+fn fixture_with_db(root: &Path) -> (BackupService, Db) {
     std::fs::create_dir_all(root).unwrap();
     let db = Db::open_main(root.join("partifactory.db")).unwrap();
     let blobs = pf_blobs::BlobStore::open(root.join("blobs")).unwrap();
@@ -24,7 +27,8 @@ fn fixture(root: &Path) -> BackupService {
         tx.execute("INSERT INTO epochs(key,epoch) VALUES('boot',12)",[])?;
         Ok::<_,pf_db::DbError>(())
     }).unwrap();
-    BackupService::new(root.into(), db, blobs, Default::default())
+    let service = BackupService::new(root.into(), db.clone(), blobs, Default::default());
+    (service, db)
 }
 fn count(path: &Path, table: &str) -> i64 {
     Connection::open(path)
@@ -385,21 +389,58 @@ fn full_export_uses_gc_mark_set_and_portable_excludes_shared_data_blobs() {
 
 #[test]
 fn copy_during_version_burst_is_prefix_consistent() {
+    use std::{
+        sync::mpsc,
+        time::{Duration, Instant},
+    };
+
     let tmp = tempfile::tempdir().unwrap();
-    let service = fixture(&tmp.path().join("source"));
-    let db = Db::open_main(tmp.path().join("source/partifactory.db")).unwrap();
+    let root = tmp.path().join("source");
+    // Production writes and backup metadata share one writer queue.
+    let (service, db) = fixture_with_db(&root);
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
     let writer = std::thread::spawn(move || {
+        let mut barrier = Some((started_tx, release_rx));
         for n in 2..=1_001 {
-            db.write_blocking(move|tx|{let hash=format!("{:064x}",n);tx.execute("INSERT INTO versions(id,part_id,n,manifest_hash,entry,author_user,via,created_at) VALUES(?1,'p_test',?2,?1,'index.html','u_test','api',?2)",params![hash,n])?;tx.execute("INSERT INTO version_files SELECT ?1,path,blob_hash,size,mime FROM version_files LIMIT 1",[hash])?;Ok::<_,pf_db::DbError>(())}).unwrap();
+            let barrier = barrier.take();
+            db.write_blocking(move |tx| {
+                let hash = format!("{n:064x}");
+                tx.execute("INSERT INTO versions(id,part_id,n,manifest_hash,entry,author_user,via,created_at) VALUES(?1,'p_test',?2,?1,'index.html','u_test','api',?2)", params![hash, n])?;
+                if let Some((started, release)) = barrier {
+                    // Hold an incomplete version uncommitted while the WAL reader copies.
+                    started.send(()).unwrap();
+                    release.recv_timeout(Duration::from_secs(30)).unwrap();
+                }
+                tx.execute("INSERT INTO version_files SELECT ?1,path,blob_hash,size,mime FROM version_files LIMIT 1", [hash])?;
+                Ok::<_, pf_db::DbError>(())
+            }).unwrap();
         }
     });
-    let path = service.hourly_copy(NOW).unwrap();
+    started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let backup = std::thread::spawn(move || service.hourly_copy(NOW));
+    let path = root.join("backup/partifactory-latest.sqlite");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !path.is_file() && !backup.is_finished() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let copied_while_uncommitted = path.is_file();
+    // The copy finishes before its metadata can pass the held writer transaction.
+    // Always release that transaction before checking results or joining threads.
+    release_tx.send(()).unwrap();
+    let copied = backup.join().unwrap().unwrap();
     writer.join().unwrap();
+    assert!(
+        copied_while_uncommitted,
+        "copy waited for the writer transaction"
+    );
+    assert_eq!(copied, path);
+    assert_eq!(count(&root.join("partifactory.db"), "versions"), 1_001);
     let conn = Connection::open(path).unwrap();
     let(versions,files,max):(i64,i64,i64)=conn.query_row("SELECT (SELECT count(*) FROM versions),(SELECT count(*) FROM version_files),(SELECT max(n) FROM versions)",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
     assert_eq!(versions, files);
     assert_eq!(versions, max);
-    assert!((1..=1_001).contains(&versions));
+    assert_eq!(versions, 1, "copy must exclude the uncommitted version");
 }
 
 #[test]
