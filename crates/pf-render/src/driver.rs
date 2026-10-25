@@ -383,6 +383,26 @@ pub fn uniform(bytes: &[u8]) -> Result<bool, PfError> {
 mod tests {
     use super::*;
     #[test]
+    fn action_limits_reject_excess_before_rendering() {
+        for extra in [
+            json!({"actions":vec![json!({"do":"click","selector":"button"});21]}),
+            json!({"actions":[{"do":"type","selector":"input","text":"é".repeat(1001)}]}),
+            json!({"actions":[{"do":"wait_ms","ms":2001}]}),
+            json!({"wait_ms":8001}),
+            json!({"actions":[{"do":"click","x":1}]}),
+        ] {
+            let mut input = json!({"name":"board"});
+            input
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            let request: CheckRequest = serde_json::from_value(input).unwrap();
+            assert_eq!(request.validate().unwrap_err().code, "invalid_input");
+        }
+        let request:CheckRequest=serde_json::from_value(json!({"name":"board","wait_ms":8000,"actions":[{"do":"type","selector":"input","text":"é".repeat(1000)},{"do":"wait_ms","ms":2000}]})).unwrap();
+        request.validate().unwrap();
+    }
+    #[test]
     fn never_returns_cap_urls() {
         assert_eq!(
             safe_url("https://board-part.pf.test/c/v1.secret/path?q=1"),
