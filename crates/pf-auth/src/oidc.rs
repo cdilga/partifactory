@@ -70,6 +70,7 @@ pub(crate) struct RefreshSecret {
 pub(crate) struct Signin {
     #[serde(rename = "return", default = "root")]
     target: String,
+    prompt: Option<String>,
 }
 fn root() -> String {
     "/".into()
@@ -114,7 +115,16 @@ impl AuthService {
         ))
     }
 
+    #[cfg(test)]
     pub(crate) async fn begin(&self, target: String) -> Result<(String, String), PfError> {
+        self.begin_prompt(target, false).await
+    }
+
+    async fn begin_prompt(
+        &self,
+        target: String,
+        prompt_login: bool,
+    ) -> Result<(String, String), PfError> {
         validate_path(&target)?;
         let client = self.client().await?;
         let (challenge, pkce) = PkceCodeChallenge::new_random_sha256();
@@ -123,6 +133,9 @@ impl AuthService {
             CsrfToken::new_random,
             Nonce::new_random,
         );
+        if prompt_login {
+            authorize = authorize.add_prompt(CoreAuthPrompt::Login);
+        }
         let supported = self.0.provider.get().and_then(|p| p.scopes_supported());
         for scope in ["profile", "email", "offline_access", "groups"] {
             if supported.is_some_and(|scopes| scopes.iter().any(|s| s.as_str() == scope))
@@ -400,9 +413,16 @@ enum RefreshFailure {
     Invalid,
 }
 
-pub(crate) async fn signin(State(state): State<AppState>, Query(q): Query<Signin>) -> Response {
+pub(crate) async fn signin(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<Signin>,
+) -> Response {
     let auth = state.ext::<AuthService>().expect("auth");
-    match auth.begin(q.target).await {
+    // An explicit sign-in while already holding a workspace session is an account switch.
+    // OIDC SSO must not silently select that same identity again.
+    let prompt_login = q.prompt.as_deref() == Some("login") || cookie_token(&headers).is_some();
+    match auth.begin_prompt(q.target, prompt_login).await {
         Ok((url, cookie)) => {
             let mut r = Redirect::to(&url).into_response();
             set_cookie(&mut r, &cookie, FLOW_TTL / 1000);
@@ -477,6 +497,21 @@ mod tests {
         assert_eq!(query["client_id"], "test-client");
         assert_eq!(query["redirect_uri"], "https://parts.pf.test/oidc/callback");
         assert!(query["scope"].contains("openid"));
+        assert!(!query.contains_key("prompt"));
+        let (switch_url, _) = auth.begin_prompt("/".into(), true).await.unwrap();
+        let switch_url = url::Url::parse(&switch_url).unwrap();
+        assert!(
+            switch_url
+                .query_pairs()
+                .any(|(key, value)| key == "prompt" && value == "login")
+        );
+        let switch_state = switch_url
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .unwrap()
+            .1
+            .into_owned();
+        auth.0.flows.lock().unwrap().remove(&switch_state);
         let state = query["state"].to_string();
         assert!(!query["nonce"].is_empty());
         assert_eq!(query["code_challenge"].len(), 43);
