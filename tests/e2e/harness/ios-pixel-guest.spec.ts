@@ -4,6 +4,7 @@ import {signIn, nativePasskey} from '../lib/public-auth';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as https from 'node:https';
+import {pixelFixture} from '../fixtures/pixel';
 
 test('Simulator guest paints and Chromium admin freezes the communal board', async ({page, context, request}, info) => {
   test.skip(!process.env.PF_IOS_PIXEL || info.project.name !== 'chromium-desktop', 'Explicit paired Simulator lane');
@@ -58,12 +59,11 @@ test('Simulator guest paints and Chromium admin freezes the communal board', asy
   expect(granted.status()).toBe(200);
   const headers={Authorization:`Bearer ${(await granted.json()).access_token}`};
   // Exercise the published board, adding only accessibility and test observation hooks.
-  const contract=fs.readFileSync('/repo/docs/agent-contract.md','utf8');
-  let content=contract.split('Hermes writes `board.html`:')[1].split('```html\n')[1].split('\n```')[0];
+  let content=pixelFixture;
   content=content.replace('el.dataset.key = key;', 'el.setAttribute("role", "button"); el.setAttribute("aria-label", "Pixel " + x + " " + y); el.dataset.key = key;');
   content=content.replace('note.textContent = ""; }', 'note.textContent = ""; await devicePainted(); }');
   content=content.replace('"Not saved: " + e.message; }', '"Not saved: " + e.message; await deviceRefused(e, key, before); }');
-  content=content.replace('loadBoard().finally(() => window.partifactory.ready());', `
+  content=content.replace('load().finally(() => window.partifactory.ready());', `
 const deviceCollector=${JSON.stringify(collector)}, deviceNonce=${JSON.stringify(nonce)};
 async function devicePost(item, extra) {
   const response=await fetch(deviceCollector+"/report", {method:"POST",credentials:"omit",headers:{"Content-Type":"text/plain"},body:JSON.stringify(Object.assign({event:"device.check",item,lane:"safari-guest",outcome:"pass",run:deviceNonce},extra))});
@@ -88,7 +88,7 @@ async function deviceRefused(e,key,before) {
   await devicePost("guest_refused",{code:e.code,error:e.name});
   note.textContent="PfError: frozen pixel reverted";
 }
-loadBoard().then(async()=>{window.partifactory.ready();await deviceWait("admin_ready");cells["px:0:0"].setAttribute("aria-label","Paint communal pixel");});`);
+load().then(async()=>{window.partifactory.ready();await deviceWait("admin_ready");cells["px:0:0"].setAttribute("aria-label","Paint communal pixel");});`);
   const name='ios-pixel';
   // Omitting space must keep using the consented personal space after directory renames.
   const created=await request.post('/api/v1/part_create',{headers,data:{name,title:'Simulator pixel board',kind:'html',content,request_id:'ios-pixel-'+nonce}});

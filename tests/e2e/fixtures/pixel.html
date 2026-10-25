@@ -1,0 +1,33 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pixel board</title>
+<style>#b{display:grid;grid-template-columns:repeat(16,1fr);max-width:480px;touch-action:manipulation}#b i{aspect-ratio:1;border:1px solid #ddd}</style>
+<input id="c" type="color" value="#e4572e"><div id="b"></div><p id="s"></p>
+<script>
+const N = 16, HEX = /^#[0-9a-f]{6}$/i, cells = {};
+const board = document.getElementById("b"), color = document.getElementById("c"), note = document.getElementById("s");
+const show = (key, v) => { if (cells[key]) cells[key].style.background = HEX.test(v || "") ? v : ""; };
+for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+  const key = `px:${x}:${y}`, el = document.createElement("i");
+  el.dataset.key = key; cells[key] = el; board.append(el);
+}
+board.addEventListener("click", async ev => {
+  const key = ev.target.dataset.key; if (!key) return;
+  const before = cells[key].style.background;
+  show(key, color.value);
+  try { await window.storage.set(key, color.value, true); note.textContent = ""; }
+  catch (e) { cells[key].style.background = before; note.textContent = e.code === "forbidden_view_only" ? "This board is view only." : "Not saved: " + e.message; }
+});
+async function load() {
+  let cursor = null;
+  do {
+    const page = await window.storage.list("px:", true, { values: true, cursor });
+    for (const [key, v] of Object.entries(page.values)) show(key, v);
+    cursor = page.next_cursor;
+  } while (cursor);
+}
+window.partifactory.on("data.changed", async e => {
+  if (e.op === "delete") return show(e.key, null);
+  const r = await window.storage.get(e.key, true);
+  show(e.key, r && r.value);
+});
+load().finally(() => window.partifactory.ready());
+</script>

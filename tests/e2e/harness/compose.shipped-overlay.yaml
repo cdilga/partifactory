@@ -71,7 +71,16 @@ services:
         ipv4_address: 172.30.79.10
       ingress:
         ipv4_address: 172.30.77.10
-        aliases: ["dex.${PF_DOMAIN_APEX:-pf.test}", "dex2.${PF_DOMAIN_APEX:-pf.test}", "parts.${PF_DOMAIN_APEX:-pf.test}"]
+        aliases:
+          - "dex.${PF_DOMAIN_APEX:-pf.test}"
+          - "dex2.${PF_DOMAIN_APEX:-pf.test}"
+          - "parts.${PF_DOMAIN_APEX:-pf.test}"
+          - "notes-part.${PF_DOMAIN_APEX:-pf.test}"
+          - "pixel-part.${PF_DOMAIN_APEX:-pf.test}"
+          - "blobs-part.${PF_DOMAIN_APEX:-pf.test}"
+          - "communal-mcp-part.${PF_DOMAIN_APEX:-pf.test}"
+          - "communal-mobile-http-part.${PF_DOMAIN_APEX:-pf.test}"
+          - "communal-mobile-mcp-part.${PF_DOMAIN_APEX:-pf.test}"
 
   security-device-client:
     profiles: [security]

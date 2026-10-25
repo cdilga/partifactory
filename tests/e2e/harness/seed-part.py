@@ -110,6 +110,10 @@ seed("mirrored", "html", {"index.html": '<!doctype html><h1 id="mirrored">Mirror
 # The executable contract is the shared-data fixture, not a separately maintained copy.
 contract = REPO.joinpath("docs/agent-contract.md").read_text()
 board = contract.split('Hermes writes `board.html`:', 1)[1].split('```html\n', 1)[1].split('\n```', 1)[0]
+fix = json.loads(contract.split('**4. Fix with one edit**', 1)[1].split('```json\n', 1)[1].split('\n→', 1)[0])['edits'][0]
+assert board.count(fix['old_str']) == 1
+board = board.replace(fix['old_str'], fix['new_str'])
+assert board == REPO.joinpath('tests/e2e/fixtures/pixel.html').read_text().rstrip('\n'), 'contract pixel fixture drifted'
 seed("pixel", "html", {"index.html": board})
 seed("public-pixel", "html", {"index.html": board})
 for browser in ("chromium-desktop", "chromium-mobile", "webkit-mobile", "firefox-desktop"):
