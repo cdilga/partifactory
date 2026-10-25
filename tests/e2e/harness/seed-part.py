@@ -115,5 +115,7 @@ seed("public-pixel", "html", {"index.html": board})
 for browser in ("chromium-desktop", "chromium-mobile", "webkit-mobile", "firefox-desktop"):
     seed("pixel-" + browser, "html", {"index.html": board})
     seed("pixel-undo-" + browser, "html", {"index.html": board})
+for example in ("about", "workshop", "orbit-relay"):
+    seed("example-" + example, "html", {"index.html": REPO.joinpath("examples", example + ".html").read_text()})
 RUN.joinpath("part-fixture.json").write_text(json.dumps(fixtures))
 print("seed-part: all four kinds built; mirrored CDN graph and capabilities ready")
