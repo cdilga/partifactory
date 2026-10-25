@@ -340,7 +340,8 @@ impl TokenService {
             let row:Option<Row>=tx.query_row("SELECT status,expires_at,interval_s,last_poll_at,connection_id FROM device_codes WHERE device_hash=?1 AND client_id='part-cli'",[&hash],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).optional()?;
             let Some((status,expires,interval,last,conn))=row else{return Ok(Err(invalid()))};
             if expires<=now{return Ok(Err(OAuthError::new("expired_token","The device code has expired.")));}
-            if status=="consumed"{return Ok(Err(invalid()));}if status=="denied"{return Ok(Err(denied()));}
+            if status=="consumed"{return Ok(Err(invalid()));}
+            if status=="denied"{return Ok(Err(denied()));}
             if last.is_some_and(|last|now-last<interval*1000){tx.execute("UPDATE device_codes SET interval_s=interval_s+5,last_poll_at=?2 WHERE device_hash=?1",params![hash,now])?;return Ok(Err(OAuthError::new("slow_down","Increase the polling interval by five seconds.")));}
             tx.execute("UPDATE device_codes SET last_poll_at=?2 WHERE device_hash=?1",params![hash,now])?;
             if status=="pending"{return Ok(Err(OAuthError::new("authorization_pending","Waiting for the person to allow this device.")));}
