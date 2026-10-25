@@ -2,12 +2,12 @@
 # the same proxy and cert as partifactory, at their own explicit hosts, which win over the
 # wildcard.
 
-dex.pf.test {
+dex.{$PF_APEX:pf.test} {
 	import pf_proxy
 	reverse_proxy dex:5556
 }
 
-dex2.pf.test {
+dex2.{$PF_APEX:pf.test} {
 	import pf_proxy
 	reverse_proxy dex2:5556
 }

@@ -16,6 +16,7 @@ h="$repo/tests/e2e/harness"
 
 case "$(uname -s)" in Darwin) default_mode=host ;; *) default_mode=container ;; esac
 mode="${PF_HARNESS_MODE:-$default_mode}"
+export PF_APEX="${PF_APEX:-pf.test}"
 export PF_HTTPS_PORT="${PF_HTTPS_PORT:-18443}"
 export PF_BIN="${PF_BIN:-${CARGO_TARGET_DIR:-$repo/target}/debug/partifactory}"
 export PF_RUN_DIR="${PF_RUN_DIR:-$repo/target/e2e-runs/$(date +%Y%m%d-%H%M%S)}"
@@ -57,7 +58,7 @@ fi
 cat > "$run/site.toml" <<EOF
 # Written by tests/e2e/harness/up.sh for one harness run.
 [domain]
-apex = "pf.test"
+apex = "$PF_APEX"
 
 [ingress]
 client_ip_header = "X-Forwarded-For"
@@ -91,6 +92,7 @@ fi
 
 cat > "$run/env" <<EOF
 PF_RUN_DIR=$run
+PF_APEX=$PF_APEX
 PF_HARNESS_MODE=$mode
 PF_HTTPS_PORT=$PF_HTTPS_PORT
 PF_OPS_URL=$ops_url
@@ -100,11 +102,11 @@ PF_SERVER_LOG=$run/server.jsonl
 EOF
 
 # Wait for the whole chain: browser-side TLS through Caddy to partifactory, and both Dex.
-resolve=(--resolve "parts.pf.test:$PF_HTTPS_PORT:127.0.0.1" --resolve "dex.pf.test:$PF_HTTPS_PORT:127.0.0.1" --resolve "dex2.pf.test:$PF_HTTPS_PORT:127.0.0.1")
+resolve=(--resolve "parts.$PF_APEX:$PF_HTTPS_PORT:127.0.0.1" --resolve "dex.$PF_APEX:$PF_HTTPS_PORT:127.0.0.1" --resolve "dex2.$PF_APEX:$PF_HTTPS_PORT:127.0.0.1")
 for i in $(seq 1 60); do
-  if curl -fsS --cacert "$run/certs/ca.pem" "${resolve[@]}" "https://parts.pf.test:$PF_HTTPS_PORT/healthz" >/dev/null 2>&1 &&
-     curl -fsS --cacert "$run/certs/ca.pem" "${resolve[@]}" "https://dex.pf.test:$PF_HTTPS_PORT/dex/.well-known/openid-configuration" >/dev/null 2>&1 &&
-     curl -fsS --cacert "$run/certs/ca.pem" "${resolve[@]}" "https://dex2.pf.test:$PF_HTTPS_PORT/dex/.well-known/openid-configuration" >/dev/null 2>&1; then
+  if curl -fsS --cacert "$run/certs/ca.pem" "${resolve[@]}" "https://parts.$PF_APEX:$PF_HTTPS_PORT/healthz" >/dev/null 2>&1 &&
+     curl -fsS --cacert "$run/certs/ca.pem" "${resolve[@]}" "https://dex.$PF_APEX:$PF_HTTPS_PORT/dex/.well-known/openid-configuration" >/dev/null 2>&1 &&
+     curl -fsS --cacert "$run/certs/ca.pem" "${resolve[@]}" "https://dex2.$PF_APEX:$PF_HTTPS_PORT/dex/.well-known/openid-configuration" >/dev/null 2>&1; then
     echo "up.sh: harness ready ($mode mode) in $run" >&2
     echo "$run"
     exit 0

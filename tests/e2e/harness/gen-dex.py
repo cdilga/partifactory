@@ -12,6 +12,7 @@ Every static user's password is `password` (test only). Dex has no disabled stat
 `disabled = true` user exists in Dex and partifactory's directory refuses them.
 """
 import json
+import os
 import sys
 import tomllib
 
@@ -77,16 +78,18 @@ def main():
         for g in u.get("groups", []):
             if g not in known:
                 sys.exit(f"gen-dex: user {u['username']} is in unknown group {g}")
+    apex = os.environ.get("PF_APEX", "pf.test")
     redirects = [
         "https://parts.pf.test/oauth/callback",
         "https://parts.pf.test/auth/callback",
         "https://parts.pf.test/_dev/callback",
     ]
-    issuer = fx.get("issuer", "https://dex.pf.test/dex")
+    redirects = [u.replace("pf.test", apex) for u in redirects]
+    issuer = fx.get("issuer", "https://dex.pf.test/dex").replace("pf.test", apex)
     with open(f"{out}/dex.yaml", "w") as f:
         f.write(render(issuer, "partifactory", redirects, users, True))
     with open(f"{out}/dex2.yaml", "w") as f:
-        f.write(render("https://dex2.pf.test/dex", "partifactory-second", redirects, users, False))
+        f.write(render(f"https://dex2.{apex}/dex", "partifactory-second", redirects, users, False))
     print(f"gen-dex: {len(users)} users, {len(known)} groups -> {out}/dex.yaml, dex2.yaml")
 
 

@@ -36,7 +36,7 @@ services:
     ports:
       - "127.0.0.1:${PF_HTTPS_PORT:-18443}:443"
     environment:
-      PF_APEX: pf.test
+      PF_APEX: ${PF_APEX:-pf.test}
       PF_UPSTREAM_WORKSPACE: ${PF_UPSTREAM_WORKSPACE:-partifactory:8080}
       PF_UPSTREAM_CONTENT: ${PF_UPSTREAM_CONTENT:-partifactory:8081}
     volumes:
