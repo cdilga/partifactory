@@ -60,6 +60,32 @@ templates -> open=true | chip=Public link | s1=... same ... | s2=... same ... | 
 
 **CodeMirror 6 interop** (`/leptos/editor`, about 20 minutes): `cm=true | len0=54 | len1=72 | len2=75`. The editor mounted in a Leptos `NodeRef` from an `Effect`. A Leptos button inserted text through a `#[wasm_bindgen(module = "/static/editor-glue.js")]` extern (54 → 72). Typing in CodeMirror updated a Leptos signal through a `Closure<dyn FnMut(String)>` (72 → 75). **Pass.**
 
+## Independent verification (2026-10-25)
+
+QuietCove independently built `spike-ui` with Rust/Cargo 1.97.1 using the shared
+`target/` and `-j2`, then ran:
+
+```sh
+SPIKE_UI_ADDR=127.0.0.1:28081 target/debug/spike-ui
+curl --fail http://127.0.0.1:28081/leptos
+curl --fail http://127.0.0.1:28081/templates
+```
+
+Both routes served their real SSR pages (2,327 and 2,523 bytes respectively),
+including the audience ladder and Share sheet markup. The actual served
+`/pkg/spike_ui_app.js` and `/pkg/spike_ui_app_bg.wasm` matched the retained files
+byte for byte. Compressing those served bytes with `brotli -q 11` produced
+**5,832 + 86,827 = 92,659 bytes (90.49 KiB)**, confirming the measured bundle.
+Leptos 0.8.22, leptos_axum 0.8.10 and askama 0.16.1 match the note's pins.
+The UI route test passed in the independent 11-test spike run. This rerun
+verifies served routes and bundle size; the interactive browser/CodeMirror
+observations above are the original run. The owned listener was stopped.
+
+Retained evidence: `target/gate-evidence/spikes/quietcove-20261025/` contains
+`ui-routes.json` (actual commands, byte counts and SHA-256 hashes), `leptos.html`,
+`templates.html`, server logs, `build.log`, `tests.log` and `versions.json`.
+Green CI on `main` remains required before closing the bead.
+
 ## Friction log (honest hours)
 
 Total framework friction for the share sheet and bar: **about 0.2 h**. Writing the components themselves was quick.

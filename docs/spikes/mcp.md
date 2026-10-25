@@ -87,6 +87,37 @@ The spike server has two tools: mcp__spike__part_get and mcp__spike__part_screen
 rmcp client and tests: `cargo test --manifest-path spikes/Cargo.toml -p spike-mcp`, 5 passed:
 `tools_list_schemas_match_schemars` (Discover lifecycle on 2026-07-28, plus a resource read), `rmcp_client_legacy_initialize_also_works` (auto lifecycle, image block), `missing_token_is_http_401_not_tool_result` (no token and a wrong token, plus the `http.request` 401 log assertion), `stateless_request_without_session_id_succeeds` (raw POSTs on 2026-07-28 and 2025-11-25), `error_is_iserror_with_structured_content`.
 
+## Independent verification and original call records (2026-10-25)
+
+QuietCove independently started the native spike at `127.0.0.1:28080` and
+connected Claude Code **2.1.310** using a strict fixture MCP configuration,
+`--restricted --tools ""`, and only the two spike tools allowed. Its initialization
+record lists exactly `mcp__spike__part_get` and `mcp__spike__part_screenshot` and
+marks the fixture server connected. A real token-less `curl` POST returned
+**HTTP 401** with `WWW-Authenticate: Bearer resource_metadata=...`; the server
+logged `event="http.request" route_class="mcp" status=401`. The five rmcp spike
+tests also passed independently. Both fixture listeners were stopped afterward.
+
+The new Claude inference attempt hit the account's weekly quota (HTTP 429)
+before any tool call. It is recorded as discovery-only, with no claim that this
+attempt called the tools. The original calls above were independently verified
+against the actual Claude Code session records, rather than inferred from its
+final answer:
+
+- Session `2d5e4896-e385-44fd-80b4-2184ca203f3f`, physical lines 43–48,
+  2026-10-24 22:07:29–30 UTC, records version 2.1.310 and paired tool calls/results:
+  `part_get demo` returns version 3, `part_get missing` returns an error, and
+  `part_screenshot demo` at 400×300 returns an image plus `{"result":247116}`.
+- Session `f139efcc-dcf9-456d-80c3-1211a672a271`, lines 37–38,
+  2026-10-24 22:09:45 UTC, records the 800×410 image and `{"result":661493}`.
+
+Retained evidence: `target/gate-evidence/spikes/quietcove-20261025/` contains
+`original-claude-calls.json` (sanitized original records, source SHA-256 hashes,
+line numbers, timestamps and image hashes), `claude-mcp.jsonl` (the new attempt),
+`curl-unauthenticated.txt`, its exact command, server logs, `tests.log` and
+`versions.json`. The fixture uses only `Bearer test`; no production token or
+session was used. Green CI on `main` remains required before closing the bead.
+
 ## Findings and risks
 
 - **rmcp moves fast.** It went from 3.3 to 3.7 in six weeks (2026-09-10 to 2026-10-22), and patch releases change stateless behaviour, e.g. 3.6.0 "answer a session-less non-initialize POST with 400" and "reject requests to 2026-07-28 clients". Pin exactly (`=3.7.0`), and let the conformance suite in pf-7qza gate every upgrade.

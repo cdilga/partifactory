@@ -61,6 +61,35 @@ stderr: {"level":"INFO","event":"build.child","outcome":"ok","build_ms":14,...}
 - `bundle_resolves_virtual_react_once`: five files, four importing `react`, give an import map of exactly `react`, `react-dom/client`, `react/jsx-runtime`. Every bare specifier in the bundle is a map key, React's source is never inlined, TS is stripped and the JSX goes through `react/jsx-runtime`.
 - `compile_error_is_failed_not_crash`: an unresolvable import → `Failed{code:"compile_error"}`.
 
+## Independent verification (2026-10-25)
+
+A second agent, QuietCove, built the native examples with Rust/Cargo 1.97.1 and
+reran the compiler from the repository root:
+
+```sh
+python3 scripts/install-spike-esbuild.py target/spike-tools/esbuild
+CARGO_INCREMENTAL=0 cargo build -j2 --manifest-path spikes/Cargo.toml --target-dir target -p spike-compiler -p spike-ui
+PF_ESBUILD="$PWD/target/spike-tools/esbuild" target/debug/spike-compiler examples/app.tsx
+```
+
+The checksummed esbuild 0.28.2 produced **1,017 bytes of minified ESM in 15 ms**.
+The import map contained exactly `react`, `react-dom/client` and
+`react/jsx-runtime`, pointing to the pinned 18.3.1 mirror paths. The captured log
+contains `event="build.child" outcome="ok" build_ms=15`.
+
+The independent test run used `CARGO_INCREMENTAL=0`, `PF_ESBUILD` as above and
+`cargo test -j2 --manifest-path spikes/Cargo.toml --target-dir target -p spike-compiler -p spike-mcp -p spike-ui`:
+**11 tests passed**, including all five compiler tests and their captured
+`timeout` / `builder_crashed` log assertions. Running the bundling test with
+esbuild absent now fails with exit 101 instead of silently succeeding (pf-z18,
+fix `dd13156`). CI installs the same version using the platform binary SHA-256
+pins in `scripts/install-spike-esbuild.py`; `ci/spikes.sh` requires version 0.28.2.
+
+Retained evidence: `target/gate-evidence/spikes/quietcove-20261025/` contains
+`versions.json`, `build.log`, `compiler-bundle.txt`, `compiler.jsonl`, `tests.log`
+and `missing-esbuild-negative.txt`. This observation does not replace the
+required green CI run on `main`.
+
 ## Measurements (esbuild backend, `spike-compiler bench`, n = 30, debug build of the parent/worker)
 
 ```
