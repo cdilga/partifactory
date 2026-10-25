@@ -49,8 +49,8 @@ fi
 mount --bind /proc/sys/net /proc/sys/net
 mount -o remount,bind,rw /proc/sys/net
 # Nested overlay upper directories on ZFS can block in kernel writeback. Keep
-# image/root layers in bounded tmpfs; named volumes (including BuildKit's cache)
-# stay on this job's disk-backed checkout volume.
+# image/root layers in bounded tmpfs; ordinary named volumes stay on this job's
+# disk-backed checkout. The OCI helper explicitly bounds its own tmpfs cache.
 data_root="$PWD/target/ci-docker"
 volume_root="$PWD/target/ci-docker-volumes"
 mkdir -p "$data_root" "$volume_root"

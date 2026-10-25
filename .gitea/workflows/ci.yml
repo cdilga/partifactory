@@ -123,7 +123,7 @@ jobs:
       # act_runner deliberately overrides --privileged with its host policy. Grant the
       # capabilities needed by this job's private daemon explicitly instead.
       # SYS_PTRACE lets dockerd bind /proc/<non-root child>/ns/net during bridge setup.
-      # The 16 GiB job holds an 8 GiB image store and a bounded 6 GiB build worker.
+      # The 16 GiB job bounds the image store and nested build workers together.
       options: --cap-add=SYS_ADMIN --cap-add=NET_ADMIN --cap-add=SYS_RESOURCE --cap-add=SYS_PTRACE --security-opt=seccomp=unconfined --security-opt=apparmor=unconfined --memory=16g --memory-swap=16g
     env:
       DOCKER_HOST: unix:///var/run/pf-ci-docker.sock
