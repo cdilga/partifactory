@@ -16,11 +16,14 @@ use spike_mcp::{PartGet, PartMeta, Wrapped};
 use tracing::instrument::WithSubscriber;
 
 async fn spawn() -> String {
+    spawn_with_dispatch(tracing::dispatcher::get_default(Clone::clone)).await
+}
+
+async fn spawn_with_dispatch(dispatch: tracing::Dispatch) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     // Hyper spawns connection tasks; a thread-local default at the test boundary does not
     // follow those tasks. Bind each request future to this test's dispatch explicitly.
-    let dispatch = tracing::dispatcher::get_default(Clone::clone);
     let app = spike_mcp::app().layer(axum::middleware::from_fn(
         move |request: axum::extract::Request, next: axum::middleware::Next| {
             next.run(request).with_subscriber(dispatch.clone())
@@ -147,9 +150,7 @@ async fn missing_token_is_http_401_not_tool_result() {
         .flatten_event(true)
         .with_writer(move || w.clone())
         .finish();
-    let _g = tracing::subscriber::set_default(sub);
-
-    let url = spawn().await;
+    let url = spawn_with_dispatch(tracing::Dispatch::new(sub)).await;
     let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"_meta":meta(),"name":"part_get","arguments":{"name":"demo"}}});
     for auth in [None, Some("Bearer wrong")] {
         let mut req = reqwest::Client::new()
