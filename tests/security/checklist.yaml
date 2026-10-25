@@ -1,0 +1,1020 @@
+{
+  "schema": 1,
+  "source": "PLAN.md \u00a77",
+  "checks": [
+    {
+      "id": "SEC-001",
+      "requirement": "Every part document response carries the canonical CSP (\u00a72), including `sandbox` without `allow-same-origin`. Only `unsandboxed` parts lack it, and the admin page lists them.",
+      "components": [
+        {
+          "kind": "external",
+          "probe": "canonical_csp",
+          "proves": "Canonical sandboxed document CSP byte-for-byte."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-parthost/tests/listener.rs",
+          "test": "listener_security_headers_hot_path_and_blob_classification",
+          "proves": "Unsandboxed policy exception in listener."
+        },
+        {
+          "kind": "pending",
+          "owner": "pf-5cyr",
+          "proves": "The unsandboxed-parts admin inventory is outside the Slice 1 workspace."
+        }
+      ]
+    },
+    {
+      "id": "SEC-002",
+      "requirement": "Part hosts never emit `Set-Cookie`. A request carrying an old `__Host-pf_cap` cookie is treated exactly like one without. In the e2e suite on Chromium, WebKit and Gecko, `document.cookie` and `cookieStore.set` writes from a part have no effect, and `localStorage` is the shim.",
+      "components": [
+        {
+          "kind": "external",
+          "probe": "no_part_cookies",
+          "proves": "No Set-Cookie and obsolete cap cookie has no effect."
+        },
+        {
+          "kind": "playwright",
+          "file": "tests/security/sandbox_cookies.spec.ts",
+          "test": "SEC sandbox cookie writes are inert and Lax sibling canaries receive no cookies",
+          "proves": "Real opaque sandbox GET/POST reaches sibling canary without Lax cookie; workspace GET/POST blocked by observed connect-src violations.",
+          "projects": [
+            "chromium-desktop",
+            "chromium-mobile",
+            "webkit-mobile",
+            "firefox-desktop"
+          ],
+          "report_file": "tests/e2e/security.spec.ts"
+        }
+      ]
+    },
+    {
+      "id": "SEC-003",
+      "requirement": "A part's fetch/POST toward another `<domain>` service, or toward the workspace, carries no `SameSite=Lax` cookies (tested against a canary service).",
+      "components": [
+        {
+          "kind": "playwright",
+          "file": "tests/security/sandbox_cookies.spec.ts",
+          "test": "SEC sandbox cookie writes are inert and Lax sibling canaries receive no cookies",
+          "proves": "Real opaque sandbox GET/POST reaches sibling canary without Lax cookie; workspace GET/POST blocked by observed connect-src violations.",
+          "projects": [
+            "chromium-desktop",
+            "chromium-mobile",
+            "webkit-mobile",
+            "firefox-desktop"
+          ],
+          "report_file": "tests/e2e/security.spec.ts"
+        }
+      ]
+    },
+    {
+      "id": "SEC-004",
+      "requirement": "`/_rt/v1` rejects a missing cap, a cap bound to another host, an expired window, a stale epoch, and any non-null `Origin` (other than the part's own for `unsandboxed`). A sibling part's page can't read or write another part's data. No `OPTIONS` preflight is ever needed.",
+      "components": [
+        {
+          "kind": "native",
+          "file": "crates/pf-parthost/tests/listener.rs",
+          "test": "runtime_origin_storage_quota_and_boot_invalidation",
+          "proves": "Runtime foreign origins and stale boot cap fail closed."
+        },
+        {
+          "kind": "external",
+          "probe": "runtime_origin",
+          "proves": "Real ingress rejects non-null origin for an otherwise valid cap."
+        },
+        {
+          "kind": "playwright",
+          "file": "tests/e2e/part-host.spec.ts",
+          "test": "localStorage persists a write followed by immediate page close without preflight",
+          "proves": "Storage flush survives close; no preflight.",
+          "projects": [
+            "chromium-desktop",
+            "chromium-mobile",
+            "webkit-mobile",
+            "firefox-desktop"
+          ]
+        },
+        {
+          "kind": "external",
+          "probe": "cap_rejection",
+          "proves": "Bad-MAC and foreign-host cap return404."
+        }
+      ]
+    },
+    {
+      "id": "SEC-005",
+      "requirement": "Part responses to `Origin: null` carry `Access-Control-Allow-Origin: null` and never `Access-Control-Allow-Credentials` or `Cross-Origin-Resource-Policy`. The workspace host never emits `Access-Control-Allow-Origin: null`.",
+      "components": [
+        {
+          "kind": "external",
+          "probe": "null_cors",
+          "proves": "Part null CORS has no credentials/CORP; workspace never allows null."
+        }
+      ]
+    },
+    {
+      "id": "SEC-006",
+      "requirement": "Caps are host-bound (a cap for A is rejected on B), deterministic within a window, and dead after an epoch bump, a boot-epoch bump or an import. An unknown `kid` or bad MAC \u2192 404.",
+      "components": [
+        {
+          "kind": "native",
+          "file": "crates/pf-caps/src/tests.rs",
+          "test": "host_bound",
+          "proves": "Capability host/window/epoch/MAC invariant: host_bound"
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-caps/src/tests.rs",
+          "test": "deterministic",
+          "proves": "Capability host/window/epoch/MAC invariant: deterministic"
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-caps/src/tests.rs",
+          "test": "epoch_rejection",
+          "proves": "Capability host/window/epoch/MAC invariant: epoch_rejection"
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-caps/src/tests.rs",
+          "test": "tamper",
+          "proves": "Capability host/window/epoch/MAC invariant: tamper"
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-caps/src/tests.rs",
+          "test": "kid_rotation_25h",
+          "proves": "Capability host/window/epoch/MAC invariant: kid_rotation_25h"
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-caps/src/tests.rs",
+          "test": "epochs_load_from_db_and_boot_bumps",
+          "proves": "Capability host/window/epoch/MAC invariant: epochs_load_from_db_and_boot_bumps"
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-backup/tests/recovery.rs",
+          "test": "pre_export_caps_die_and_fresh_caps_verify",
+          "proves": "Import invalidates old caps."
+        },
+        {
+          "kind": "external",
+          "probe": "cap_rejection",
+          "proves": "Bad-MAC and foreign-host cap rejection through ingress."
+        }
+      ]
+    },
+    {
+      "id": "SEC-007",
+      "requirement": "`/grant` can't redirect off the part's own host (fuzzed), and in `wrap` mode the cap appears only in the fragment. Without a session, `/grant` \u2192 sign-in, never content.",
+      "components": [
+        {
+          "kind": "external",
+          "probe": "grant_redirects",
+          "proves": "Fuzz part/path/return_to/redirect_uri and unauthenticated sign-in; session input also observes fragment-only wrap."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-auth/src/tests.rs",
+          "test": "paths_and_cookie_are_unambiguous",
+          "proves": "Grant path and cookie parsing."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-auth/src/tests.rs",
+          "test": "grant_hosts_are_derived_and_signout_revokes_caps_immediately",
+          "proves": "Grant host derived from configured part origin."
+        }
+      ]
+    },
+    {
+      "id": "SEC-008",
+      "requirement": "**The wrapper**: the part host root is served without `sandbox` but with its own strict CSP (scripts only from the shared blob host, `connect-src` only the workspace, `frame-src 'self'`, `frame-ancestors` from config). It never sets a cookie, removes `#pf=` before any other script runs, and holds only its own part's cap. Content framed inside it can't read it (opaque origin: a test script in the part tries `parent.document` and `parent.sessionStorage` and fails).",
+      "components": [
+        {
+          "kind": "external",
+          "probe": "wrapper_headers",
+          "proves": "Strict wrapper CSP, no Set-Cookie or cap in HTML."
+        },
+        {
+          "kind": "playwright",
+          "file": "tests/security/sandbox_cookies.spec.ts",
+          "test": "SEC sandbox cookie writes are inert and Lax sibling canaries receive no cookies",
+          "proves": "Cookie writes are inert, localStorage shim works, parent is opaque and real sibling GET/POST receive no Lax cookie.",
+          "projects": [
+            "chromium-desktop",
+            "chromium-mobile",
+            "webkit-mobile",
+            "firefox-desktop"
+          ],
+          "report_file": "tests/e2e/security.spec.ts"
+        },
+        {
+          "kind": "playwright",
+          "file": "tests/e2e/wrapper_first_open.spec.ts",
+          "test": "gallery opens the trusted wrapper in one click, hides its cap, preserves fragments and reloads without a grant",
+          "proves": "Wrapper fragment scrub, own cap and opaque child cannot read parent.",
+          "projects": [
+            "chromium-desktop",
+            "webkit-mobile"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "SEC-009",
+      "requirement": "**Chrome-API CORS**: `Access-Control-Allow-Origin` + `Allow-Credentials` are sent only for an active, sandboxed part's own host, and only on that part's chrome routes. `Origin: null`, a sibling part's origin, an unsandboxed part's origin, `blobs-part`, an old redirecting name and any other origin get no CORS headers (fuzzed). Writes need `Sec-Fetch-Site: same-site`.",
+      "components": [
+        {
+          "kind": "external",
+          "probe": "chrome_cors",
+          "proves": "Origin fuzz and Fetch Metadata mutations through ingress."
+        },
+        {
+          "kind": "playwright",
+          "file": "tests/e2e/wrapper_first_open.spec.ts",
+          "test": "live chrome CORS fuzz and JSON mutation requirements",
+          "proves": "Active own host allowed; null/sibling/blob/renamed/lookalike denied.",
+          "projects": [
+            "chromium-desktop"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "SEC-010",
+      "requirement": "`Referrer-Policy: no-referrer` on every part response. Logs never contain `/c/<cap>/` segments (canary test).",
+      "components": [
+        {
+          "kind": "external",
+          "probe": "no_referrer",
+          "proves": "Part wrapper/content no-referrer headers."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-serve/tests/ingress_contract.rs",
+          "test": "caps_and_tokens_never_in_access_line",
+          "proves": "Access line cap/token canaries redacted."
+        },
+        {
+          "kind": "external",
+          "probe": "redaction_canaries",
+          "proves": "Real ingress canaries absent from supplied log/metrics/Insights sinks."
+        }
+      ]
+    },
+    {
+      "id": "SEC-011",
+      "requirement": "Part blobs always carry `Cache-Control: private` and the shared blob host serves only hashes in `shared_blobs`. *(adapter)* Private part blobs are never in Cloudflare's cache (`cf-cache-status` \u2260 `HIT`).",
+      "components": [
+        {
+          "kind": "native",
+          "file": "crates/pf-parthost/tests/listener.rs",
+          "test": "listener_security_headers_hot_path_and_blob_classification",
+          "proves": "Private blobs and shared hash allowlist."
+        },
+        {
+          "kind": "pending",
+          "owner": "pf-5cyr",
+          "proves": "Cloudflare private cache adapter clause; portability/adapters follow Slice 1."
+        }
+      ]
+    },
+    {
+      "id": "SEC-012",
+      "requirement": "Shared blobs carry `public, max-age=31536000, immutable` and never `Set-Cookie`. *(adapter)* A shared blob on `blobs-part/b/<hash>` shows `cf-cache-status: HIT` on the second fetch (the cache rule works).",
+      "components": [
+        {
+          "kind": "native",
+          "file": "crates/pf-parthost/tests/listener.rs",
+          "test": "listener_security_headers_hot_path_and_blob_classification",
+          "proves": "Shared hash immutable policy and no cookies."
+        },
+        {
+          "kind": "pending",
+          "owner": "pf-5cyr",
+          "proves": "Cloudflare repeated-fetch HIT adapter clause."
+        }
+      ]
+    },
+    {
+      "id": "SEC-013",
+      "requirement": "A part host root fetched by a signed-out client returns the content-free card (or the public card while a public link is active) and no part bytes. Bot and browser User-Agents get byte-identical responses for the root and `/l/`. Neither page's HTML contains a cap or a hop-target URL.",
+      "components": [
+        {
+          "kind": "external",
+          "probe": "signed_out_cards",
+          "proves": "Signed-out root and optional public-link bot/browser parity; no cap/hop."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-parthost/tests/public_links.rs",
+          "test": "public_get_is_content_free_ua_identical_and_counted_only_on_go",
+          "proves": "Public /l/ HTML bot/browser equality and no content."
+        }
+      ]
+    },
+    {
+      "id": "SEC-014",
+      "requirement": "`/p/<name>` on the workspace only redirects to the part host, and reveals nothing else.",
+      "components": [
+        {
+          "kind": "external",
+          "probe": "workspace_redirect",
+          "proves": "Workspace /p/name redirects only to part host."
+        }
+      ]
+    },
+    {
+      "id": "SEC-015",
+      "requirement": "A private card's input struct has no part-derived field (unit test).",
+      "components": [
+        {
+          "kind": "native",
+          "file": "crates/pf-serve/src/og.rs",
+          "test": "cards_are_static_1200_by_630_pngs_and_audience_only",
+          "proves": "Card enum has audience-only static PNGs and no part-derived input."
+        }
+      ]
+    },
+    {
+      "id": "SEC-016",
+      "requirement": "Only the admin's session can create a public link. No agent scope, token or op can (tested on every surface). A revoked public link \u2192 404 within seconds. The kill switch revokes all.",
+      "components": [
+        {
+          "kind": "native",
+          "file": "crates/pf-links/tests/lifecycle.rs",
+          "test": "http_admin_stepup_origin_and_bearer_wall",
+          "proves": "Public link requires pinned admin session and fresh step-up."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-links/tests/lifecycle.rs",
+          "test": "expires_requires_live_and_kill_switch_audits_each_link",
+          "proves": "Revoke/expiry and kill switch."
+        },
+        {
+          "kind": "native",
+          "file": "tests/agent_surfaces/run.rs",
+          "test": "four_drivers_times_personal_and_device_tokens",
+          "proves": "All four agent surfaces with PAT/device cannot create outward-sharing state."
+        },
+        {
+          "kind": "playwright",
+          "file": "tests/e2e/share_sheet_contribute.spec.ts",
+          "test": "native admin share, mobile guest paint, freeze, undo and revoke",
+          "proves": "Real native passkey, WebKit guest, revoke404.",
+          "projects": [
+            "chromium-desktop"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "SEC-017",
+      "requirement": "Only the admin's pinned subject reaches admin. An IdP-admin user still gets 403. An admin action without a fresh (10 min) partifactory passkey assertion \u2192 `step_up_required`. Household sharing never asks.",
+      "components": [
+        {
+          "kind": "native",
+          "file": "crates/pf-auth/src/tests.rs",
+          "test": "admin_pin_is_immutable_subject_and_break_glass_is_single_use",
+          "proves": "Only immutable pinned subject is admin."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-links/tests/lifecycle.rs",
+          "test": "http_admin_stepup_origin_and_bearer_wall",
+          "proves": "Member and bearer rejected, pinned admin requires fresh10-minute step-up."
+        },
+        {
+          "kind": "playwright",
+          "file": "tests/e2e/share_sheet_contribute.spec.ts",
+          "test": "native admin share, mobile guest paint, freeze, undo and revoke",
+          "proves": "Real virtual passkey required for admin link creation.",
+          "projects": [
+            "chromium-desktop"
+          ]
+        },
+        {
+          "kind": "pending",
+          "owner": "pf-lsdg",
+          "proves": "Household-sharing op and its no-step-up rule are outside Slice 1."
+        }
+      ]
+    },
+    {
+      "id": "SEC-018",
+      "requirement": "*(adapter)* The Authentik provisioner gets 403 from the IdP on a non-`pf-*` group, and the core refuses before calling. Gate results are recorded: no non-`pf-*` membership, no `is_superuser` groups, no flow or stage edits, no privileged parent groups.",
+      "components": [
+        {
+          "kind": "pending",
+          "owner": "pf-1d8c",
+          "proves": "Authentik provisioner is absent from Slice1; all adapter restrictions owned by P2b."
+        }
+      ]
+    },
+    {
+      "id": "SEC-019",
+      "requirement": "With the IdP down, `/readyz` stays 200, existing sessions work, and no epoch is bumped. A refresh that returns `invalid_grant` ends that session.",
+      "components": [
+        {
+          "kind": "native",
+          "file": "crates/pf-auth/tests/no_network.rs",
+          "test": "failed_refresh_keeps_last_membership",
+          "proves": "IdP outage preserves session and membership."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-auth/tests/no_network.rs",
+          "test": "invalid_grant_fails_closed",
+          "proves": "invalid_grant ends session."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-serve/tests/ingress_contract.rs",
+          "test": "readyz_on_ops",
+          "proves": "Ops readiness is independent of IdP."
+        }
+      ]
+    },
+    {
+      "id": "SEC-020",
+      "requirement": "Local accounts: passkey-only (no password path exists), a recovery link revokes the old passkeys, and an invite token beyond its use count is refused.",
+      "components": [
+        {
+          "kind": "pending",
+          "owner": "pf-1d8c",
+          "proves": "Native local accounts/recovery/invites are P2b, not Slice1."
+        }
+      ]
+    },
+    {
+      "id": "SEC-021",
+      "requirement": "Agent tokens: audience-bound to the workspace origin (rejected on part hosts and on `/oauth/*`), scope- and space-limited, no admin scopes obtainable, refresh reuse \u2192 the whole token family is revoked.",
+      "components": [
+        {
+          "kind": "native",
+          "file": "crates/pf-oauth/src/tests.rs",
+          "test": "tokens_and_codes_have_required_entropy_format_and_scope_boundaries",
+          "proves": "Audience, scopes and token formats."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-oauth/src/tests.rs",
+          "test": "consent_cannot_widen_scopes_or_cross_personal_spaces",
+          "proves": "Consent scope/space boundary."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-oauth/src/tests.rs",
+          "test": "refresh_rotates_and_reuse_commits_family_revocation_and_epoch",
+          "proves": "Family cascade and epoch on refresh reuse."
+        },
+        {
+          "kind": "playwright",
+          "file": "tests/e2e/device_grant.spec.ts",
+          "test": "real sign-in consents device and personal agent tokens, refresh reuse and revoke fail closed",
+          "proves": "Real OIDC sign-in, device/PAT consent and token revocation.",
+          "projects": [
+            "chromium-desktop",
+            "webkit-mobile"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "SEC-022",
+      "requirement": "An agent without `share:household` can't grant. With it, it can grant only to existing people and groups, only within its spaces, and every such grant is labelled and listed in the share sheet and activity feed.",
+      "components": [
+        {
+          "kind": "pending",
+          "owner": "pf-lsdg",
+          "proves": "share:household and agent grant operation do not ship in Slice1."
+        }
+      ]
+    },
+    {
+      "id": "SEC-023",
+      "requirement": "No agent scope, token or op can make a public link, an invite, a group, an `everyone-signed-in` grant or a LAN allowlist entry, on any surface. `part_link_for` returns a link that grants nothing by itself: opened by someone without the right, it shows the normal 403. There is no request table for an agent to write to (schema test).",
+      "components": [
+        {
+          "kind": "native",
+          "file": "tests/agent_surfaces/run.rs",
+          "test": "four_drivers_times_personal_and_device_tokens",
+          "proves": "Four surfaces cannot write outward sharing; link_for yields navigation only."
+        },
+        {
+          "kind": "external",
+          "probe": "schema_boundaries",
+          "proves": "No agent request table in deployed database."
+        },
+        {
+          "kind": "playwright",
+          "file": "tests/e2e/wrapper_first_open.spec.ts",
+          "test": "an unshared private part reveals no title and offers another sign-in",
+          "proves": "Unshared navigation remains403.",
+          "projects": [
+            "chromium-desktop",
+            "webkit-mobile"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "SEC-024",
+      "requirement": "Unconsented OAuth clients can do nothing. Registration is rate-limited. A CIMD URL resolving to a private address is refused. The consent sheet shows the redirect host.",
+      "components": [
+        {
+          "kind": "pending",
+          "owner": "pf-lsdg",
+          "proves": "OAuth authorization code, registration and CIMD are deferred; no endpoints advertised now."
+        }
+      ]
+    },
+    {
+      "id": "SEC-025",
+      "requirement": "Device codes: single use, 10-minute expiry, `slow_down` enforced, manual entry limited to 5 per minute; the stale and different-network banners appear when they should.",
+      "components": [
+        {
+          "kind": "native",
+          "file": "crates/pf-oauth/src/tests.rs",
+          "test": "device_polling_rate_side_effects_commit_and_codes_are_single_use",
+          "proves": "Single use,10-minute expiry,slow_down and poll limits."
+        },
+        {
+          "kind": "playwright",
+          "file": "tests/e2e/device_grant.spec.ts",
+          "test": "real sign-in consents device and personal agent tokens, refresh reuse and revoke fail closed",
+          "proves": "Real OIDC sign-in, device/PAT consent and token revocation.",
+          "projects": [
+            "chromium-desktop",
+            "webkit-mobile"
+          ]
+        },
+        {
+          "kind": "playwright",
+          "file": "tests/security/sandbox_cookies.spec.ts",
+          "report_file": "tests/e2e/security.spec.ts",
+          "test": "SEC device consent warns for stale different-network requests and limits manual lookup",
+          "proves": "Real elapsed stale warning, trusted ingress source-network comparison and sixth manual lookup slow_down.",
+          "projects": [
+            "chromium-desktop"
+          ]
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-oauth/src/tests.rs",
+          "test": "device_network_comparison_is_coarse_private_and_unknown_after_restart",
+          "proves": "Coarse IPv4/IPv6 comparison, missing addresses and reboot become unknown; no raw address inventory."
+        }
+      ]
+    },
+    {
+      "id": "SEC-026",
+      "requirement": "A `pf_pat_` token is redacted in logs, scope- and space-limited like OAuth tokens, and revoked by the same cascade.",
+      "components": [
+        {
+          "kind": "native",
+          "file": "crates/pf-oauth/src/tests.rs",
+          "test": "personal_tokens_resolve_scopes_and_revocation_is_immediate",
+          "proves": "PAT scopes/spaces/revoke cascade."
+        },
+        {
+          "kind": "external",
+          "probe": "redaction_canaries",
+          "proves": "PAT redacted in live logs."
+        },
+        {
+          "kind": "playwright",
+          "file": "tests/e2e/device_grant.spec.ts",
+          "test": "real sign-in consents device and personal agent tokens, refresh reuse and revoke fail closed",
+          "proves": "Real OIDC sign-in, device/PAT consent and token revocation.",
+          "projects": [
+            "chromium-desktop",
+            "webkit-mobile"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "SEC-027",
+      "requirement": "Authentication failures are HTTP 401 with `WWW-Authenticate` on `/mcp` and `/api`, never a tool result.",
+      "components": [
+        {
+          "kind": "external",
+          "probe": "authentication_boundary",
+          "proves": "Missing/bad HTTP+MCP auth is HTTP401 with WWW-Authenticate."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-mcp/tests/protocol.rs",
+          "test": "auth_is_http_401_and_revocation_is_immediate",
+          "proves": "MCP auth fails before tool dispatch."
+        }
+      ]
+    },
+    {
+      "id": "SEC-028",
+      "requirement": "Discovery documents are reachable unauthenticated and contain no site secrets or user data.",
+      "components": [
+        {
+          "kind": "external",
+          "probe": "discovery",
+          "proves": "Public discovery contains no concrete token, session cookie or supplied secret."
+        }
+      ]
+    },
+    {
+      "id": "SEC-029",
+      "requirement": "A guest cap calling any non-data `/_rt` op (`comments.*`, `artifact.publish`, `assets.put`, `user`, `errors.report`, `refresh`) gets `403`, and so does any `/api` or `/mcp` request from a guest's context (they hold no token).",
+      "components": [
+        {
+          "kind": "playwright",
+          "file": "tests/security/sandbox_cookies.spec.ts",
+          "report_file": "tests/e2e/security.spec.ts",
+          "test": "SEC real guest non-data wall view-only writes forged and replayed guest ids",
+          "proves": "Real guest op matrix and API/MCP wall; view-only data-write refusal; forged/replayed guest claim MAC rejection; no history/source/share UI.",
+          "projects": [
+            "chromium-desktop"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "SEC-030",
+      "requirement": "A Can-view link's cap can't write shared data. A forged or replayed guest id (`g`) fails the cap's MAC.",
+      "components": [
+        {
+          "kind": "playwright",
+          "file": "tests/security/sandbox_cookies.spec.ts",
+          "report_file": "tests/e2e/security.spec.ts",
+          "test": "SEC real guest non-data wall view-only writes forged and replayed guest ids",
+          "proves": "Real guest op matrix and API/MCP wall; view-only data-write refusal; forged/replayed guest claim MAC rejection; no history/source/share UI.",
+          "projects": [
+            "chromium-desktop"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "SEC-031",
+      "requirement": "Guest writes past the per-guest or per-IP limit get `429`; past the part's shared-data cap, `quota_exceeded`. After **Freeze**, an open guest tab can't write on its next request.",
+      "components": [
+        {
+          "kind": "playwright",
+          "file": "tests/e2e/share_sheet_contribute.spec.ts",
+          "test": "native admin share, mobile guest paint, freeze, undo and revoke",
+          "proves": "Real guest burst429 with retry, open tab freeze and revoke.",
+          "projects": [
+            "chromium-desktop"
+          ]
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-parthost/tests/listener.rs",
+          "test": "runtime_origin_storage_quota_and_boot_invalidation",
+          "proves": "Shared storage quota rollback."
+        }
+      ]
+    },
+    {
+      "id": "SEC-032",
+      "requirement": "Guests never see history, source or the share sheet.",
+      "components": [
+        {
+          "kind": "playwright",
+          "file": "tests/security/sandbox_cookies.spec.ts",
+          "report_file": "tests/e2e/security.spec.ts",
+          "test": "SEC real guest non-data wall view-only writes forged and replayed guest ids",
+          "proves": "Real guest op matrix and API/MCP wall; view-only data-write refusal; forged/replayed guest claim MAC rejection; no history/source/share UI.",
+          "projects": [
+            "chromium-desktop"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "SEC-033",
+      "requirement": "**Container escape attempts** from a hostile test image fail: mounts, `unshare`, raw sockets, kernel modules, writes to the root filesystem, setuid binaries (`no-new-privileges`), host paths, the Engine API socket. A fork bomb hits the pids limit and a memory blow-up kills only that container.",
+      "components": [
+        {
+          "kind": "pending",
+          "owner": "pf-q8yu",
+          "proves": "Backend/runner/build/secrets/Docker+Podman clause; no backend runner ships in Slice1."
+        }
+      ]
+    },
+    {
+      "id": "SEC-034",
+      "requirement": "**LAN reachability from a backend must fail**: every RFC 1918, CGNAT, link-local and ULA range, the household's real subnets (from site config), the host's addresses, `169.254.169.254` and every other part's network. An allowlisted entry is reachable and nothing else is. Denied attempts are counted. The same holds during a BuildKit build.",
+      "components": [
+        {
+          "kind": "pending",
+          "owner": "pf-q8yu",
+          "proves": "Backend/runner/build/secrets/Docker+Podman clause; no backend runner ships in Slice1."
+        }
+      ]
+    },
+    {
+      "id": "SEC-035",
+      "requirement": "**Egress is on by default**: a request to a public canary succeeds from a backend and from a build.",
+      "components": [
+        {
+          "kind": "pending",
+          "owner": "pf-q8yu",
+          "proves": "Backend/runner/build/secrets/Docker+Podman clause; no backend runner ships in Slice1."
+        }
+      ]
+    },
+    {
+      "id": "SEC-036",
+      "requirement": "**Identity-header forgery**: a request carrying its own `X-PF-Identity` or any `X-PF-*` header reaches the backend with them replaced; a JWT signed with another part's key is rejected by the example backend; a request without a valid cap never reaches a backend. Backends never see a `Cookie`, a cap or a `pf_` token (canary).",
+      "components": [
+        {
+          "kind": "pending",
+          "owner": "pf-q8yu",
+          "proves": "Backend/runner/build/secrets/Docker+Podman clause; no backend runner ships in Slice1."
+        }
+      ]
+    },
+    {
+      "id": "SEC-037",
+      "requirement": "The compose parser refuses every unsupported key, an image from a registry outside the allowlist fails with `image_not_allowed`, and the runner refuses any request outside its template.",
+      "components": [
+        {
+          "kind": "pending",
+          "owner": "pf-q8yu",
+          "proves": "Backend/runner/build/secrets/Docker+Podman clause; no backend runner ships in Slice1."
+        }
+      ]
+    },
+    {
+      "id": "SEC-038",
+      "requirement": "**Secrets are write-only**: no op, surface or screen returns a value, including to the agent that set it; values never appear in versions, exports (without `--include-secrets --encrypt`), logs, traces or Insights (canary).",
+      "components": [
+        {
+          "kind": "pending",
+          "owner": "pf-q8yu",
+          "proves": "Backend/runner/build/secrets/Docker+Podman clause; no backend runner ships in Slice1."
+        }
+      ]
+    },
+    {
+      "id": "SEC-039",
+      "requirement": "Every line runs on Docker and on Podman.",
+      "components": [
+        {
+          "kind": "pending",
+          "owner": "pf-q8yu",
+          "proves": "Backend/runner/build/secrets/Docker+Podman clause; no backend runner ships in Slice1."
+        }
+      ]
+    },
+    {
+      "id": "SEC-040",
+      "requirement": "An advisory DB more than 7 days stale turns Health amber, and a build with the DB stale or missing still succeeds (fail open).",
+      "components": [
+        {
+          "kind": "pending",
+          "owner": "pf-3wue",
+          "proves": "Advisory database/sync/automatic update features are absent from Slice1."
+        }
+      ]
+    },
+    {
+      "id": "SEC-041",
+      "requirement": "With `source = \"osv-api\"`, the outbound requests carry only ecosystem, package name and version, never part content, names, titles or URLs (canary test). With the default `osv-bulk`, nothing about parts leaves the box.",
+      "components": [
+        {
+          "kind": "pending",
+          "owner": "pf-3wue",
+          "proves": "Advisory database/sync/automatic update features are absent from Slice1."
+        }
+      ]
+    },
+    {
+      "id": "SEC-042",
+      "requirement": "An advisory sync or match never changes a live part's import map or image digest; only `part_edit {update}`, Update libraries or opt-in auto-update makes a new version, and auto-update is recorded as `system`.",
+      "components": [
+        {
+          "kind": "pending",
+          "owner": "pf-3wue",
+          "proves": "Advisory database/sync/automatic update features are absent from Slice1."
+        }
+      ]
+    },
+    {
+      "id": "SEC-043",
+      "requirement": "The renderer has no route off the internal Docker network (an egress canary to an external host fails). Renderer caps can't persist `/_rt` writes, including during a preview recording.",
+      "components": [
+        {
+          "kind": "script",
+          "file": "tests/render/isolation.py",
+          "test": "renderer_isolation",
+          "source_anchor": "render can reach forbidden canary",
+          "proves": "Actual renderer socket canaries cannot reach public/LAN; only internal render network."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-parthost/tests/data.rs",
+          "test": "render_overlay_is_scoped_discarded_and_never_emits_data_events",
+          "proves": "Renderer write overlay discarded, no data/SSE mutation."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-parthost/tests/data.rs",
+          "test": "render_cap_never_writes",
+          "proves": "Property-based renderer writes never persist."
+        }
+      ]
+    },
+    {
+      "id": "SEC-044",
+      "requirement": "A private part's root never carries `og:video` or a content poster. `/og/<hash>` on a part host answers only while that part has an active public link with that preview on: otherwise, and at once after revoke, it's a 404 byte-identical to an unknown path. A link set to `card` never gets a preview. An agent-supplied MP4 with an audio track or a codec other than H.264 fails its build with `preview_invalid`. The gallery's clip endpoint refuses a viewer who can't open the part.",
+      "components": [
+        {
+          "kind": "external",
+          "probe": "signed_out_cards",
+          "proves": "Private root has no og:video and static audience card only."
+        },
+        {
+          "kind": "pending",
+          "owner": "pf-5cyr",
+          "proves": "Public poster/video previews, MP4 codecs and gallery clip endpoint are absent from Slice1."
+        }
+      ]
+    },
+    {
+      "id": "SEC-045",
+      "requirement": "The origin is reachable only through the configured ingress (a direct connection to the listeners from outside fails). `:9090` is never routed. A client-IP header from an address outside `trusted_proxies` is ignored.",
+      "components": [
+        {
+          "kind": "external",
+          "probe": "ingress_metrics",
+          "proves": "Public metrics denied; supplied forbidden listener addresses cannot connect."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-serve/tests/ingress_contract.rs",
+          "test": "spoofed_xff_from_untrusted_peer_ignored",
+          "proves": "Untrusted client-IP header ignored."
+        }
+      ]
+    },
+    {
+      "id": "SEC-046",
+      "requirement": "No tokens, caps, cookies, secrets or part content in logs, traces, `insights.db` or `/metrics` (fuzzed with canary values across every surface). `/metrics` refuses a request without the admin metrics token.",
+      "components": [
+        {
+          "kind": "external",
+          "probe": "redaction_canaries",
+          "proves": "Sensitive canary inputs absent in supplied logs,metrics,Insights."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-obs/src/redact.rs",
+          "test": "random_caps_never_survive",
+          "proves": "Random cap redaction."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-obs/src/redact.rs",
+          "test": "random_tokens_never_survive",
+          "proves": "Random token redaction."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-config/src/tests.rs",
+          "test": "canary_never_in_debug_display_logs_panics",
+          "proves": "Config secret redaction."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-serve/tests/ingress_contract.rs",
+          "test": "metrics_auth",
+          "proves": "Metrics token required at ops listener."
+        },
+        {
+          "kind": "pending",
+          "owner": "pf-5cyr",
+          "proves": "Full Insights tracing/log store UI and adapters deferred; current Insights janitor rows covered by retention test."
+        }
+      ]
+    },
+    {
+      "id": "SEC-047",
+      "requirement": "Rate limits trip at the configured thresholds, and quotas stop a looping agent. At 95 % of the disk budget, writes get `storage_full` while reads and deletes continue.",
+      "components": [
+        {
+          "kind": "playwright",
+          "file": "tests/e2e/disk_full.spec.ts",
+          "test": "real volume pressure refuses writes while content reads and deletion continue",
+          "proves": "Dedicated PF_STORAGE_GATE=1 live95% volume lane; a skipped ordinary lane never counts.",
+          "projects": [
+            "chromium-desktop"
+          ]
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-serve/tests/ratelimit_layer.rs",
+          "test": "self_test_route_trips_at_threshold_plus_one",
+          "proves": "Configured threshold429 +RetryAfter/log/metric."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-parthost/tests/listener.rs",
+          "test": "runtime_origin_storage_quota_and_boot_invalidation",
+          "proves": "Looping storage quota enforcement."
+        }
+      ]
+    },
+    {
+      "id": "SEC-048",
+      "requirement": "Every growing store has a cap (`doctor` fails otherwise), and each one, filled past its cap in a test, comes back under. A safe default switched off without its `[unsafe]` key fails `config check`.",
+      "components": [
+        {
+          "kind": "native",
+          "file": "crates/pf-janitor/tests/retention.rs",
+          "test": "every_store_has_a_validated_cap_and_pressure_behavior",
+          "proves": "Growing-store cap/pressure registry."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-janitor/tests/retention.rs",
+          "test": "oldest_first_stores_prune_below_cap_and_keep_held_blobs",
+          "proves": "Fill beyond cap and prune; preserve referenced blobs."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-janitor/tests/retention.rs",
+          "test": "capped_reference_stores_refuse_insert_and_update_without_losing_old_content",
+          "proves": "Capped durable stores refuse writes without data loss."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-config/src/tests.rs",
+          "test": "unsafe_key_required_to_disable_protection",
+          "proves": "Unsafe key required by config loader."
+        },
+        {
+          "kind": "pending",
+          "owner": "pf-5cyr",
+          "proves": "Doctor CLI outside Slice1."
+        }
+      ]
+    },
+    {
+      "id": "SEC-049",
+      "requirement": "A parts-only export contains no grants, tokens, sessions or people (schema test).",
+      "components": [
+        {
+          "kind": "native",
+          "file": "crates/pf-backup/tests/recovery.rs",
+          "test": "portable_restores_content_without_live_access",
+          "proves": "Parts-only export contains no identity/access tables."
+        }
+      ]
+    },
+    {
+      "id": "SEC-050",
+      "requirement": "The simulated device matrix in the gate; a non-blocking real-device pass (iPhone Safari, Android Chrome, the Telegram in-app browser) for: standalone open, part-host open (first open and reload), embedding, invite acceptance, sign-in.",
+      "components": [
+        {
+          "kind": "playwright",
+          "file": "tests/device/device-pass.spec.ts",
+          "test": "shipping device matrix: standalone, part root, reload, guest and sign-in",
+          "proves": "Emulated device matrix.",
+          "projects": [
+            "chromium-mobile",
+            "webkit-mobile",
+            "firefox-desktop"
+          ],
+          "report_file": "tests/e2e/device_pass.spec.ts"
+        },
+        {
+          "kind": "script",
+          "file": "tests/device/ios-sim.sh",
+          "test": "device_pass",
+          "source_anchor": "device-pass",
+          "proves": "Mac Mobile Safari simulator self-report + screenshots."
+        },
+        {
+          "kind": "manual",
+          "owner": "pf-vl9",
+          "proves": "Non-blocking actual iPhone Safari,Android Chrome,Telegram webview pass."
+        },
+        {
+          "kind": "pending",
+          "owner": "pf-yczc",
+          "proves": "Embedding outside Slice1."
+        },
+        {
+          "kind": "pending",
+          "owner": "pf-1d8c",
+          "proves": "Invite acceptance outside Slice1."
+        }
+      ]
+    }
+  ]
+}

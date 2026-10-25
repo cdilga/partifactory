@@ -8,7 +8,7 @@ use pf_db::{
 };
 use pf_model::{PfError, Principal};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, future::Future, pin::Pin, sync::Arc};
+use std::{collections::BTreeSet, future::Future, net::IpAddr, pin::Pin, sync::Arc};
 pub mod web;
 
 pub const SCOPES: &[&str] = &[
@@ -177,6 +177,9 @@ pub struct TokenService {
     pub epochs: Arc<EpochStore>,
     pub auth: pf_auth::AuthService,
     pub origin: String,
+    // Pending device codes need only a short-lived comparison, never an address inventory.
+    // A restart deliberately makes earlier fingerprints unknown rather than a false mismatch.
+    network_key: Arc<String>,
 }
 #[derive(Debug, Serialize)]
 pub struct TokenResponse {
@@ -227,6 +230,7 @@ impl TokenService {
             db,
             epochs,
             auth,
+            network_key: Arc::new(opaque("network_", 32)),
         }
     }
     pub fn resource(&self) -> String {
@@ -255,6 +259,64 @@ impl TokenService {
         scope: &str,
         resource: Option<&str>,
     ) -> Result<DeviceResponse> {
+        self.device_from_network(client_id, agent_name, software, scope, resource, None)
+            .await
+    }
+
+    pub(crate) fn network_fingerprint(&self, address: Option<IpAddr>) -> Option<String> {
+        let address = address?;
+        let network = match address {
+            IpAddr::V4(ip) => {
+                let octets = ip.octets();
+                format!("v4:{}.{}.{}", octets[0], octets[1], octets[2])
+            }
+            IpAddr::V6(ip) => {
+                if let Some(ip) = ip.to_ipv4_mapped() {
+                    return self.network_fingerprint(Some(IpAddr::V4(ip)));
+                }
+                // /56 comparison; neither the prefix nor the full address leaves this call.
+                format!("v6:{:?}", &ip.octets()[..7])
+            }
+        };
+        let hex = |bytes: Vec<u8>| bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        let key_id = hex(pf_auth::secret_hash(&self.network_key));
+        let hash = hex(pf_auth::secret_hash(&format!(
+            "{}:{network}",
+            self.network_key
+        )));
+        Some(format!("network-v1:{}:{hash}", &key_id[..16]))
+    }
+
+    pub(crate) fn network_relation(
+        &self,
+        stored: Option<&str>,
+        address: Option<IpAddr>,
+    ) -> &'static str {
+        let Some(current) = self.network_fingerprint(address) else {
+            return "unknown";
+        };
+        let Some(stored) = stored else {
+            return "unknown";
+        };
+        if stored.rsplit_once(':').map(|p| p.0) != current.rsplit_once(':').map(|p| p.0) {
+            return "unknown";
+        }
+        if stored == current {
+            "same_network"
+        } else {
+            "different_network"
+        }
+    }
+
+    pub(crate) async fn device_from_network(
+        &self,
+        client_id: &str,
+        agent_name: &str,
+        software: Option<String>,
+        scope: &str,
+        resource: Option<&str>,
+        address: Option<IpAddr>,
+    ) -> Result<DeviceResponse> {
         if client_id != "part-cli" {
             return Err(OAuthError::new(
                 "invalid_client",
@@ -279,8 +341,9 @@ impl TokenService {
         let stored_code = code.clone();
         let now = ids::now_ms();
         let requested = json(&requested)?;
+        let network = self.network_fingerprint(address);
         self.db.write(move|tx|{
-            tx.execute("INSERT INTO device_codes(device_hash,user_code,client_id,agent_name,software,req_scopes,status,interval_s,created_at,expires_at) VALUES(?1,?2,'part-cli',?3,?4,?5,'pending',5,?6,?7)",params![hash,stored_code,agent_name,software,requested,now,now+600_000])?;Ok::<_,OAuthError>(())
+            tx.execute("INSERT INTO device_codes(device_hash,user_code,client_id,agent_name,software,req_scopes,req_geo,status,interval_s,created_at,expires_at) VALUES(?1,?2,'part-cli',?3,?4,?5,?8,'pending',5,?6,?7)",params![hash,stored_code,agent_name,software,requested,now,now+600_000,network])?;Ok::<_,OAuthError>(())
         }).await?;
         tracing::info!(event = "device.authorize", outcome = "ok");
         Ok(DeviceResponse {

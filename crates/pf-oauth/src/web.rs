@@ -1,7 +1,7 @@
 //! The browser consent surface and the mounted OAuth endpoints.
 use crate::*;
 use axum::{
-    Form, Json, Router,
+    Extension, Form, Json, Router,
     extract::{Path, Query, State},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
@@ -47,14 +47,19 @@ struct Device {
 fn default_scopes() -> String {
     "parts:read parts:write data:read data:write".into()
 }
-async fn device(State(state): State<AppState>, Form(body): Form<Device>) -> Response {
+async fn device(
+    State(state): State<AppState>,
+    address: Option<Extension<pf_serve::ClientAddr>>,
+    Form(body): Form<Device>,
+) -> Response {
     match service(&state)
-        .device(
+        .device_from_network(
             &body.client_id,
             &body.agent_name,
             body.software,
             &body.scope,
             body.resource.as_deref(),
+            address.map(|Extension(address)| address.0),
         )
         .await
     {
@@ -141,6 +146,7 @@ struct Code {
 }
 async fn consent_info(
     State(state): State<AppState>,
+    address: Option<Extension<pf_serve::ClientAddr>>,
     headers: HeaderMap,
     Query(query): Query<Code>,
 ) -> Response {
@@ -149,8 +155,9 @@ async fn consent_info(
         let actor=service.auth.require_session(&headers).await?;
         state.rates().check("device-manual",&actor.session_id).map_err(|_|OAuthError::new("slow_down","Try entering a code again in one minute."))?;
         let code=normalize_code(&query.code)?;let uid=actor.user_id.clone();let now=ids::now_ms();
+        let network_service=service.clone();let address=address.map(|Extension(address)|address.0);
         service.db.read(move|c|{
-            let mut out=c.query_row("SELECT agent_name,software,req_scopes,created_at FROM device_codes WHERE user_code=?1 AND status='pending' AND expires_at>?2",params![code,now],|r|Ok(json!({"agent_name":r.get::<_,String>(0)?,"software":r.get::<_,Option<String>>(1)?,"scope":r.get::<_,String>(2)?,"age_s":(now-r.get::<_,i64>(3)?)/1000,"origin":"unknown"}))).optional()?.ok_or_else(invalid)?;
+            let mut out=c.query_row("SELECT agent_name,software,req_scopes,created_at,req_geo FROM device_codes WHERE user_code=?1 AND status='pending' AND expires_at>?2",params![code,now],|r|Ok(json!({"agent_name":r.get::<_,String>(0)?,"software":r.get::<_,Option<String>>(1)?,"scope":r.get::<_,String>(2)?,"age_s":(now-r.get::<_,i64>(3)?)/1000,"origin":network_service.network_relation(r.get::<_,Option<String>>(4)?.as_deref(),address)}))).optional()?.ok_or_else(invalid)?;
             let mut st=c.prepare("SELECT s.id,s.slug,s.title FROM spaces s WHERE s.owner_user_id=?1 OR (s.kind='shared' AND EXISTS(SELECT 1 FROM grants g WHERE g.target_kind='space' AND g.target_id=s.id AND (g.expires_at IS NULL OR g.expires_at>?2) AND (g.subject='user:'||?1 OR g.subject IN(SELECT 'group:'||group_name FROM group_members WHERE user_id=?1)))) ORDER BY s.kind,s.slug")?;
             let spaces=st.query_map(params![uid,now],|r|Ok(json!({"id":r.get::<_,String>(0)?,"slug":r.get::<_,String>(1)?,"title":r.get::<_,String>(2)?})))?.collect::<std::result::Result<Vec<_>,_>>()?;
             out["spaces"]=json!(spaces);out["step_up_status"]=json!(actor.fresh_stepup(now));Ok::<_,OAuthError>(out)
@@ -319,12 +326,12 @@ pub fn install(builder: &mut ServerBuilder, service: &TokenService) {
     );
 }
 
-const DEVICE_HTML: &str = r#"<!doctype html><meta name="viewport" content="width=device-width"><title>Connect an agent · partifactory</title><style>body{font:17px system-ui;max-width:36rem;margin:2rem auto;padding:1rem}input,button,select{font:inherit;padding:.7rem}label{display:block;margin:1rem 0}button{min-height:48px}fieldset{border:0;padding:0}</style><h1>Connect an agent</h1><form id="lookup"><label>Device code <input id="code" required maxlength="9" placeholder="XXXX-XXXX" autocomplete="off"></label><button>Continue</button></form><section id="consent" hidden><h2 id="agent"></h2><p>Agent names are unverified.</p><p id="origin"></p><p id="warning" hidden>Only approve if you just asked an agent to connect.</p><fieldset id="scopes"></fieldset><label>Space <select id="space"></select></label><label>Connection lifetime <select id="days"><option value="30">30 days</option><option value="90" selected>90 days</option><option value="365">1 year</option></select></label><button id="allow">Allow</button> <button id="deny">Deny</button></section><p role="status" id="status"></p><script>
+const DEVICE_HTML: &str = r#"<!doctype html><meta name="viewport" content="width=device-width"><title>Connect an agent · partifactory</title><style>body{font:17px system-ui;max-width:36rem;margin:2rem auto;padding:1rem}input,button,select{font:inherit;padding:.7rem}label{display:block;margin:1rem 0}button{min-height:48px}fieldset{border:0;padding:0}</style><h1>Connect an agent</h1><form id="lookup"><label>Device code <input id="code" required maxlength="9" placeholder="XXXX-XXXX" autocomplete="off"></label><button>Continue</button></form><section id="consent" hidden><h2 id="agent"></h2><p>Agent names are unverified.</p><p id="origin"></p><p id="network-warning" hidden>This request came from a different network. Only approve a device you recognize.</p><p id="warning" hidden>Only approve if you just asked an agent to connect.</p><fieldset id="scopes"></fieldset><label>Space <select id="space"></select></label><label>Connection lifetime <select id="days"><option value="30">30 days</option><option value="90" selected>90 days</option><option value="365">1 year</option></select></label><button id="allow">Allow</button> <button id="deny">Deny</button></section><p role="status" id="status"></p><script>
 const $=s=>document.querySelector(s),status=$('#status');$('#code').value=new URLSearchParams(location.search).get('code')||'';
 async function api(path,body){const r=await fetch(path,body?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}:{}),v=await r.json();if(!r.ok)throw Error(v.error_description||v.error?.message||'Please try again.');return v}
 const decode=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));const encode=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 async function stepup(){let {flow,publicKey}=await api('/admin/stepup/start',{});publicKey.challenge=decode(publicKey.challenge);for(let c of publicKey.allowCredentials||[])c.id=decode(c.id);let c=await navigator.credentials.get({publicKey});await api('/admin/stepup/finish',{flow,credential:{id:c.id,rawId:encode(c.rawId),type:c.type,response:{authenticatorData:encode(c.response.authenticatorData),clientDataJSON:encode(c.response.clientDataJSON),signature:encode(c.response.signature),userHandle:c.response.userHandle?encode(c.response.userHandle):null},extensions:c.getClientExtensionResults()}})}
-let info;$('#lookup').onsubmit=async e=>{e.preventDefault();try{info=await api('/api/agents/consent?code='+encodeURIComponent($('#code').value));$('#agent').textContent='This device says it is '+info.agent_name;$('#origin').textContent='Origin unknown · requested '+info.age_s+' seconds ago';$('#warning').hidden=info.age_s<=120;$('#scopes').replaceChildren();for(let scope of JSON.parse(info.scope)){let label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.value=scope;input.checked=!['share:household','backends:deploy'].includes(scope);label.append(input,document.createTextNode(' '+({'parts:read':'Read parts','parts:write':'Create and edit parts','parts:delete':'Move parts to the bin','data:read':'Read shared data','data:write':'Change shared data','comments:write':'Comment on parts','share:household':'Share with household','backends:deploy':'Deploy backends'}[scope]||scope)));$('#scopes').append(label)}$('#space').replaceChildren();for(let space of info.spaces){let option=document.createElement('option');option.value=space.id;option.textContent=space.title||space.slug;$('#space').append(option)}$('#consent').hidden=false;$('#lookup').hidden=true}catch(e){status.textContent=e.message}};
+let info;$('#lookup').onsubmit=async e=>{e.preventDefault();try{info=await api('/api/agents/consent?code='+encodeURIComponent($('#code').value));$('#agent').textContent='This device says it is '+info.agent_name;$('#origin').textContent=({'same_network':'Same network','different_network':'Different network'}[info.origin]||'Origin unknown')+' · requested '+info.age_s+' seconds ago';$('#network-warning').hidden=info.origin!=='different_network';$('#warning').hidden=info.age_s<=120;$('#scopes').replaceChildren();for(let scope of JSON.parse(info.scope)){let label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.value=scope;input.checked=!['share:household','backends:deploy'].includes(scope);label.append(input,document.createTextNode(' '+({'parts:read':'Read parts','parts:write':'Create and edit parts','parts:delete':'Move parts to the bin','data:read':'Read shared data','data:write':'Change shared data','comments:write':'Comment on parts','share:household':'Share with household','backends:deploy':'Deploy backends'}[scope]||scope)));$('#scopes').append(label)}$('#space').replaceChildren();for(let space of info.spaces){let option=document.createElement('option');option.value=space.id;option.textContent=space.title||space.slug;$('#space').append(option)}$('#consent').hidden=false;$('#lookup').hidden=true}catch(e){status.textContent=e.message}};
 async function decide(allow){try{const body={code:$('#code').value,scopes:[...document.querySelectorAll('#scopes input:checked')].map(i=>i.value),spaces:[$('#space').value],lifetime_days:Number($('#days').value),allow};try{await api('/api/agents/consent',body)}catch(e){if(!allow||!e.message.includes('passkey'))throw e;await stepup();await api('/api/agents/consent',body)}status.textContent=allow?'Agent connected. You can return to your terminal.':'Request denied.';$('#consent').hidden=true}catch(e){status.textContent=e.message}}
 $('#allow').onclick=()=>decide(true);$('#deny').onclick=()=>decide(false);
 </script>"#;

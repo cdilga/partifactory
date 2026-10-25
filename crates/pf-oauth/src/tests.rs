@@ -87,6 +87,83 @@ fn tokens_and_codes_have_required_entropy_format_and_scope_boundaries() {
     }
     assert_eq!(scopes("parts:read parts:read").unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn device_network_comparison_is_coarse_private_and_unknown_after_restart() {
+    let (_db, service) = setup();
+    let first = "198.51.100.12".parse().unwrap();
+    let fingerprint = service.network_fingerprint(Some(first)).unwrap();
+    assert!(!fingerprint.contains("198.51.100"));
+    assert_eq!(
+        service.network_relation(Some(&fingerprint), Some("198.51.100.250".parse().unwrap())),
+        "same_network"
+    );
+    assert_eq!(
+        service.network_relation(Some(&fingerprint), Some("203.0.113.1".parse().unwrap())),
+        "different_network"
+    );
+    assert_eq!(
+        service.network_relation(
+            Some(&fingerprint),
+            Some("::ffff:198.51.100.12".parse().unwrap())
+        ),
+        "same_network"
+    );
+    let v6 = service
+        .network_fingerprint(Some("2001:db8:abcd:1201::1".parse().unwrap()))
+        .unwrap();
+    assert_eq!(
+        service.network_relation(Some(&v6), Some("2001:db8:abcd:12ff::2".parse().unwrap())),
+        "same_network"
+    );
+    assert_eq!(
+        service.network_relation(Some(&v6), Some("2001:db8:abcd:1301::1".parse().unwrap())),
+        "different_network"
+    );
+    assert_eq!(service.network_relation(None, Some(first)), "unknown");
+    assert_eq!(
+        service.network_relation(Some(&fingerprint), None),
+        "unknown"
+    );
+    let restarted = TokenService::new(
+        service.db.clone(),
+        service.epochs.clone(),
+        service.auth.clone(),
+    );
+    assert_eq!(
+        restarted.network_relation(Some(&fingerprint), Some(first)),
+        "unknown"
+    );
+}
+
+#[tokio::test]
+async fn device_network_metadata_never_stores_an_address() {
+    let (db, service) = setup();
+    service
+        .device_from_network(
+            "part-cli",
+            "Network warning gate",
+            None,
+            "parts:read",
+            None,
+            Some("198.51.100.12".parse().unwrap()),
+        )
+        .await
+        .unwrap();
+    let stored: String = db
+        .read(|c| {
+            c.query_row("SELECT req_geo FROM device_codes", [], |r| r.get(0))
+                .map_err(pf_db::DbError::from)
+        })
+        .await
+        .unwrap();
+    assert!(stored.starts_with("network-v1:"));
+    assert!(!stored.contains("198.51.100"));
+    assert_eq!(
+        service.network_relation(Some(&stored), Some("203.0.113.1".parse().unwrap())),
+        "different_network"
+    );
+}
 #[tokio::test]
 async fn device_polling_rate_side_effects_commit_and_codes_are_single_use() {
     let (_db, service) = setup();
