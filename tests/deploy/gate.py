@@ -248,7 +248,12 @@ def main():
                         except subprocess.TimeoutExpired:
                             process.kill()
                             process.wait(timeout=5)
-            elapsed = time.monotonic() - begin
+                    elapsed = time.monotonic() - begin
+                    # Keep observations even if an assertion below fails. A failed
+                    # availability gate needs the same reviewable samples as a pass.
+                    (args.evidence_dir / f"{name}-observations.json").write_text(json.dumps({
+                        "case": name, "rto_s": elapsed, "exit_code": process.poll(), "samples": samples,
+                    }, indent=2) + "\n")
             require(code != 0 and elapsed < 120, "broken deployment must fail and recover within two minutes")
             report = json.loads(journal.read_text())
             require(report["previous"] == args.good_image and report["phase"] == phase and not report["ok"], "wrong deployment journal outcome")
