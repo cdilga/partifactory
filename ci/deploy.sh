@@ -148,7 +148,9 @@ if docker volume inspect "$volume_name" >/dev/null 2>&1; then echo 'drill volume
 docker volume create --label pf.harness=1 --driver local --opt type=tmpfs --opt device=tmpfs \
   --opt o=size=2g,mode=700 "$volume_name" >> "$private" 2>&1
 daemon_volume="$volume_name"
-daemon="$(docker create --name "pf-drill-daemon-$PF_E2E_RUN" --label pf.harness=1 --privileged \
+# Privileged Docker defaults to a shared cgroup namespace. Keep the recovery
+# daemon's children inside this bounded container's delegated subtree instead.
+daemon="$(docker create --name "pf-drill-daemon-$PF_E2E_RUN" --label pf.harness=1 --privileged --cgroupns=private \
   --cpus=2 --memory=2g --memory-swap=2g --pids-limit=512 \
   --network pf-harness_ingress --mount "type=volume,src=$daemon_volume,dst=/var/lib/docker" \
   -e DOCKER_TLS_CERTDIR= -p 127.0.0.1:23751:2375 -p 127.0.0.1:19443:19443 \
