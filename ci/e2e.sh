@@ -115,6 +115,7 @@ note "--- playwright"
 docker compose -f "$h/compose.yaml" --profile browsers run --rm browsers --grep-invert @origin-down "$@" \
   2>&1 | tee "$logs/playwright.txt"
 pw="${PIPESTATUS[0]}"
+if [ -f "$logs/results.json" ]; then cp "$logs/results.json" "$logs/results-main.json"; fi
 grep -E '^\s+[0-9]+ (passed|failed|skipped|flaky)' "$logs/playwright.txt" | tee -a "$summary" || true
 [ "$pw" = 0 ] || { note "FAIL playwright"; exit 1; }
 

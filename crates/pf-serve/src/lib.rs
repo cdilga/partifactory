@@ -142,6 +142,15 @@ impl ServerBuilder {
         self
     }
 
+    /// Decorate installed workspace routes, for discovery content negotiation.
+    pub fn map_workspace(
+        &mut self,
+        f: impl FnOnce(Router<AppState>) -> Router<AppState>,
+    ) -> &mut Self {
+        self.workspace = f(std::mem::take(&mut self.workspace));
+        self
+    }
+
     /// Merge routes into every part host (`<name>-part.<apex>`; read `Extension<PartHost>`).
     pub fn part(&mut self, r: Router<AppState>) -> &mut Self {
         self.part = std::mem::take(&mut self.part).merge(r);

@@ -310,6 +310,8 @@ async fn complete_check(cfg: &Config, job: &Job) -> Result<bool, PfError> {
         Ok((events,changed))
     }).await?;
     cfg.events.publish(events);
+    tracing::info!(event="live.switch", gate="after_check", part_id=%job.part, build=job.id,
+        result=if gate==Gate::Skipped {"skipped"} else if changed {"moved"} else {"held"});
     Ok(changed)
 }
 async fn finish_failed(cfg: &Config, job: &Job, error: &PfError) -> Result<(), PfError> {
