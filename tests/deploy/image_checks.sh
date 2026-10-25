@@ -15,7 +15,7 @@ cleanup(){
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 docker image inspect "$image" > "$out/inspect.json"
-container="$(docker create --label pf.harness=1 "$image" --help)"
+container="$(docker create --platform linux/amd64 --label pf.harness=1 "$image" --help)"
 docker export "$container" > "$out/rootfs.tar"
 python3 - "$out" <<'PY'
 import json,pathlib,sys,tarfile
@@ -38,8 +38,52 @@ print('image: Linux amd64, non-root, scratch filesystem, CA, CLI symlink, native
 PY
 docker start -a "$container" > "$out/help.txt"
 if grep -Eq '^  dev[[:space:]]' "$out/help.txt"; then echo 'release image exposes dev subcommands' >&2; exit 1; fi
+docker run --rm --platform linux/amd64 --label pf.harness=1 --entrypoint /part "$image" --help > "$out/part-help.json"
+docker run --rm --platform linux/amd64 --label pf.harness=1 "$image" config --help > "$out/config-help.txt"
+python3 - "$out" "${PF_RELEASE_ASSETS:-}" <<'PY'
+import json,pathlib,sys,tarfile
+p=pathlib.Path(sys.argv[1]);help=(p/'help.txt').read_text()
+for command in ['serve','export','import','migrate','healthcheck','deploy','config','admin']:
+    assert any(line.startswith('  '+command+' ') for line in help.splitlines()),command
+assert 'check' in (p/'config-help.txt').read_text()
+ops=json.loads((p/'part-help.json').read_text())['ops']
+assert 'part_create' in ops and 'part_link_for' in ops
+if sys.argv[2]:
+    with tarfile.open(pathlib.Path(sys.argv[2])/'part-linux-amd64.tar.gz') as archive:
+        assert archive.extractfile('part').read()==(p/'partifactory').read_bytes(),'CLI asset differs from image binary'
+(p/'cap').write_text('k'*32+'\n');(p/'cap').chmod(0o444)
+PY
+base_env=(-e PF_SITE_TOML=/nonexistent/site.toml -e PF_DOMAIN_APEX=pf.test \
+  -e PF_SESSION_KEY=ssssssssssssssssssssssssssssssss -e PF_METRICS_TOKEN=mmmmmmmmmmmmmmmm)
+docker run --rm --platform linux/amd64 --label pf.harness=1 "${base_env[@]}" \
+  -e PF_CAP_HMAC_KEY=kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk "$image" config check > "$out/config-env.jsonl"
+docker run --rm --platform linux/amd64 --label pf.harness=1 "${base_env[@]}" \
+  --mount "type=bind,src=$out/cap,dst=/probe/cap,readonly" \
+  -e PF_CAP_HMAC_KEY_FILE=/probe/cap "$image" config check > "$out/config-file.jsonl"
 set +e
-docker run --rm --label pf.harness=1 -e PF_DEV_IDENTITY=/nonexistent/identity.toml \
+docker run --rm --platform linux/amd64 --label pf.harness=1 -e PF_SITE_TOML=/nonexistent/site.toml \
+  "$image" config check > "$out/config-missing.jsonl" 2>&1
+missing_code=$?
+docker run --rm --platform linux/amd64 --label pf.harness=1 --entrypoint /part "$image" create \
+  > "$out/part-invalid.stdout" 2> "$out/part-invalid.json"
+part_code=$?
+set -e
+[ "$missing_code" = 2 ] && [ "$part_code" = 2 ] || { echo 'release refusal has wrong exit code' >&2; exit 1; }
+python3 - "$out" <<'PY'
+import json,pathlib,sys
+p=pathlib.Path(sys.argv[1])
+for name in ['config-env.jsonl','config-file.jsonl']:
+    raw=(p/name).read_text();rows=[json.loads(line) for line in raw.splitlines()]
+    assert any(row.get('event')=='config.loaded' for row in rows),name
+    assert 'k'*32 not in raw and 's'*32 not in raw and 'm'*16 not in raw,'secret in config logs'
+rows=[json.loads(line) for line in (p/'config-missing.jsonl').read_text().splitlines()]
+assert any(row.get('event')=='config.check' and row.get('outcome')=='missing_secret'
+           and row.get('var')=='PF_SESSION_KEY' for row in rows)
+assert json.loads((p/'part-invalid.json').read_text())['error']['code']=='invalid_input'
+print('image: release server help, part argv0/help/error, missing-secret refusal and env/_FILE equivalence')
+PY
+set +e
+docker run --rm --platform linux/amd64 --label pf.harness=1 -e PF_DEV_IDENTITY=/nonexistent/identity.toml \
   "$image" config check > "$out/release-refusal.jsonl" 2>&1
 code=$?
 set -e
