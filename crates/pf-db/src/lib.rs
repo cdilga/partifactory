@@ -40,6 +40,11 @@ pub const MAIN: &[Migration] = &[
         name: "0002_shared_blob_type",
         sql: include_str!("../migrations/0002_shared_blob_type.sql"),
     },
+    Migration {
+        version: 3,
+        name: "0003_retention",
+        sql: include_str!("../migrations/0003_retention.sql"),
+    },
 ];
 
 /// The insights database's migrations (`/data/insights.db`, §5g).
@@ -298,6 +303,20 @@ impl Db {
 
     pub fn path(&self) -> &Path {
         &self.inner.path
+    }
+
+    /// Serialized maintenance on the existing writer, outside a transaction. SQLite refuses
+    /// WAL checkpoints and VACUUM inside BEGIN, so janitor jobs must use this entry point.
+    pub async fn maintenance<T, F>(&self, f: F) -> Result<T, DbError>
+    where
+        F: FnOnce(&mut Connection) -> Result<T, DbError> + Send + 'static,
+        T: Send + 'static,
+    {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.submit(Box::new(move |conn| {
+            let _ = tx.send(f(conn));
+        }))?;
+        rx.await.map_err(|_| DbError::WriterGone)?
     }
 
     fn submit(&self, job: Job) -> Result<(), DbError> {

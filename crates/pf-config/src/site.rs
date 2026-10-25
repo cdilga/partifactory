@@ -257,11 +257,15 @@ pub struct Disk {
     /// The share of the volume partifactory may use (§5h). 100 switches the budget off and
     /// needs `[unsafe] disk_budget`.
     pub budget_percent: u32,
+    pub stores: StoreCaps,
 }
 
 impl Default for Disk {
     fn default() -> Self {
-        Self { budget_percent: 80 }
+        Self {
+            budget_percent: 80,
+            stores: StoreCaps::default(),
+        }
     }
 }
 
@@ -282,4 +286,42 @@ impl Default for Advisories {
 pub struct Backends {
     /// The runner sidecar is on. Requires `PF_RUNNER_KEY`.
     pub enabled: bool,
+}
+
+/// Byte caps for existing stores. Values must be 1 KiB..8 times the safe default.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct StoreCaps {
+    pub exports: u64,
+    pub events: u64,
+    pub runtime_errors: u64,
+    pub build_logs: u64,
+    pub audit: u64,
+    pub idempotency: u64,
+    pub data_snapshots: u64,
+    pub previews: u64,
+    pub blobs: u64,
+    pub data_docs: u64,
+    pub shared_blobs: u64,
+    pub mirror_cache: u64,
+    pub quota_hits: u64,
+}
+impl Default for StoreCaps {
+    fn default() -> Self {
+        Self {
+            exports: 8 * 1024 * 1024 * 1024,
+            events: 134217728,
+            runtime_errors: 134217728,
+            build_logs: 536870912,
+            audit: 268435456,
+            idempotency: 134217728,
+            data_snapshots: 2147483648,
+            previews: 2147483648,
+            blobs: 21474836480,
+            data_docs: 21474836480,
+            shared_blobs: 5368709120,
+            mirror_cache: 5368709120,
+            quota_hits: 16777216,
+        }
+    }
 }

@@ -63,7 +63,7 @@ pub fn record_blob(
     now: i64,
 ) -> pf_db::rusqlite::Result<()> {
     tx.execute(
-        "INSERT INTO blobs (hash, size, created_at) VALUES (?1, ?2, ?3) ON CONFLICT (hash) DO NOTHING",
+        "INSERT INTO blobs (hash, size, created_at) VALUES (?1, ?2, ?3) ON CONFLICT (hash) DO UPDATE SET unref_since=NULL",
         params![hash, size as i64, now],
     )?;
     Ok(())
@@ -80,6 +80,7 @@ pub fn commit_version(
     files: &BTreeMap<String, FileEntry>,
     meta: &CommitMeta,
 ) -> Result<Committed, PfError> {
+    blobs.check_capacity(0)?;
     let n = part.head_n + 1;
     let manifest = Manifest {
         part_id: part.id.clone(),
@@ -94,11 +95,21 @@ pub fn commit_version(
         created_at: meta.now,
     };
     let bytes = manifest.canonical_bytes();
+    crate::quotas::check_version(
+        tx,
+        &part.id,
+        meta.principal,
+        files,
+        bytes.len() as u64,
+        meta.now,
+    )?;
     let put = blobs.put(&bytes)?;
     let version_id = put.hash.clone();
     record_blob(tx, &put.hash, put.size, meta.now)?;
+    crate::quotas::record_introduced(tx, meta.principal, &put.hash, put.size)?;
     for f in files.values() {
         record_blob(tx, &f.hash, f.size, meta.now)?;
+        crate::quotas::record_introduced(tx, meta.principal, &f.hash, f.size)?;
     }
     tx.execute(
         "INSERT INTO versions (id, part_id, n, parent_id, manifest_hash, entry, author_user, actor_conn, via, message,

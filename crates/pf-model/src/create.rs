@@ -481,6 +481,8 @@ impl PartService {
                     Some(s) => spaces::writable_space(tx, &p.user_id, s, now)?,
                     None => spaces::default_space(tx, &p.user_id, now)?,
                 };
+                blobs.check_capacity(0)?;
+                crate::quotas::check_create(tx, &space.id, now)?;
                 let id = pf_db::ids::new_id("p");
                 tx.execute(
                     "INSERT INTO parts (id, name, space_id, title, description, kind, owner_user_id, shared_data_writers,
@@ -537,8 +539,8 @@ impl PartService {
                 idem::store(tx, &pkey, &request_id, "part_create", &hash, &out, now)?;
                 Ok::<_, PfError>((out, committed))
             })
-            .await?;
-        let (out, committed) = result;
+            .await;
+        let (out, committed) = self.quota_result(result, &caller.principal, now).await?;
         if let Some(c) = &committed {
             self.committed(c, &caller.principal);
         }
@@ -585,7 +587,7 @@ impl PartService {
         let via = caller.via;
         let message = req.message.clone();
         let part_id = row.id.clone();
-        let (out, committed) = self
+        let result = self
             .db
             .write(move |tx| {
                 if let Some(r) = idem::lookup(tx, &pkey, &request_id, "part_put", &hash)? {
@@ -621,7 +623,8 @@ impl PartService {
                 idem::store(tx, &pkey, &request_id, "part_put", &hash, &out, now)?;
                 Ok::<_, PfError>((out, Some(c)))
             })
-            .await?;
+            .await;
+        let (out, committed) = self.quota_result(result, &caller.principal, now).await?;
         if let Some(c) = &committed {
             self.committed(c, &caller.principal);
         }

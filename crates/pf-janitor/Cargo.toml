@@ -6,5 +6,21 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[dependencies]
+pf-db = { path = "../pf-db" }
+pf-config = { path = "../pf-config" }
+pf-blobs = { path = "../pf-blobs" }
+pf-caps = { path = "../pf-caps" }
+pf-obs = { path = "../pf-obs" }
+pf-serve = { path = "../pf-serve" }
+serde_json.workspace = true
+tracing.workspace = true
+fs4 = "0.13"
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+futures-util = "0.3"
+
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

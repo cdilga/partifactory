@@ -246,7 +246,7 @@ impl PartService {
             self.url(&req.name),
             caller.via,
         );
-        let (out, committed, epochs) = self.db.write(move |tx| {
+        let result = self.db.write(move |tx| {
             let pkey = p.key();
             if let Some(result) = idem::lookup(tx, &pkey, &rid, "part_edit", &hash)? { return Ok((result, None, Vec::new())); }
             let role = if req.meta.is_some() { spaces::MANAGE } else { spaces::EDIT };
@@ -285,6 +285,7 @@ impl PartService {
                 }
                 tx.execute("UPDATE parts SET updated_at=?2 WHERE id=?1",params![row.id,now])?;
             } else if req.rebuild == Some(true) {
+                blobs.check_capacity(0)?;
                 let vid = head.head_version_id.as_ref().ok_or_else(|| PfError::invalid("rebuild", "part has no version"))?;
                 crate::builds::enqueue(tx, &row.id, vid, &row.kind, now)?;
             } else if let Some(edits) = &req.edits {
@@ -315,7 +316,8 @@ impl PartService {
             if let Some(base) = rebased { out["rebased_from"] = json!(base); }
             idem::store(tx,&pkey,&rid,"part_edit",&hash,&out,now)?;
             Ok::<_,PfError>((out,committed,epochs))
-        }).await?;
+        }).await;
+        let (out, committed, epochs) = self.quota_result(result, &caller.principal, now).await?;
         for (key, epoch) in epochs {
             self.epochs.set(&key, epoch);
             tracing::info!(event="epoch.bump",key=%key,epoch,reason="shared_data_writers_editors","capability minter revoked");

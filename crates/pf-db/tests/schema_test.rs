@@ -96,7 +96,7 @@ fn golden(name: &str, actual: &str) {
 fn schema_golden_snapshot() {
     let mut c = Connection::open_in_memory().unwrap();
     migrate(&mut c, MAIN).unwrap();
-    golden("schema_v2.sql", &schema_dump(&c));
+    golden("schema_v3.sql", &schema_dump(&c));
     let mut v1 = Connection::open_in_memory().unwrap();
     migrate(&mut v1, &MAIN[..1]).unwrap();
     golden("schema_v1.sql", &schema_dump(&v1));

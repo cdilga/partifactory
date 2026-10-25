@@ -15,6 +15,31 @@ pub type Env = BTreeMap<String, String>;
 /// owns the full registry; later beads add their names here.
 pub const PROTECTIONS: &[Protection] = &[
     Protection {
+        name: "secure_headers",
+        key: "secure_headers",
+        is_off: |_| false,
+    },
+    Protection {
+        name: "quotas",
+        key: "quotas",
+        is_off: |_| false,
+    },
+    Protection {
+        name: "ingress_tls",
+        key: "ingress_tls",
+        is_off: |_| false,
+    },
+    Protection {
+        name: "log_redaction",
+        key: "log_redaction",
+        is_off: |_| false,
+    },
+    Protection {
+        name: "retention_caps",
+        key: "retention_caps",
+        is_off: |_| false,
+    },
+    Protection {
         name: "nightly_export",
         key: "backup.export_schedule",
         is_off: |c| c.backup.export_schedule == "off",
@@ -453,6 +478,18 @@ fn cross_field(site: &SiteConfig, has_oidc: bool, has_runner: bool, diags: &mut 
                 site.backup.export_schedule
             ),
         });
+    }
+    let caps = serde_json::to_value(&site.disk.stores).expect("store caps serialize");
+    let defaults =
+        serde_json::to_value(crate::site::StoreCaps::default()).expect("store caps serialize");
+    for (key, value) in caps.as_object().expect("store caps object") {
+        let cap = value.as_u64().unwrap_or(0);
+        let maximum = defaults[key].as_u64().unwrap_or(0).saturating_mul(8);
+        if cap < 1024 || cap > maximum {
+            diags.push(Diag::Invalid {
+                message: format!("`disk.stores.{key}` must be between 1024 and {maximum} bytes"),
+            });
+        }
     }
     if site.disk.budget_percent == 0 || site.disk.budget_percent > 100 {
         diags.push(Diag::Invalid {

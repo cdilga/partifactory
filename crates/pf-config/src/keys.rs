@@ -249,6 +249,58 @@ pub const DOCS: &[(&str, &str)] = &[
         "The share of the volume partifactory may use. `100` switches the budget off and needs `[unsafe] disk_budget = \"off\"`.",
     ),
     (
+        "disk.stores.exports",
+        "Byte cap for scheduled exports; bounded from 1 KiB to eight times its safe default.",
+    ),
+    (
+        "disk.stores.events",
+        "Byte cap for events; bounded from 1 KiB to eight times its safe default.",
+    ),
+    (
+        "disk.stores.runtime_errors",
+        "Byte cap for runtime errors; bounded from 1 KiB to eight times its safe default.",
+    ),
+    (
+        "disk.stores.build_logs",
+        "Byte cap for build logs; bounded from 1 KiB to eight times its safe default.",
+    ),
+    (
+        "disk.stores.audit",
+        "Byte cap for audit; bounded from 1 KiB to eight times its safe default.",
+    ),
+    (
+        "disk.stores.idempotency",
+        "Byte cap for idempotency; bounded from 1 KiB to eight times its safe default.",
+    ),
+    (
+        "disk.stores.data_snapshots",
+        "Byte cap for data snapshots; bounded from 1 KiB to eight times its safe default.",
+    ),
+    (
+        "disk.stores.previews",
+        "Byte cap for previews; bounded from 1 KiB to eight times its safe default.",
+    ),
+    (
+        "disk.stores.blobs",
+        "Byte cap for blobs; bounded from 1 KiB to eight times its safe default.",
+    ),
+    (
+        "disk.stores.data_docs",
+        "Byte cap for data docs; bounded from 1 KiB to eight times its safe default.",
+    ),
+    (
+        "disk.stores.shared_blobs",
+        "Byte cap for shared blobs; bounded from 1 KiB to eight times its safe default.",
+    ),
+    (
+        "disk.stores.mirror_cache",
+        "Byte cap for mirror cache; bounded from 1 KiB to eight times its safe default.",
+    ),
+    (
+        "disk.stores.quota_hits",
+        "Byte cap for quota hits; bounded from 1 KiB to eight times its safe default.",
+    ),
+    (
         "advisories.enabled",
         "Record library lists per build and (after Slice 1) match them against advisories.",
     ),

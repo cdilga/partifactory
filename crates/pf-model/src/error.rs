@@ -72,12 +72,24 @@ impl PfError {
 
 impl From<pf_db::DbError> for PfError {
     fn from(e: pf_db::DbError) -> Self {
-        PfError::internal(e.to_string())
+        match e {
+            pf_db::DbError::Sqlite(e) => e.into(),
+            other => PfError::internal(other.to_string()),
+        }
     }
 }
 
 impl From<pf_db::rusqlite::Error> for PfError {
     fn from(e: pf_db::rusqlite::Error) -> Self {
+        if let pf_db::rusqlite::Error::SqliteFailure(_, Some(message)) = &e {
+            if let Some(store) = message.strip_prefix("pf_storage_full:") {
+                return PfError::new(
+                    "storage_full",
+                    "the store cap is used up; delete content before retrying",
+                )
+                .with("store", store);
+            }
+        }
         PfError::internal(format!("sqlite: {e}"))
     }
 }

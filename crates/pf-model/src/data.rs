@@ -129,6 +129,28 @@ pub fn take_snapshot(
     let data: BTreeMap<String, BTreeMap<String, Value>> =
         serde_json::from_slice(&bytes).map_err(|e| PfError::internal(e.to_string()))?;
     let docs: usize = data.values().map(BTreeMap::len).sum();
+    let hash = pf_blobs::sha256_hex(&bytes);
+    let snapshot_used:i64=tx.query_row("SELECT COALESCE(sum(size),0) FROM blobs WHERE hash IN (SELECT blob_hash FROM data_snapshots)",[],|r|r.get(0))?;
+    let exists: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM data_snapshots WHERE blob_hash=?1)",
+        [&hash],
+        |r| r.get(0),
+    )?;
+    crate::quotas::check_store(
+        tx,
+        "data_snapshots",
+        snapshot_used.max(0) as u64,
+        if exists { 0 } else { bytes.len() as u64 },
+        2 * 1024 * 1024 * 1024,
+    )?;
+    let in_space:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM data_snapshots s JOIN parts p ON p.id=s.part_id WHERE p.space_id=(SELECT space_id FROM parts WHERE id=?1) AND s.blob_hash=?2)",params![part,hash],|r|r.get(0))?;
+    crate::quotas::check_space_bytes(
+        tx,
+        part,
+        if in_space { 0 } else { bytes.len() as u64 },
+        0,
+        now,
+    )?;
     let blob = blobs.put(&bytes).map_err(|e| {
         PfError::from(e).with(
             "hint",
@@ -220,8 +242,10 @@ pub fn change(
     } else {
         VALUE_LIMIT as i64
     };
-    if bytes > limit {
-        return Err(PfError::new("quota_exceeded", "data quota exceeded").with("kind", scope));
+    if bytes > limit && body.is_some() {
+        return Err(PfError::new("quota_exceeded", "data quota exceeded")
+            .with("kind", scope)
+            .with("limit", limit));
     }
     // A persisted per-key sequence survives delete/recreate and snapshot restore.
     let rev_key = format!("data.rev:{part}:{scope}:{owner}:{key}");
@@ -235,6 +259,20 @@ pub fn change(
         .unwrap_or(current);
     let rev = last + 1;
     if let Some(body) = body {
+        let total: i64 = tx.query_row(
+            "SELECT COALESCE(sum(length(body)),0) FROM data_docs",
+            [],
+            |r| r.get(0),
+        )?;
+        let old_body:i64=tx.query_row("SELECT COALESCE((SELECT length(body) FROM data_docs WHERE part_id=?1 AND scope=?2 AND owner=?3 AND collection='__storage' AND doc_id=?4),0)",params![part,scope,owner,key],|r|r.get(0))?;
+        crate::quotas::check_space_bytes(tx, part, body.len() as u64, old_body.max(0) as u64, now)?;
+        crate::quotas::check_store(
+            tx,
+            "data_docs",
+            total.saturating_sub(old_body).max(0) as u64,
+            body.len() as u64,
+            20 * 1024 * 1024 * 1024,
+        )?;
         tx.execute("INSERT INTO data_docs(part_id,scope,owner,collection,doc_id,body,rev,updated_at,updated_by) VALUES(?1,?2,?3,'__storage',?4,?5,?6,?7,?8) ON CONFLICT(part_id,scope,owner,collection,doc_id) DO UPDATE SET body=excluded.body,rev=excluded.rev,updated_at=excluded.updated_at,updated_by=excluded.updated_by",params![part,scope,owner,key,body,rev,now,actor])?;
     } else {
         tx.execute("DELETE FROM data_docs WHERE part_id=?1 AND scope=?2 AND owner=?3 AND collection='__storage' AND doc_id=?4",params![part,scope,owner,key])?;
@@ -407,7 +445,7 @@ impl PartService {
             self.blobs.clone(),
             self.now(),
         );
-        let (result,events,snapshots)=self.db.write(move|tx| {
+        let transaction=self.db.write(move|tx| {
             let row=crate::create::check_role(tx,policy.as_ref(),&p,crate::read::find_part(tx,&req.name)?.filter(|r|r.deleted_at.is_none()),&req.name,if snapshot{crate::spaces::EDIT}else{crate::spaces::VIEW},now)?;
             let part=&row.id;
             if let Some(id)=&rid && let Some(result)=idem::lookup(tx,&p.key(),id,"part_data",&hash)? {return Ok((result,vec![],vec![]));}
@@ -426,7 +464,7 @@ impl PartService {
                     let value=if req.action=="set" {let value=req.data.as_ref().ok_or_else(||PfError::invalid("data","data is required"))?; if !value.is_string(){return Err(PfError::invalid("data","__storage values must be strings"));} Some(value)} else {None};
                     let (rev,ev)=change(tx,part,&scope,owner,key,value,req.if_rev,&p.key(),None,now)?;
                     events.extend(ev);
-                    if scope=="shared" {snapshots.extend(scheduled_snapshot(tx,&blobs,part,now)?);}
+                    if scope=="shared" && req.action!="delete" {snapshots.extend(scheduled_snapshot(tx,&blobs,part,now)?);}
                     if value.is_some(){json!({"doc_id":key,"rev":rev})}else{json!({"doc_id":key,"deleted":true})}
                 },
                 "snapshot_list"=> {
@@ -456,7 +494,8 @@ impl PartService {
             };
             if let Some(id)=&rid {idem::store(tx,&p.key(),id,"part_data",&hash,&result,now)?;}
             Ok::<_,PfError>((result,events,snapshots))
-        }).await?;
+        }).await;
+        let (result, events, snapshots) = self.quota_result(transaction, principal, now).await?;
         let reason = match action.as_str() {
             "snapshot_restore" => "before_restore",
             "reset" => "before_reset",
@@ -762,6 +801,76 @@ mod stress_tests {
             k.count("SELECT count(*) FROM events WHERE type='data.changed'"),
             1000
         );
+    }
+
+    #[tokio::test]
+    async fn space_bytes_include_documents_and_refusal_keeps_old_data_and_no_idempotency() {
+        let k = kit();
+        let person = k.person("spacebytes");
+        k.svc
+            .create(
+                &person,
+                CreateRequest {
+                    name: Some("dataquota".into()),
+                    title: Some("Quota".into()),
+                    request_id: Some("create".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        k.svc.db.write(|tx|{tx.execute("UPDATE spaces SET quota_bytes=10",[])?;tx.execute("INSERT INTO data_snapshot_policies(part_id,mode,keep,set_by,set_at) SELECT id,'off',7,'user:fixture',0 FROM parts",[])?;Ok::<_,pf_db::DbError>(())}).await.unwrap();
+        let req = |action: &str, value: Option<&str>, rid: &str| PartDataRequest {
+            name: "dataquota".into(),
+            action: action.into(),
+            doc_id: Some("a".into()),
+            data: value.map(|v| json!(v)),
+            request_id: Some(rid.into()),
+            ..Default::default()
+        };
+        k.svc
+            .data(&person.principal, req("set", Some("12345678"), "first"))
+            .await
+            .unwrap();
+        let e = k
+            .svc
+            .data(&person.principal, req("set", Some("123456789"), "rejected"))
+            .await
+            .unwrap_err();
+        assert_eq!(e.code, "quota_exceeded");
+        assert_eq!(e.details["kind"], "space_bytes");
+        assert_eq!(
+            k.count("SELECT count(*) FROM idempotency WHERE request_id='rejected'"),
+            0
+        );
+        assert_eq!(
+            k.count("SELECT count(*) FROM quota_hits WHERE kind='space_bytes'"),
+            1
+        );
+        let get = PartDataRequest {
+            name: "dataquota".into(),
+            action: "get".into(),
+            doc_id: Some("a".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            k.svc.data(&person.principal, get).await.unwrap()["doc"]["data"],
+            "12345678"
+        );
+        // Deletion must work even after an administrator lowers a cap below existing usage.
+        k.svc
+            .db
+            .write(|tx| {
+                tx.execute("UPDATE spaces SET quota_bytes=1", [])?;
+                tx.execute("UPDATE parts SET shared_data_cap=1", [])?;
+                Ok::<_, pf_db::DbError>(())
+            })
+            .await
+            .unwrap();
+        k.svc
+            .data(&person.principal, req("delete", None, "delete"))
+            .await
+            .unwrap();
     }
 
     struct Budget(Arc<AtomicBool>);

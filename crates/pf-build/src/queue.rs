@@ -242,6 +242,7 @@ pub async fn finish_ok(
             let (ecosystem,name,version)=match crate::mirror::cdn_url_to_npm(&asset.resolved){Some((name,version))=>("npm",name,version),None=>("unknown",asset.url.clone(),String::new())};
             db.execute("INSERT INTO build_deps(build_id,ecosystem,name,version,source_url,blob_hash) VALUES(?1,?2,?3,?4,?5,?6)",params![j.id,ecosystem,name,version,asset.url,asset.hash])?;
         }
+        pf_model::quotas::check_space_bytes(db,&j.part,0,0,now)?;
         let mut events=vec![append_event(db,now,Some(&j.part),"build.finished","system",&json!({"id":j.id,"status":"ok"}))?];
         let active:bool=db.query_row("SELECT deleted_at IS NULL FROM parts WHERE id=?1",[&j.part],|r|r.get(0))?;
         let changed=active&&j.gate!="after_check"&&set_live_if_newer(db,&j.part,&j.version,j.id)?;
@@ -270,6 +271,7 @@ async fn finish_cached(cfg: &Config, job: &Job, cached: i64, key: String) -> Res
         db.execute("UPDATE builds SET status='ok',cache_key=?2,toolchain=?3,output_hash=(SELECT output_hash FROM builds WHERE id=?4),log_hash=(SELECT log_hash FROM builds WHERE id=?4),warnings=(SELECT warnings FROM builds WHERE id=?4),errors='[]',finished_at=?5,gate_check=?6 WHERE id=?1",params![j.id,key,TOOLCHAIN,cached,now,if j.gate=="after_check"{Some("pending")}else{None}])?;
         db.execute("INSERT INTO build_files(build_id,path,blob_hash,br_hash,content_type) SELECT ?1,path,blob_hash,br_hash,content_type FROM build_files WHERE build_id=?2",params![j.id,cached])?;
         db.execute("INSERT INTO build_deps(build_id,ecosystem,name,version,source_url,blob_hash) SELECT ?1,ecosystem,name,version,source_url,blob_hash FROM build_deps WHERE build_id=?2",params![j.id,cached])?;
+        pf_model::quotas::check_space_bytes(db,&j.part,0,0,now)?;
         let mut events=vec![append_event(db,now,Some(&j.part),"build.finished","system",&json!({"id":j.id,"status":"ok","cached":true}))?];
         let active:bool=db.query_row("SELECT deleted_at IS NULL FROM parts WHERE id=?1",[&j.part],|r|r.get(0))?;
         let changed=active&&j.gate!="after_check"&&set_live_if_newer(db,&j.part,&j.version,j.id)?;

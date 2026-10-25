@@ -36,6 +36,8 @@ pub enum BlobError {
 pub trait DiskBudget: Send + Sync {
     /// `true` when a put of `incoming` more bytes must be refused with `storage_full`.
     fn is_full(&self, incoming: u64) -> bool;
+    fn did_put(&self, _bytes: u64) {}
+    fn did_delete(&self, _bytes: u64) {}
 }
 
 /// A budget that never reports full (tests, and until the retention bead lands).
@@ -111,11 +113,52 @@ impl BlobStore {
 
     /// Check the shared disk budget before a database-backed allocation or undo snapshot.
     pub fn check_capacity(&self, incoming: u64) -> Result<(), BlobError> {
-        if self.budget.is_full(incoming) {Err(BlobError::StorageFull)} else {Ok(())}
+        if self.budget.is_full(incoming) {
+            Err(BlobError::StorageFull)
+        } else {
+            Ok(())
+        }
     }
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Janitor inventory, off the hot path. Includes abandoned puts whose caller rolled back
+    /// before it could record a DB row. Symlinks and temporary files are never followed.
+    pub fn entries(&self) -> Result<Vec<(String, u64, i64)>, BlobError> {
+        let mut entries = Vec::new();
+        for first in fs::read_dir(&self.root)? {
+            let first = first?;
+            if !first.file_type()?.is_dir() || first.file_name() == "tmp" {
+                continue;
+            }
+            for second in fs::read_dir(first.path())? {
+                let second = second?;
+                if !second.file_type()?.is_dir() {
+                    continue;
+                }
+                for entry in fs::read_dir(second.path())? {
+                    let entry = entry?;
+                    if !entry.file_type()?.is_file() {
+                        continue;
+                    }
+                    let hash = entry.file_name().to_string_lossy().into_owned();
+                    if !is_hash(&hash) {
+                        continue;
+                    }
+                    let meta = entry.metadata()?;
+                    let created = meta
+                        .modified()?
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis()
+                        .min(i64::MAX as u128) as i64;
+                    entries.push((hash, meta.len(), created));
+                }
+            }
+        }
+        Ok(entries)
     }
 
     /// Where the blob `hash` lives (whether or not it exists).
@@ -183,6 +226,9 @@ impl BlobStore {
         })();
         let _ = fs::remove_file(&tmp);
         let created = res?;
+        if created {
+            self.budget.did_put(size);
+        }
         Ok(Put {
             hash,
             size,
@@ -226,6 +272,19 @@ impl BlobStore {
     /// Verify a blob without returning it.
     pub fn verify(&self, hash: &str) -> Result<(), BlobError> {
         self.get(hash).map(|_| ())
+    }
+
+    /// GC only: callers must recheck references inside the single writer before deletion.
+    pub fn remove(&self, hash: &str) -> Result<u64, BlobError> {
+        Self::check(hash)?;
+        let size = match fs::metadata(self.path(hash)) {
+            Ok(m) => m.len(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(e) => return Err(e.into()),
+        };
+        fs::remove_file(self.path(hash))?;
+        self.budget.did_delete(size);
+        Ok(size)
     }
 
     /// Remove temp files older than `older_than` (left by a crash mid-put). Returns how many.

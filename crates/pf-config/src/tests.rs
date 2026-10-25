@@ -199,6 +199,7 @@ proptest! {
                 "backup.host_snapshots" => ("on", n),
                 "backup.export_schedule" => ("nightly", n),
                 "idp.issuer" => ("", n),
+                path if path.starts_with("disk.stores.") => (seed.as_str(), n + 1024),
                 _ => (seed.as_str(), n),
             };
             if key.ty == KeyType::Map {
@@ -508,4 +509,26 @@ fn env_md_lists_every_key_and_secret() {
     for (s, _, _) in SECRET_VARS {
         assert!(md.contains(s));
     }
+}
+
+#[test]
+fn store_caps_are_bounded_and_unsafe_quota_override_is_explicit() {
+    assert!(load("[disk.stores]\npreviews = 1024\n", &base_env()).is_ok());
+    for cap in [0u64, 1023, u64::MAX] {
+        assert!(
+            errs(load(
+                &format!("[disk.stores]\npreviews = {cap}\n"),
+                &base_env()
+            ))
+            .iter()
+            .any(|d| matches!(d, Diag::Invalid { .. } | Diag::Parse { .. }))
+        );
+    }
+    let loaded = load("[unsafe]\nquotas = \"off\"\n", &base_env()).unwrap();
+    assert!(
+        loaded
+            .warnings
+            .iter()
+            .any(|d| matches!(d,Diag::UnsafeSet{name} if name=="quotas"))
+    );
 }

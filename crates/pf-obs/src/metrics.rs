@@ -66,6 +66,13 @@ pub struct Metrics {
     pub nonpart_host_hits: IntCounter,
     pub ready_check_ok: IntGaugeVec,
     pub store_bytes: IntGaugeVec,
+    pub store_cap_bytes: IntGaugeVec,
+    pub disk_budget_bytes: IntGauge,
+    pub disk_used_bytes: IntGauge,
+    pub disk_budget_state: IntGauge,
+    pub quota_hits_total: IntCounterVec,
+    pub janitor_jobs_total: IntCounterVec,
+    pub janitor_freed_bytes_total: IntCounterVec,
     pub disk_headroom_ratio_permille: IntGauge,
     pub build_duration: Histogram,
     pub render_up: IntGauge,
@@ -134,6 +141,35 @@ fn build() -> Metrics {
         &["store"],
     )
     .expect("metric");
+    let store_cap_bytes = IntGaugeVec::new(
+        Opts::new("pf_store_cap_bytes", "Configured cap of each growing store"),
+        &["store"],
+    )
+    .expect("metric");
+    let disk_budget_bytes =
+        IntGauge::new("pf_disk_budget_bytes", "Data volume budget in bytes").expect("metric");
+    let disk_used_bytes =
+        IntGauge::new("pf_disk_used_bytes", "Measured data and runner bytes").expect("metric");
+    let disk_budget_state =
+        IntGauge::new("pf_disk_budget_state", "Disk budget: 0 ok, 1 warn, 2 full").expect("metric");
+    let quota_hits_total = IntCounterVec::new(
+        Opts::new("pf_quota_hits_total", "Deduplicated daily quota hits"),
+        &["kind"],
+    )
+    .expect("metric");
+    let janitor_jobs_total = IntCounterVec::new(
+        Opts::new("pf_janitor_jobs_total", "Completed janitor jobs"),
+        &["store", "outcome"],
+    )
+    .expect("metric");
+    let janitor_freed_bytes_total = IntCounterVec::new(
+        Opts::new(
+            "pf_janitor_freed_bytes_total",
+            "Bytes freed by janitor jobs",
+        ),
+        &["store"],
+    )
+    .expect("metric");
     let disk_headroom_ratio_permille = IntGauge::new(
         "pf_disk_headroom_permille",
         "Free space on the data volume, in thousandths",
@@ -156,6 +192,13 @@ fn build() -> Metrics {
         Box::new(nonpart_host_hits.clone()),
         Box::new(ready_check_ok.clone()),
         Box::new(store_bytes.clone()),
+        Box::new(store_cap_bytes.clone()),
+        Box::new(disk_budget_bytes.clone()),
+        Box::new(disk_used_bytes.clone()),
+        Box::new(disk_budget_state.clone()),
+        Box::new(quota_hits_total.clone()),
+        Box::new(janitor_jobs_total.clone()),
+        Box::new(janitor_freed_bytes_total.clone()),
         Box::new(disk_headroom_ratio_permille.clone()),
         Box::new(build_duration.clone()),
         Box::new(render_up.clone()),
@@ -172,6 +215,13 @@ fn build() -> Metrics {
         nonpart_host_hits,
         ready_check_ok,
         store_bytes,
+        store_cap_bytes,
+        disk_budget_bytes,
+        disk_used_bytes,
+        disk_budget_state,
+        quota_hits_total,
+        janitor_jobs_total,
+        janitor_freed_bytes_total,
         disk_headroom_ratio_permille,
         build_duration,
         render_up,

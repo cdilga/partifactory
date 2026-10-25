@@ -1,8 +1,8 @@
 use super::*;
 
-const FIXTURE_0003: Migration = Migration {
-    version: 3,
-    name: "0003_fixture",
+const FIXTURE_0004: Migration = Migration {
+    version: 4,
+    name: "0004_fixture",
     sql: include_str!("testdata/0002_fixture.sql"),
 };
 
@@ -20,8 +20,8 @@ fn tables(conn: &Connection) -> Vec<String> {
 fn migrate_from_empty() {
     let mut conn = Connection::open_in_memory().unwrap();
     let rep = migrate(&mut conn, MAIN).unwrap();
-    assert_eq!(rep.applied, vec![1, 2]);
-    assert_eq!(rep.version, 2);
+    assert_eq!(rep.applied, vec![1, 2, 3]);
+    assert_eq!(rep.version, 3);
     let t = tables(&conn);
     for want in [
         "users",
@@ -37,7 +37,7 @@ fn migrate_from_empty() {
     // Running again is a no-op.
     let again = migrate(&mut conn, MAIN).unwrap();
     assert!(again.applied.is_empty());
-    assert_eq!(again.version, 2);
+    assert_eq!(again.version, 3);
 }
 
 #[test]
@@ -52,11 +52,11 @@ fn migrate_from_n_minus_1() {
         })
         .unwrap();
     }
-    let set = [MAIN[0], MAIN[1], FIXTURE_0003];
+    let set = [MAIN[0], MAIN[1], MAIN[2], FIXTURE_0004];
     let mut conn = Connection::open(&path).unwrap();
     let rep = migrate(&mut conn, &set).unwrap();
-    assert_eq!(rep.applied, vec![3]);
-    assert_eq!(rep.version, 3);
+    assert_eq!(rep.applied, vec![4]);
+    assert_eq!(rep.version, 4);
     assert!(tables(&conn).iter().any(|t| t == "fixture_0002"));
     let v: String = conn
         .query_row("SELECT value FROM kv WHERE key = 'survives'", [], |r| {
@@ -73,7 +73,7 @@ fn migrate_from_n_minus_1() {
                 .map_err(DbError::from)
         })
         .unwrap();
-    assert_eq!(n, 3);
+    assert_eq!(n, 4);
 }
 
 #[test]
@@ -100,9 +100,10 @@ fn failed_migration_rolls_back() {
     let bad = [
         MAIN[0],
         MAIN[1],
+        MAIN[2],
         Migration {
-            version: 3,
-            name: "0003_bad",
+            version: 4,
+            name: "0004_bad",
             sql: "CREATE TABLE half (x INTEGER) STRICT; THIS IS NOT SQL;",
         },
     ];
@@ -111,7 +112,7 @@ fn failed_migration_rolls_back() {
     let v: u32 = conn
         .query_row("SELECT MAX(version) FROM _pf_migrations", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(v, 2);
+    assert_eq!(v, 3);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

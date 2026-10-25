@@ -16,6 +16,7 @@ pub mod jcs;
 pub mod lifecycle;
 pub mod manifest;
 pub mod names;
+pub mod quotas;
 pub mod read;
 pub mod rebase;
 pub mod spaces;

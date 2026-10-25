@@ -83,7 +83,7 @@ impl PartService {
             self.url(name),
             name.to_string(),
         );
-        let (out, epoch, committed) = self
+        let result = self
             .db
             .write(move |tx| {
                 if let Some(r) = idem::lookup(tx, &pkey, &request_id, "part_edit", &hash)? {
@@ -137,7 +137,8 @@ impl PartService {
                 idem::store(tx, &pkey, &request_id, "part_edit", &hash, &out, now)?;
                 Ok::<_, PfError>((out, epoch, committed))
             })
-            .await?;
+            .await;
+        let (out, epoch, committed) = self.quota_result(result, &caller.principal, now).await?;
         if let Some((key, e)) = epoch {
             self.epochs.set(&key, e);
         }
