@@ -35,7 +35,8 @@ fi
 out="$PWD/target/release-assets"
 mkdir -p "$out"
 export CARGO_INCREMENTAL=0 SOURCE_COMMIT="$(git rev-parse HEAD)"
-export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+# A stable epoch also keeps BuildKit WORKDIR/COPY metadata cacheable across commits.
+export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-0}"
 outputs=(--output "type=oci,dest=$out/partifactory-linux-amd64.oci.tar,rewrite-timestamp=true")
 if [ "$dry" = 0 ]; then outputs+=(--output type=image,push=true); fi
 # A single BuildKit cache, bounded after each build, including a failed one.

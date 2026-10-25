@@ -52,3 +52,9 @@ read-only volume. Do not attach it to ingress, publish CDP or mount `/data` into
 The application needs no ZFS or appliance API. Use the host's management API to install
 the compose stack on an appliance and take a host snapshot before changing it. Export
 application data regularly to a separate host; a local snapshot alone is not a backup.
+
+Release builds use canonical OCI timestamps (`SOURCE_DATE_EPOCH=0`) so source-only
+changes can reuse the dependency layers. The image revision label and `RELEASE.json`
+record the actual source commit. When reproducing an existing build, supply its
+`SOURCE_DATE_EPOCH` explicitly to `scripts/release.sh`; keep that value fixed to
+reuse the same BuildKit metadata and dependency cache.
