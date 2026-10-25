@@ -27,6 +27,13 @@ ports or public ops bindings, and checks that ops routes do not pass through
 the proxy. TLS verification remains enabled. A client connection override
 preserves the original hostname/SNI without editing `/etc/hosts`.
 
+Add `--deploy-image "$GOOD_RELEASE_IMAGE" --binary /path/to/partifactory` to
+smoke to exercise the successful deployment path too. It waits for the actual
+two-minute readiness watch, checks the completed journal and new container's
+digest, confirms the old container was removed and opens the part again.
+Without this option smoke records `successful_deploy: null`; it does not
+claim that the successful-switch gate was observed.
+
 `rollback.sh` adds `--binary`, `--good-image`, `--bad-image`,
 `--delayed-image` to the same connection arguments. All images must be pinned
 by digest. The live stack must start on the good digest. The immediate image

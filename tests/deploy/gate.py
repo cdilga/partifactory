@@ -42,6 +42,7 @@ def main():
     parser.add_argument("--good-image")
     parser.add_argument("--bad-image")
     parser.add_argument("--delayed-image")
+    parser.add_argument("--deploy-image", help="Smoke also performs and observes a successful good-image deployment")
     args = parser.parse_args()
     args.evidence_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     private = args.evidence_dir / "private.log"
@@ -114,6 +115,33 @@ def main():
     if args.mode == "logs":
         log_limits()
     elif args.mode == "smoke":
+        successful = None
+        if args.deploy_image:
+            require(pinned(args.deploy_image), "good deployment image must be pinned by digest")
+            before_id = service_id()
+            previous = inspect(before_id)["Config"]["Image"]
+            journal = args.evidence_dir / "good-deploy-journal.json"
+            argv = [str(args.binary.resolve()), "deploy", "--image", args.deploy_image,
+                    "--compose", str(args.compose.resolve()), "--journal", str(journal.resolve())]
+            if args.env_file:
+                argv += ["--env-file", str(args.env_file.resolve())]
+            if args.host:
+                endpoint = args.host
+                if "://" not in endpoint:
+                    endpoint = json.loads(command(["docker", "context", "inspect", endpoint]).stdout)[0]["Endpoints"]["docker"]["Host"]
+                argv += ["--host", endpoint]
+            began = time.monotonic()
+            output = command(argv, timeout=240)
+            (args.evidence_dir / "good-deploy.jsonl").write_bytes(output.stdout + output.stderr)
+            successful = json.loads(journal.read_text())
+            require(successful["ok"] and successful["phase"] == "complete" and successful["previous"] == previous,
+                    "good deployment did not complete its journal")
+            require(time.monotonic() - began >= 120, "good deployment skipped its two-minute readiness watch")
+            after_id = service_id()
+            require(after_id != before_id and inspect(after_id)["Config"]["Image"] == args.deploy_image,
+                    "good deployment did not switch the service")
+            require(command(engine + ["inspect", before_id], check=False).returncode != 0, "old container was not removed")
+            require(observed_part(), "part stopped serving after good deployment")
         current = inspect(service_id())
         require(pinned(current["Config"]["Image"]), "running release image must be digest-pinned")
         require(current["Config"]["User"] == "65532:65532", "application must be non-root")
@@ -128,7 +156,8 @@ def main():
             _, status, _ = request(args.base_url.rstrip("/") + suffix)
             require(status in (401, 403, 404), "proxy exposed an ops route")
         log_limits()
-        (args.evidence_dir / "smoke.json").write_text(json.dumps({"ok": True, "image": current["Config"]["Image"], "part_served": True}) + "\n")
+        (args.evidence_dir / "smoke.json").write_text(json.dumps({"ok": True, "image": current["Config"]["Image"],
+                                                                 "part_served": True, "successful_deploy": successful}) + "\n")
     else:
         require(all(pinned(value or "") for value in (args.good_image, args.bad_image, args.delayed_image)), "all three test images must be pinned by digest")
         require(inspect(service_id())["Config"]["Image"] == args.good_image, "start with the specified good image")
