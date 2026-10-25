@@ -133,7 +133,7 @@ load().then(async()=>{window.partifactory.ready();await deviceWait("admin_ready"
   const rawCrossHostClockDifferenceMs=seen-Number(painted.at);
   expect(elapsed,'server completion to admin style bounds guest response→style').toBeLessThan(1000);
   await expect(board.locator('[data-key="px:0:0"]')).toHaveCSS('background-color','rgb(228, 87, 46)');
-  await report('admin_live_under_1s',{at:String(elapsed),measurement:'same-host-server-completion-upper-bound'});
+  await report('admin_live_under_1s',{at:String(elapsed)});
   const frozenResponse=page.waitForResponse(response=>response.request().method()==='POST' && new URL(response.url()).pathname.startsWith(`/api/chrome/v1/${name}/links/`));
   await page.getByRole('button',{name:'Freeze',exact:true}).click();
   expect((await frozenResponse).status()).toBe(200);
