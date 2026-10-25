@@ -182,19 +182,19 @@ fn claims_policy(claims: &Value, binding: Binding<'_>) -> Result<()> {
         None if refresh => {}
         _ => return Err(VerifyError::Invalid),
     }
-    if let Some(expected) = claims.get("at_hash") {
-        if !expected.as_str().is_some_and(|expected| {
+    if let Some(expected) = claims.get("at_hash")
+        && !expected.as_str().is_some_and(|expected| {
             token_hash(access, algorithm).is_ok_and(|actual| equal(&actual, expected))
-        }) {
-            return Err(VerifyError::Invalid);
-        }
+        })
+    {
+        return Err(VerifyError::Invalid);
     }
-    if let (Some(expected), Some(code)) = (claims.get("c_hash"), code) {
-        if !expected.as_str().is_some_and(|expected| {
+    if let (Some(expected), Some(code)) = (claims.get("c_hash"), code)
+        && !expected.as_str().is_some_and(|expected| {
             token_hash(code, algorithm).is_ok_and(|actual| equal(&actual, expected))
-        }) {
-            return Err(VerifyError::Invalid);
-        }
+        })
+    {
+        return Err(VerifyError::Invalid);
     }
     Ok(())
 }
