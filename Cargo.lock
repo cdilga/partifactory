@@ -3466,6 +3466,7 @@ dependencies = [
  "pf-db",
  "pf-model",
  "pf-obs",
+ "pf-ops",
  "pf-prelude",
  "pf-serve",
  "pf-ui-shell",
