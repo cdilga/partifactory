@@ -117,7 +117,7 @@ async fn gallery(
         body.push_str("</nav><select id=\"kind\" aria-label=\"Part kind\"><option value=\"\">All kinds</option>");
         for (value,label) in [("html","HTML"),("markdown","Markdown"),("text","Text"),("tsx","TSX"),("svg","SVG"),("files","Files")] {body.push_str(&format!("<option value=\"{value}\"{}>{label}</option>",if value==kind {" selected"}else{""}));}
         body.push_str("</select><div class=\"view-toggle\" aria-label=\"Layout\"><a href=\"/?view=grid\">Grid</a><a href=\"/?view=list\">List</a></div></div>");
-        if visible.is_empty(){body.push_str(&format!(r##"<section class="empty" id="connect">{MARK}<h1>A place for your next part.</h1><p>Connect an agent, then ask it to make a page, a tool or something useful for home.</p><a class="button primary" href="#connect-command">Connect an agent</a><code class="command" id="connect-command">claude mcp add partifactory --transport http {origin}/mcp --header "Authorization: Bearer &lt;personal token&gt;"</code><button id="copy-command">Copy command</button><p id="notice" role="status"></p></section>"##));}
+        if visible.is_empty(){body.push_str(&format!(r##"<section class="empty">{MARK}<h1>A place for your next part.</h1><p>Connect an agent, then ask it to make a page, a tool or something useful for home.</p><a class="button primary" href="/connect">Connect an agent</a></section>"##));}
         let mut day=String::new();
         for p in visible {
             let age=now.div_euclid(86_400_000)-p.updated.div_euclid(86_400_000);let section=if age==0{"TODAY"}else if age==1{"YESTERDAY"}else if age<7{"THIS WEEK"}else{"EARLIER"};
@@ -134,6 +134,35 @@ async fn gallery(
         use leptos::prelude::*;
         let shell=Owner::new().with(||view!{<pf_ui_shell::Shell user=actor.username query=query admin=actor.admin body=body/>}.to_html());
         Ok(page("Parts",&shell,&origin))
+    }.await;
+    result.unwrap_or_else(fail)
+}
+
+/// Persistent setup entrypoint, independent of the gallery's contents or filters.
+async fn connect(State(s): State<AppState>, headers: HeaderMap) -> Response {
+    let result = async {
+        let actor = auth(&s)?.require_session(&headers).await?;
+        let origin = format!("https://{}", s.config().hosts.workspace_host());
+        let endpoint = escape(&format!("{origin}/mcp"));
+        let body = format!(r#"<main class="page setup-page"><div class="heading"><h1>Connect an agent</h1></div><p class="lede">Give your agent a connection to your parts.</p><section class="workspace-panel" aria-labelledby="mcp-heading"><span class="section-head">REMOTE MCP</span><h2 id="mcp-heading">Add partifactory to your agent</h2><p>In your agent's MCP settings, add this remote server URL:</p><code class="command" id="connect-command">{endpoint}</code><button class="primary" id="copy-command">Copy server URL</button><p id="notice" role="status"></p><ol class="setup-steps"><li>Open the connection in your agent.</li><li>Sign in to partifactory in the browser it opens.</li><li>Review the access and spaces, then allow the connection.</li></ol><p class="muted">Your agent must support remote MCP with OAuth. You can review its access and revoke it from Connected agents.</p></section><nav class="setup-links" aria-label="Connection options"><a class="button" href="/connected-agents">Connected agents</a><a class="button" href="/device">Enter a device code</a></nav><p class="muted">If your agent shows a device code, use Enter a device code and make sure the codes match before allowing access.</p></main>"#);
+        use leptos::prelude::*;
+        let shell = Owner::new().with(|| view! {<pf_ui_shell::Shell user=actor.username query=String::new() admin=actor.admin body=body/>}.to_html());
+        tracing::info!(event="ui.render", page="connect", outcome="ok");
+        Ok::<_, PfError>(page("Connect an agent", &shell, &origin))
+    }.await;
+    result.unwrap_or_else(fail)
+}
+
+/// The public-link API remains in pf-links; workspace chrome has one shared owner.
+async fn public_links(State(s): State<AppState>, headers: HeaderMap) -> Response {
+    let result = async {
+        let actor = auth(&s)?.require_admin_session(&headers, false).await?;
+        let origin = format!("https://{}", s.config().hosts.workspace_host());
+        let body = r#"<main class="page admin-links"><div class="heading"><h1>Public links</h1><span class="public mono">ANYONE WITH THE LINK</span></div><p class="lede">Every live public link across the workspace.</p><p class="muted">Anyone who gets a link can open its part without signing in. Revoking a link also closes access in its open guest tabs.</p><section class="workspace-panel links-panel" aria-label="Live public links"><div class="links-scroll" tabindex="0" role="region" aria-label="Public links table"><table class="links-table"><thead><tr><th scope="col">Part</th><th scope="col">Created</th><th scope="col">Expires</th><th scope="col">Opens</th><th scope="col">Last opened</th><th scope="col">Action</th></tr></thead><tbody id="links" aria-busy="true"></tbody></table></div><p id="status" role="status">Loading public links…</p><button id="retry-links" hidden>Try again</button></section><section class="revoke-panel" aria-labelledby="revoke-heading"><div><h2 id="revoke-heading">Revoke all public links</h2><p>Every public link will stop working. Hold the button for one second to confirm.</p></div><button class="danger" id="kill" disabled>Hold to revoke all links</button></section></main>"#.to_owned();
+        use leptos::prelude::*;
+        let shell = Owner::new().with(|| view! {<pf_ui_shell::Shell user=actor.username query=String::new() admin=actor.admin body=body/>}.to_html());
+        tracing::info!(event="ui.render", page="public_links", outcome="ok");
+        Ok::<_, PfError>(page("Public links", &shell, &origin))
     }.await;
     result.unwrap_or_else(fail)
 }
@@ -435,6 +464,8 @@ pub fn install(b: &mut ServerBuilder) {
     b.workspace(
         Router::new()
             .route("/", get(gallery))
+            .route("/connect", get(connect))
+            .route("/admin/links", get(public_links))
             .route("/p/{name}/share", get(workspace_share))
             .route("/_pf/wrapper.js", get(share_script))
             .route("/_pf/wrapper.css", get(share_css))

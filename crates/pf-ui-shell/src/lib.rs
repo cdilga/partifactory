@@ -36,11 +36,12 @@ pub fn Shell(user: String, query: String, admin: bool, body: String) -> impl Int
                     <svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M6 7h12v5H6zM9 17h6"/></svg>
                     "partifactory"
                 </a>
-                <form class="search" method="get"><input id="search" name="q" aria-label="Search parts" placeholder="Search parts  /" value=query.clone()/></form>
+                <form class="search" method="get" action="/"><input id="search" name="q" aria-label="Search parts" placeholder="Search parts  /" value=query.clone()/></form>
                 <button id="theme" aria-label="Toggle theme" on:click=theme>"◐"</button>
                 <details><summary aria-label="Account menu">{avatar}</summary><div class="menu">
                     {admin.then(||view!{<a href="/admin/links">"Public links"</a>})}
-                    <a href="/#connect">"Connect an agent"</a>
+                    <a href="/connect">"Connect an agent"</a>
+                    <a href="/connected-agents">"Connected agents"</a>
                     <button data-signout="/signout" on:click=move |_| signout("/signout")>"Sign out"</button>
                     <button data-signout="/signout/everywhere" on:click=move |_| signout("/signout/everywhere")>"Sign out everywhere"</button>
                 </div></details>

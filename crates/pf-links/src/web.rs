@@ -250,16 +250,6 @@ async fn revoke_all(State(s): State<AppState>, h: HeaderMap) -> Response {
         Err(e) => error(e),
     }
 }
-async fn admin_page(State(s): State<AppState>, h: HeaderMap) -> Response {
-    if let Err(e) = admin(&s, &h, None, false).await {
-        return error(e);
-    }
-    let mut r=axum::response::Html(r#"<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Public links · partifactory</title><style>html{color-scheme:light dark;font:16px system-ui}body{max-width:1100px;margin:40px auto;padding:0 20px}table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:12px;border-bottom:1px solid #8885}button{font:inherit;padding:10px 14px;border:1px solid currentColor;border-radius:8px;background:transparent;color:inherit;cursor:pointer}#kill{margin-top:24px;color:light-dark(#9e2525,#ffb4ac)}.scroll{overflow:auto}#status{min-height:28px}</style><script src="/_pf/links.js" defer></script></head><body><a href="/">← Workspace</a><h1>Public links</h1><p>Every live link across the workspace. Revoking a link also invalidates its open guest tabs.</p><div class="scroll"><table><thead><tr><th>Part</th><th>Created</th><th>Expires</th><th>Opens</th><th>Last opened</th><th>Action</th></tr></thead><tbody id="links"></tbody></table></div><button id="kill">Hold 1 second to revoke all links</button><p id="status" role="status"></p></body></html>"#).into_response();
-    r.headers_mut().insert(header::CONTENT_SECURITY_POLICY,HeaderValue::from_static("default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"));
-    r.headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    r
-}
 async fn admin_script() -> Response {
     (
         [
@@ -417,7 +407,6 @@ pub fn install(builder: &mut ServerBuilder, svc: &LinkService) {
     builder.workspace(
         Router::new()
             .route("/p/{name}", get(part_redirect))
-            .route("/admin/links", get(admin_page))
             .route("/_pf/links.js", get(admin_script))
             .route("/api/admin/v1/links", get(list))
             .route("/api/admin/v1/links/revoke-all", post(revoke_all))
