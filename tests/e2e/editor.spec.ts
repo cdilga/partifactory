@@ -59,7 +59,8 @@ test('an Edit member changes a Markdown part in the browser, with drafts and con
   await expect.poll(async () => (await call('part_get', { name })).content['index.md']).toBe('# Shopping  list\n\n- milk (2 litres)\n\n| Item | Qty |\n| --- | --: |\n| eggs | 6 |\n| bread | 1 |\n');
   await p.screenshot({ path: info.outputPath('editor-formatted.png'), fullPage: true });
   // Select a word: the floating toolbar offers Comment, which opens the rail on that quote.
-  await doc.locator('h1').dblclick();
+  // Double-click the first word itself (the heading's box is wider than its text).
+  await doc.locator('h1').dblclick({ position: { x: 12, y: 12 } });
   await expect(p.locator('#pf-editor .pf-toolbar')).toBeVisible();
   await p.screenshot({ path: info.outputPath('editor-toolbar.png') });
   await p.locator('#pf-editor .pf-toolbar').getByRole('button', { name: 'Comment', exact: true }).click();

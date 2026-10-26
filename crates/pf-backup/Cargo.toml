@@ -31,7 +31,7 @@ tempfile.workspace = true
 thiserror.workspace = true
 tokio = { version = "1", features = ["sync", "time", "rt"] }
 tracing.workspace = true
-zstd = "0.13"
+zstd = "0.14.3"
 
 [dev-dependencies]
 pf-model = { path = "../pf-model" }
