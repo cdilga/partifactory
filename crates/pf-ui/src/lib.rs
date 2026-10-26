@@ -434,6 +434,154 @@ async fn comments_events(
     });
     Sse::new(stream).into_response()
 }
+/// The source editor (Slice 2): the live text files of a part, for people with Edit.
+fn editor_ctx(actor: &pf_auth::SessionActor, write: bool) -> pf_ops::Ctx {
+    let mut scopes: std::collections::BTreeSet<String> = ["parts:read".to_owned()].into();
+    if write {
+        scopes.insert("parts:write".into());
+    }
+    pf_ops::Ctx {
+        caller: pf_model::create::Caller {
+            principal: actor.principal(),
+            via: "chrome",
+        },
+        scopes,
+        spaces: None,
+    }
+}
+async fn editor_role(
+    s: &AppState,
+    actor: &pf_auth::SessionActor,
+    name: &str,
+) -> Result<String, PfError> {
+    let svc = parts(s)?.clone();
+    let (principal, policy, now, name) = (
+        actor.principal(),
+        svc.policy.clone(),
+        pf_db::ids::now_ms(),
+        name.to_owned(),
+    );
+    svc.db
+        .read(move |db| {
+            let row =
+                pf_model::read::find_part(db, &name)?.ok_or_else(|| PfError::not_found("part"))?;
+            let role = policy
+                .role(db, &principal, &row.id, now)?
+                .ok_or_else(|| PfError::not_found("part"))?;
+            if role < 2 {
+                return Err(
+                    PfError::new("forbidden", "Editing needs Edit or more on this part.")
+                        .with("role_needed", "edit"),
+                );
+            }
+            Ok(row.id)
+        })
+        .await
+}
+async fn source_get(
+    State(s): State<AppState>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let result = async {
+        let actor = auth(&s)?.require_session(&headers).await?;
+        let part_id = editor_role(&s, &actor, &name).await?;
+        let got = pf_ops::Registry::new(parts(&s)?.clone()).run(&editor_ctx(&actor, false), "part_get", json!({"name":name})).await?;
+        let uid = actor.user_id.clone();
+        let draft: Option<(Value, i64)> = parts(&s)?
+            .db
+            .read(move |db| {
+                db.query_row(
+                    "SELECT d.files, v.n FROM drafts d JOIN versions v ON v.id=d.base_version_id WHERE d.user_id=?1 AND d.part_id=?2",
+                    pf_db::rusqlite::params![uid, part_id],
+                    |r| Ok((serde_json::from_str(&r.get::<_, String>(0)?).unwrap_or(Value::Null), r.get(1)?)),
+                )
+                .optional()
+                .map_err(PfError::from)
+            })
+            .await?;
+        Ok::<_, PfError>(json!({"head":got["head"],"kind":got["kind"],"files":got["files"],"content":got["content"],"draft":draft.map(|(files,base)| json!({"files":files,"base":base}))}))
+    }
+    .await;
+    match result {
+        Ok(j) => Json(j).into_response(),
+        Err(e) => fail(e),
+    }
+}
+#[derive(Deserialize)]
+struct SourceSave {
+    file: String,
+    content: String,
+    if_match: String,
+}
+async fn source_save(
+    State(s): State<AppState>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+    Json(b): Json<SourceSave>,
+) -> Response {
+    let result = async {
+        let actor = auth(&s)?.require_session(&headers).await?;
+        let part_id = editor_role(&s, &actor, &name).await?;
+        let rid = format!("web-{}", pf_db::ids::new_id("r"));
+        let out = pf_ops::Registry::new(parts(&s)?.clone())
+            .run(&editor_ctx(&actor, true), "part_edit", json!({"name":name,"edits":[{"op":"write","file":b.file,"content":b.content,"if_match":b.if_match}],"request_id":rid,"message":"Edited in the browser","wait":false}))
+            .await?;
+        let uid = actor.user_id.clone();
+        parts(&s)?.db.write(move |tx| {
+            tx.execute("DELETE FROM drafts WHERE user_id=?1 AND part_id=?2", pf_db::rusqlite::params![uid, part_id])?;
+            Ok::<_, PfError>(())
+        }).await?;
+        tracing::info!(event = "part.edit", surface = "web", outcome = "ok");
+        Ok::<_, PfError>(out)
+    }
+    .await;
+    match result {
+        Ok(j) => Json(j).into_response(),
+        Err(e) => fail(e),
+    }
+}
+#[derive(Deserialize)]
+struct DraftSave {
+    /// `{path: text}`; empty discards the draft.
+    files: std::collections::BTreeMap<String, String>,
+    base: i64,
+}
+async fn draft_save(
+    State(s): State<AppState>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+    Json(b): Json<DraftSave>,
+) -> Response {
+    let result = async {
+        let actor = auth(&s)?.require_session(&headers).await?;
+        let part_id = editor_role(&s, &actor, &name).await?;
+        let files = serde_json::to_string(&b.files).map_err(|e| PfError::internal(e.to_string()))?;
+        if files.len() > 1 << 20 {
+            return Err(PfError::new("too_large", "A draft is at most 1 MiB."));
+        }
+        let (uid, now) = (actor.user_id.clone(), pf_db::ids::now_ms());
+        parts(&s)?.db.write(move |tx| {
+            if b.files.is_empty() {
+                tx.execute("DELETE FROM drafts WHERE user_id=?1 AND part_id=?2", pf_db::rusqlite::params![uid, part_id])?;
+                return Ok(());
+            }
+            let base: String = tx.query_row("SELECT id FROM versions WHERE part_id=?1 AND n=?2", pf_db::rusqlite::params![part_id, b.base], |r| r.get(0))
+                .map_err(|_| PfError::invalid("base", "unknown version"))?;
+            tx.execute(
+                "INSERT INTO drafts(user_id,part_id,base_version_id,files,updated_at) VALUES(?1,?2,?3,?4,?5)
+                 ON CONFLICT(user_id,part_id) DO UPDATE SET base_version_id=excluded.base_version_id, files=excluded.files, updated_at=excluded.updated_at",
+                pf_db::rusqlite::params![uid, part_id, base, files, now],
+            )?;
+            Ok::<_, PfError>(())
+        }).await
+    }
+    .await;
+    match result {
+        Ok(()) => Json(json!({"saved": true})).into_response(),
+        Err(e) => fail(e),
+    }
+}
 #[derive(Deserialize)]
 struct MoveTo {
     space: String,
@@ -735,6 +883,16 @@ pub fn install(b: &mut ServerBuilder) {
             .route(
                 "/api/chrome/v1/{name}/comments/events",
                 get(comments_events).options(|| async { StatusCode::NO_CONTENT }),
+            )
+            .route(
+                "/api/chrome/v1/{name}/source",
+                get(source_get)
+                    .post(source_save)
+                    .options(|| async { StatusCode::NO_CONTENT }),
+            )
+            .route(
+                "/api/chrome/v1/{name}/draft",
+                post(draft_save).options(|| async { StatusCode::NO_CONTENT }),
             )
             .route(
                 "/api/chrome/v1/{name}/move",

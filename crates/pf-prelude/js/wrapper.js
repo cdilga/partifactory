@@ -212,6 +212,64 @@ window.pfShareChrome = function (part, WS) {
     open.forEach(function (t) { thread(t, commentsBody); });
     if (done.length) { var d = el('details', null, commentsBody); el('summary', 'Resolved (' + done.length + ')', d); done.forEach(function (t) { thread(t, d); }); }
   }
+  // The source editor (Slice 2): Edit and above change text parts here, with drafts and a
+  // conflict notice if someone else saved first. The page reloads to the new version on save.
+  var editor = null;
+  function openEditor() {
+    if (!editor) {
+      editor = { panel: el('dialog', null, document.body) };
+      var d = editor.panel; d.id = 'pf-editor'; d.setAttribute('aria-labelledby', 'pf-editor-title');
+      var head = el('header', null, d); el('h2', 'Edit', head).id = 'pf-editor-title';
+      editor.file = el('select', null, head); editor.file.setAttribute('aria-label', 'File');
+      editor.save = button('Save', head, function () { saveEditor(false); }); editor.save.className = 'pf-primary';
+      button('Close', head, function () { d.close(); });
+      editor.text = el('textarea', null, d); editor.text.spellcheck = false; editor.text.setAttribute('aria-label', 'Source');
+      editor.status = el('p', null, d); editor.status.setAttribute('role', 'status');
+      editor.conflict = el('div', null, d); editor.conflict.className = 'pf-conflict'; editor.conflict.hidden = true;
+      el('p', 'This part changed since you started editing.', editor.conflict);
+      button('Save mine anyway', editor.conflict, function () { saveEditor(true); });
+      button('Discard my changes', editor.conflict, function () { discardEditor(); });
+      var timer;
+      editor.text.oninput = function () {
+        editor.edits[editor.file.value] = editor.text.value; clearTimeout(timer);
+        timer = setTimeout(function () { api('/draft', { files: editor.edits, base: editor.head }).then(function () { editor.status.textContent = 'Draft saved.'; }).catch(function () {}); }, 800);
+      };
+      editor.file.onchange = function () { editor.text.value = editor.edits[editor.file.value] != null ? editor.edits[editor.file.value] : editor.src.content[editor.file.value]; };
+    }
+    editor.panel.showModal(); editor.status.textContent = 'Loading…'; editor.conflict.hidden = true;
+    return api('/source').then(function (src) {
+      editor.src = src; editor.head = src.head; editor.edits = {};
+      var names = Object.keys(src.content || {}).filter(function (f) { return typeof src.content[f] === 'string'; });
+      editor.file.replaceChildren(); names.forEach(function (f) { var o = el('option', f, editor.file); o.value = f; });
+      editor.file.hidden = names.length < 2;
+      editor.status.textContent = '';
+      if (src.draft && src.draft.files) {
+        editor.edits = src.draft.files;
+        editor.status.textContent = src.draft.base === src.head ? 'Restored your unsaved changes.' : 'Restored your unsaved changes; the part has changed since.';
+      }
+      editor.file.value = names[0]; editor.file.onchange(); editor.text.focus();
+    }).catch(function (e) { editor.status.textContent = e.message || String(e); });
+  }
+  function saveEditor(force) {
+    var files = Object.keys(editor.edits); if (!files.length) { editor.status.textContent = 'No changes.'; return; }
+    var chain = Promise.resolve(), saved = null;
+    files.forEach(function (f) {
+      chain = chain.then(function () {
+        var hash = force && editor.current && editor.current[f] ? editor.current[f] : (editor.src.files[f] || {}).hash || null;
+        return api('/source', { file: f, content: editor.edits[f], if_match: hash }).then(function (j) { saved = j; delete editor.edits[f]; });
+      });
+    });
+    chain.then(function () {
+      editor.conflict.hidden = true; editor.status.textContent = 'Saved as version ' + saved.head + '.';
+      api('/draft', { files: {}, base: saved.head }).catch(function () {});
+      var f = document.getElementById('pf-frame'); if (f) setTimeout(function () { f.src = f.src; }, 600);
+      return api('/source').then(function (src) { editor.src = src; editor.head = src.head; });
+    }).catch(function (e) {
+      if (e.code === 'if_match_failed') { editor.current = editor.current || {}; editor.current[editor.file.value] = e.details && e.details.current_sha256; editor.conflict.hidden = false; editor.status.textContent = ''; return; }
+      editor.status.textContent = e.message || String(e);
+    });
+  }
+  function discardEditor() { editor.edits = {}; api('/draft', { files: {}, base: editor.head }).catch(function () {}); editor.panel.close(); openEditor(); }
   function openComments() {
     if (!commentsPanel) {
       commentsPanel = el('dialog', null, document.body); commentsPanel.id = 'pf-comments'; commentsPanel.setAttribute('aria-labelledby', 'pf-comments-title');
@@ -239,6 +297,7 @@ window.pfShareChrome = function (part, WS) {
   var nameLabel=el('span',part,bar);nameLabel.className='pf-name';
   var revision=el('span','',bar);revision.className='pf-revision';
   audience = el('span', 'Only me', bar); audience.className = 'pf-audience';
+  var editButton=button('Edit',bar,openEditor);editButton.hidden=true;
   var commentsButton=button('Comments',bar,openComments);commentsButton.hidden=true;commentsButton.className='pf-comments-button';
   var shareButton=button('Share',bar,share);shareButton.hidden=true;
   var more=el('details',null,bar);more.className='pf-more';var toggle=el('summary','⋯',more);toggle.setAttribute('aria-label','More part actions');
@@ -251,7 +310,7 @@ window.pfShareChrome = function (part, WS) {
   function updateSummary(fromVersion) {
     return api('/summary').then(function(j){summary=j;title.textContent=j.title||part;draftTitle.textContent=j.title||part;document.title=(j.title||part)+' · partifactory';
       kind.textContent=String(j.kind||'').toUpperCase();revision.textContent=j.live===null?'DRAFT':'REV '+j.live;
-      var features=j.features||{};shareButton.hidden=!features.share;if(features.comments&&commentsButton.hidden){commentsButton.hidden=false;loadComments();listenComments();}copy.hidden=!features.copy_link;standalone.hidden=!features.open_standalone;
+      var features=j.features||{};shareButton.hidden=!features.share;editButton.hidden=!(j.role>=2&&['text','markdown','html','svg','code'].indexOf(j.kind)>=0);if(features.comments&&commentsButton.hidden){commentsButton.hidden=false;loadComments();listenComments();}copy.hidden=!features.copy_link;standalone.hidden=!features.open_standalone;
       shareButton.onclick=features.unsandboxed?function(){location.href=WS+'/p/'+encodeURIComponent(part)+'/share';}:share;
       var f=document.getElementById('pf-frame');if(f)standalone.href=f.src;
       var wasDraft=!drafting.hidden;drafting.hidden=j.live!==null;
