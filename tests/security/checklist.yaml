@@ -485,7 +485,7 @@
         {
           "kind": "playwright",
           "file": "tests/e2e/device_grant.spec.ts",
-          "test": "real sign-in consents device and personal agent tokens, refresh reuse and revoke fail closed",
+          "test": "real sign-in consents device agent tokens, refresh reuse and revoke fail closed",
           "proves": "Real OIDC sign-in, device/PAT consent and token revocation.",
           "projects": [
             "chromium-desktop",
@@ -557,7 +557,7 @@
         {
           "kind": "playwright",
           "file": "tests/e2e/device_grant.spec.ts",
-          "test": "real sign-in consents device and personal agent tokens, refresh reuse and revoke fail closed",
+          "test": "real sign-in consents device agent tokens, refresh reuse and revoke fail closed",
           "proves": "Real OIDC sign-in, device/PAT consent and token revocation.",
           "projects": [
             "chromium-desktop",
@@ -584,7 +584,7 @@
     },
     {
       "id": "SEC-026",
-      "requirement": "Agent access tokens are scope- and space-limited, revoked by the connection cascade, and redacted in logs; retired `pf_pat_` personal tokens never resolve.",
+      "requirement": "Agent access tokens are redacted in logs, scope- and space-limited, and revoked by the connection cascade; retired `pf_pat_` tokens never resolve.",
       "components": [
         {
           "kind": "native",
@@ -600,7 +600,7 @@
         {
           "kind": "playwright",
           "file": "tests/e2e/device_grant.spec.ts",
-          "test": "real sign-in consents device and personal agent tokens, refresh reuse and revoke fail closed",
+          "test": "real sign-in consents device agent tokens, refresh reuse and revoke fail closed",
           "proves": "Real OIDC sign-in, device/PAT consent and token revocation.",
           "projects": [
             "chromium-desktop",
