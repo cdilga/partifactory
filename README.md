@@ -2,7 +2,13 @@
 
 A self-hosted home for the things you and your AI agents make: pages, React tools, documents, decks and diagrams. Each one is a **part**, with its own origin and a name that means something (`photofinder-part.example.dev`).
 
-Status: **design stage**. The plan is in [PLAN.md](PLAN.md). There's no code yet.
+Status: **early, and in daily use by one household.** The first two slices of [PLAN.md](PLAN.md) are built, tested in CI on desktop and mobile browser engines, and deployed:
+
+- **Parts:** HTML, Markdown, text, SVG, code and multi-file parts, each sandboxed on its own host with no cookies. Every version is kept, and a server-side render check catches pages that crash or come up blank.
+- **Agents:** connect over MCP, an HTTPS JSON API or the `part` CLI, with OAuth (including Client ID Metadata Documents) or a device code. Each agent gets its own scoped, revocable connection. The contract agents read is [docs/agent-contract.md](docs/agent-contract.md), served as `/skill.md`.
+- **People:** OIDC sign-in, sharing with people and groups as View, Comment, Edit or Manage, a household Family space, live comments, a formatted Markdown editor, shared data inside parts, and admin-made public links.
+
+Still to come: React (`tsx`) parts, backends, invites, notifications and full-text search. The plan has the order.
 
 ## Credit
 
