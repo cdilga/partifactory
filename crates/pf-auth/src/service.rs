@@ -45,7 +45,7 @@ pub struct SessionActor {
 }
 /// How the admin confirms high-risk actions: `kv` key `admin.confirm`.
 pub const CONFIRM_KEY: &str = "admin.confirm";
-pub const CONFIRM_MODES: [&str; 2] = ["passkey", "off"];
+pub const CONFIRM_MODES: [&str; 3] = ["passkey", "provider", "off"];
 impl SessionActor {
     pub fn principal(&self) -> Principal {
         Principal::person(&self.user_id)
@@ -868,6 +868,7 @@ pub fn install(builder: &mut ServerBuilder, service: AuthService) {
         Router::new()
             .route("/signin", get(crate::oidc::signin))
             .route("/oidc/callback", get(crate::oidc::callback))
+            .route("/admin/stepup/signin", get(crate::oidc::stepup_signin))
             .route_layer(pf_serve::ratelimit::layer("signin")),
     );
     builder.workspace(

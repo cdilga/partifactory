@@ -408,6 +408,27 @@
           ]
         },
         {
+          "kind": "native",
+          "file": "crates/pf-auth/src/tests.rs",
+          "test": "admin_confirmation_can_be_turned_off_only_for_the_admin",
+          "proves": "Without a passkey, step-up falls back to a provider sign-in instead of locking the admin out; only the admin's mode changes."
+        },
+        {
+          "kind": "native",
+          "file": "crates/pf-auth/src/oidc.rs",
+          "test": "provider_confirmation_needs_the_same_person_signed_in_again",
+          "proves": "A provider confirmation needs the same subject and an auth_time after it began."
+        },
+        {
+          "kind": "playwright",
+          "file": "tests/e2e/workspace-admin.spec.ts",
+          "test": "A provider confirmation is refused unless the provider signs the admin in again",
+          "proves": "A provider that reuses its own sign-in (no fresh auth_time) cannot confirm an admin session.",
+          "projects": [
+            "chromium-desktop"
+          ]
+        },
+        {
           "kind": "pending",
           "owner": "pf-lsdg",
           "proves": "Household-sharing op and its no-step-up rule are outside Slice 1."

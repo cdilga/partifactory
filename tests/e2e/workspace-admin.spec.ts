@@ -103,10 +103,40 @@ test('Security shows how admin actions are confirmed, as a choice', async ({page
   // The checked option is the mode in force; the harness keeps the passkey default.
   await expect(page.getByRole('radio',{name:/Your partifactory passkey/})).toBeChecked();
   await expect(page.getByRole('radio',{name:/Nothing extra/})).not.toBeChecked();
-  await expect(page.getByRole('radio',{name:/fresh sign-in/})).toBeDisabled();
+  await expect(page.getByRole('radio',{name:/fresh sign-in/})).toBeEnabled();
+  // Passkeys have their own section, and adding one is always offered.
+  await expect(page.getByRole('heading',{name:'Your partifactory passkeys',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Add a passkey',exact:true})).toBeVisible();
   const evidence=path.resolve('../../target/evidence/pf-security',info.project.name);fs.mkdirSync(evidence,{recursive:true});
   await page.screenshot({path:path.join(evidence,'security.png'),fullPage:true});
   await page.setViewportSize({width:360,height:740});
   await noPageOverflow(page);
   expect((await waitForLog({event:'ui.render'})).some(l=>l.page==='security')).toBe(true);
+});
+
+test('A provider confirmation is refused unless the provider signs the admin in again', async ({browser}) => {
+  // Its own session, so this never touches the shared admin session. The harness's Dex asks
+  // for the password again (prompt=login) but its ID token carries no auth_time, so nothing
+  // proves a fresh sign-in: the confirmation must be refused, the session stays unconfirmed,
+  // and the admin is told why. The accepted path is pf-auth's
+  // provider_confirmation_needs_the_same_person_signed_in_again plus the live gate.
+  const context=await browser.newContext();const page=await context.newPage();
+  try{
+    const base=process.env.PF_BASE_URL??'https://parts.pf.test';
+    await page.goto(base+'/signin?return=/');
+    await page.locator('input[name=login]').fill('admin@example.com');
+    await page.locator('input[name=password]').fill('password');
+    await page.locator('button[type=submit]').click();
+    await page.waitForURL(base+'/**');
+    expect((await (await page.request.get(base+'/api/session')).json()).step_up_status).toBe(false);
+    await page.goto(base+'/admin/stepup/signin?return=/admin/security');
+    await expect(page.locator('input[name=login]')).toBeVisible();
+    await page.locator('input[name=login]').fill('admin@example.com');
+    await page.locator('input[name=password]').fill('password');
+    await page.locator('button[type=submit]').click();
+    await page.waitForURL(base+'/admin/security');
+    await expect(page.locator('#security-status')).toContainText("didn't ask you to sign in again");
+    expect((await (await page.request.get(base+'/api/session')).json()).step_up_status).toBe(false);
+    expect((await waitForLog({event:'stepup.verify'})).some(l=>l.via==='provider'&&l.outcome==='refused')).toBe(true);
+  }finally{await context.close();}
 });

@@ -17,7 +17,13 @@ window.pfShareChrome = function (part, WS) {
   function b64(a) { return btoa(String.fromCharCode.apply(null, new Uint8Array(a))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
   function stepup() {
     status.textContent = 'Confirm with your admin passkey…';
-    return api('/stepup', {}).then(function (j) {
+    return api('/stepup', {}).catch(function (e) {
+      // No passkey (or the admin chose it): sign in again at the provider, then come back here.
+      if (!(e.details && e.details.step_up_via === 'provider')) throw e;
+      status.textContent = 'Sign in again to confirm, then try once more.';
+      location.assign(WS + e.details.url + '?return=' + encodeURIComponent('/p/' + part));
+      return new Promise(function () {});
+    }).then(function (j) {
       var p = j.publicKey; p.challenge = bytes(p.challenge);
       (p.allowCredentials || []).forEach(function (c) { c.id = bytes(c.id); });
       return navigator.credentials.get({ publicKey: p }).then(function (c) {

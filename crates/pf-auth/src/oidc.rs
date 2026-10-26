@@ -51,6 +51,26 @@ pub(crate) struct Flow {
     pkce: PkceCodeVerifier,
     target: String,
     expires: i64,
+    stepup: Option<Stepup>,
+}
+/// A re-authentication that confirms an existing admin session instead of starting a new one.
+struct Stepup {
+    session_hash: Vec<u8>,
+    subject: String,
+    started: i64,
+}
+/// How a callback ends: a new session, or a confirmed existing one.
+enum Finished {
+    Session(crate::NewSession, String),
+    Stepup(String),
+    StepupRefused(String),
+}
+
+/// A provider sign-in confirms a session only if it is the same person, signed in again after
+/// the confirmation began. A provider that silently reuses its own session sends an old (or no)
+/// `auth_time`, and is refused. Allows 30 s of clock skew between this host and the provider.
+fn fresh_signin(expected: &str, subject: &str, auth_time: Option<i64>, started_ms: i64) -> bool {
+    subject == expected && auth_time.is_some_and(|t| t * 1000 >= started_ms - 30_000)
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct RefreshSecret {
@@ -117,6 +137,44 @@ impl AuthService {
         target: String,
         prompt_login: bool,
     ) -> Result<(String, String), PfError> {
+        let cookie = new_token();
+        let url = self
+            .begin_flow(target, prompt_login, secret_hash(&cookie), None)
+            .await?;
+        Ok((url, cookie))
+    }
+
+    /// Sends the signed-in admin to sign in again at the provider (`prompt=login`, `max_age=0`).
+    /// The callback marks this session as freshly confirmed; it never replaces the session.
+    pub(crate) async fn begin_stepup_signin(
+        &self,
+        headers: &HeaderMap,
+        target: String,
+    ) -> Result<String, PfError> {
+        let actor = self.require_admin_session(headers, false).await?;
+        if !actor.subject.starts_with("oidc:") {
+            return Err(PfError::new(
+                "forbidden",
+                "This account doesn't sign in through the identity provider.",
+            ));
+        }
+        let session_hash = secret_hash(cookie_token(headers).ok_or_else(unauthenticated)?);
+        let stepup = Stepup {
+            session_hash: session_hash.clone(),
+            subject: actor.subject,
+            started: self.now(),
+        };
+        self.begin_flow(target, true, session_hash, Some(stepup))
+            .await
+    }
+
+    async fn begin_flow(
+        &self,
+        target: String,
+        prompt_login: bool,
+        binder: Vec<u8>,
+        stepup: Option<Stepup>,
+    ) -> Result<String, PfError> {
         validate_path(&target)?;
         let client = self.client().await?;
         let (challenge, pkce) = PkceCodeChallenge::new_random_sha256();
@@ -128,12 +186,19 @@ impl AuthService {
         if prompt_login {
             authorize = authorize.add_extra_param("prompt", "login");
         }
+        if stepup.is_some() {
+            authorize = authorize.add_extra_param("max_age", "0");
+        }
         let supported = self
             .0
             .provider
             .get()
             .and_then(|provider| provider.scopes_supported.as_ref());
         for scope in ["profile", "email", "offline_access", "groups"] {
+            // A confirmation keeps the session's own grant; it needs no new refresh token.
+            if stepup.is_some() && scope == "offline_access" {
+                continue;
+            }
             if supported.is_some_and(|scopes| scopes.iter().any(|s| s == scope))
                 || (supported.is_none() && scope != "groups")
             {
@@ -141,7 +206,6 @@ impl AuthService {
             }
         }
         let (url, state) = authorize.set_pkce_challenge(challenge).url();
-        let cookie = new_token();
         let now = self.now();
         let mut flows = self.0.flows.lock().map_err(internal)?;
         flows.retain(|_, v| v.expires > now);
@@ -154,21 +218,18 @@ impl AuthService {
         flows.insert(
             state.secret().clone(),
             Flow {
-                binder: secret_hash(&cookie),
+                binder,
                 nonce,
                 pkce,
                 target,
                 expires: now + FLOW_TTL,
+                stepup,
             },
         );
-        Ok((url.to_string(), cookie))
+        Ok(url.to_string())
     }
 
-    async fn finish(
-        &self,
-        headers: &HeaderMap,
-        q: Callback,
-    ) -> Result<(crate::NewSession, String), PfError> {
+    async fn finish(&self, headers: &HeaderMap, q: Callback) -> Result<Finished, PfError> {
         let binder = secret_hash(cookie_token(headers).ok_or_else(unauthenticated)?);
         let state = q.state.ok_or_else(unauthenticated)?;
         let flow = {
@@ -206,13 +267,57 @@ impl AuthService {
         .await
         .map_err(|_| unauthenticated())?;
         let identity = self.identity(&claims)?;
+        if let Some(stepup) = flow.stepup {
+            return Ok(if self.confirm_stepup(stepup, &identity, &claims).await? {
+                Finished::Stepup(flow.target)
+            } else {
+                Finished::StepupRefused(flow.target)
+            });
+        }
         let refresh = tokens.refresh_token().map(|r| RefreshSecret {
             refresh: r.secret().clone(),
             nonce: flow.nonce.clone(),
         });
         let session = self.login(&identity, refresh, self.now()).await?;
         tracing::info!(event="oidc.login",principal=%format!("user:{}",session.user_id),outcome="ok");
-        Ok((session, flow.target))
+        Ok(Finished::Session(session, flow.target))
+    }
+
+    /// The provider must have signed the same person in again after the confirmation began.
+    async fn confirm_stepup(
+        &self,
+        stepup: Stepup,
+        identity: &Identity,
+        claims: &Value,
+    ) -> Result<bool, PfError> {
+        let subject = format!("oidc:{}#{}", identity.issuer, identity.sub);
+        if !fresh_signin(
+            &stepup.subject,
+            &subject,
+            claims["auth_time"].as_i64(),
+            stepup.started,
+        ) {
+            tracing::warn!(
+                event = "stepup.verify",
+                via = "provider",
+                outcome = "refused"
+            );
+            return Ok(false);
+        }
+        let now = self.now();
+        let hash = stepup.session_hash;
+        let changed = self
+            .0
+            .db
+            .write(move |tx| {
+                tx.execute("UPDATE sessions SET stepup_at=?2 WHERE id_hash=?1 AND revoked_at IS NULL AND expires_at>?2", params![hash, now]).map_err(PfError::from)
+            })
+            .await?;
+        if changed != 1 {
+            return Err(unauthenticated());
+        }
+        tracing::info!(event="stepup.verify",via="provider",principal=%subject,outcome="ok");
+        Ok(true)
     }
 
     fn identity(&self, claims: &Value) -> Result<Identity, PfError> {
@@ -424,6 +529,17 @@ pub(crate) async fn signin(
         Err(e) => fail(e),
     }
 }
+pub(crate) async fn stepup_signin(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<Signin>,
+) -> Response {
+    let auth = state.ext::<AuthService>().expect("auth");
+    match auth.begin_stepup_signin(&headers, q.target).await {
+        Ok(url) => Redirect::to(&url).into_response(),
+        Err(e) => fail(e),
+    }
+}
 pub(crate) async fn callback(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -431,7 +547,16 @@ pub(crate) async fn callback(
 ) -> Response {
     let auth = state.ext::<AuthService>().expect("auth");
     match auth.finish(&headers, q).await {
-        Ok((session, target)) => {
+        Ok(Finished::Stepup(target)) => {
+            let mut r = Redirect::to(&target).into_response();
+            r.headers_mut()
+                .insert(header::PRAGMA, HeaderValue::from_static("no-cache"));
+            r
+        }
+        Ok(Finished::StepupRefused(target)) => {
+            Redirect::to(&format!("{target}#confirm-failed")).into_response()
+        }
+        Ok(Finished::Session(session, target)) => {
             let mut r = Redirect::to(&target).into_response();
             set_cookie(
                 &mut r,
@@ -449,6 +574,30 @@ pub(crate) async fn callback(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provider_confirmation_needs_the_same_person_signed_in_again() {
+        let (me, started) = ("oidc:https://idp.example.com#me", 1_000_000_000);
+        assert!(fresh_signin(me, me, Some(1_000_000), started));
+        assert!(
+            fresh_signin(me, me, Some(999_980), started),
+            "small clock skew is allowed"
+        );
+        assert!(
+            !fresh_signin(me, me, Some(999_000), started),
+            "a sign-in from before is reused SSO"
+        );
+        assert!(
+            !fresh_signin(me, me, None, started),
+            "no auth_time proves nothing"
+        );
+        assert!(!fresh_signin(
+            me,
+            "oidc:https://idp.example.com#someone-else",
+            Some(1_000_000),
+            started
+        ));
+    }
     use axum::{Json, Router, routing::get};
     use std::sync::Arc;
 

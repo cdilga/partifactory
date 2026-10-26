@@ -147,11 +147,16 @@ impl AuthService {
     pub async fn begin_stepup(&self, headers: &HeaderMap) -> Result<serde_json::Value, PfError> {
         let actor = self.require_admin_session(headers, false).await?;
         let keys = self.passkeys(&actor.user_id).await?;
-        if keys.is_empty() {
+        // With no passkey to check, or when the admin chose it, confirm by signing in again.
+        let mode = self.security(&actor.user_id).await?["confirm"].clone();
+        if keys.is_empty() || mode == "provider" {
             return Err(PfError::new(
                 "forbidden",
-                "Register an admin passkey first.",
-            ));
+                "Confirm by signing in again at your identity provider.",
+            )
+            .with("step_up_required", true)
+            .with("step_up_via", "provider")
+            .with("url", "/admin/stepup/signin"));
         }
         let (challenge, state) = self
             .webauthn()
@@ -213,7 +218,11 @@ async fn register_start(State(state): State<AppState>, headers: HeaderMap) -> Re
         let actor = auth.require_admin_session(&headers, false).await?;
         let keys = auth.passkeys(&actor.user_id).await?;
         if !keys.is_empty() && !auth.may_enroll(&actor).await? {
-            return Err(forbidden());
+            // Adding another passkey is confirmed like any admin action.
+            return Err(
+                PfError::new("forbidden", "Confirm before adding another passkey.")
+                    .with("step_up_required", true),
+            );
         }
         // Deterministic 128-bit user handle, independent of display name and IdP username.
         let digest = crate::secret_hash(&actor.user_id);

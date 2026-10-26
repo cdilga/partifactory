@@ -169,7 +169,16 @@ impl AuthService {
         mode: &str,
     ) -> Result<(), PfError> {
         if !crate::service::CONFIRM_MODES.contains(&mode) {
-            return Err(PfError::invalid("confirm", "Choose passkey or off."));
+            return Err(PfError::invalid(
+                "confirm",
+                "Choose passkey, provider or off.",
+            ));
+        }
+        if mode == "provider" && !actor.subject.starts_with("oidc:") {
+            return Err(PfError::invalid(
+                "confirm",
+                "This account doesn't sign in through an identity provider.",
+            ));
         }
         if mode == "passkey" && self.security(&actor.user_id).await?["passkeys"] == 0 {
             return Err(PfError::invalid(

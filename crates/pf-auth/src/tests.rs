@@ -326,8 +326,18 @@ async fn admin_confirmation_can_be_turned_off_only_for_the_admin() {
             .await
             .is_err()
     );
+    // With no passkey to check, confirmation falls back to signing in again at the provider,
+    // so the admin is never locked out of changing this setting.
+    let fallback = auth.begin_stepup(&headers(&admin.token)).await.unwrap_err();
+    assert_eq!(fallback.details["step_up_via"], "provider");
+    assert_eq!(fallback.details["url"], "/admin/stepup/signin");
     // Passkey mode can't be turned on without a passkey to satisfy it.
     assert!(auth.set_security(&actor, "passkey").await.is_err());
+    auth.set_security(&actor, "provider").await.unwrap();
+    assert_eq!(
+        auth.security(&actor.user_id).await.unwrap()["confirm"],
+        "provider"
+    );
     assert!(auth.set_security(&actor, "sometimes").await.is_err());
     auth.set_security(&actor, "off").await.unwrap();
     let actor = auth
