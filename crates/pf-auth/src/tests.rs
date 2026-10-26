@@ -291,3 +291,50 @@ async fn provider_claims_cannot_join_a_local_group_by_name_collision() {
         vec!["household"]
     );
 }
+#[tokio::test]
+async fn admin_confirmation_can_be_turned_off_only_for_the_admin() {
+    let (db, mut auth) = setup();
+    let now = ids::now_ms();
+    let id = identity();
+    let admin = auth.login(&id, None, now).await.unwrap();
+    let member = auth
+        .login(
+            &Identity {
+                sub: "subject-two".into(),
+                username: "other".into(),
+                ..identity()
+            },
+            None,
+            now,
+        )
+        .await
+        .unwrap();
+    let mut config = loaded();
+    config.site.admin.subject = format!("oidc:{}#{}", id.issuer, id.sub);
+    auth = AuthService::from_loaded(db.db.clone(), auth.0.epochs.clone(), &config).unwrap();
+    let actor = auth
+        .require_admin_session(&headers(&admin.token), false)
+        .await
+        .unwrap();
+    assert_eq!(
+        auth.security(&actor.user_id).await.unwrap()["confirm"],
+        "passkey"
+    );
+    // Under passkey mode, changing the setting needs the passkey like any admin action.
+    assert!(
+        auth.require_admin_session(&headers(&admin.token), true)
+            .await
+            .is_err()
+    );
+    // Passkey mode can't be turned on without a passkey to satisfy it.
+    assert!(auth.set_security(&actor, "passkey").await.is_err());
+    assert!(auth.set_security(&actor, "sometimes").await.is_err());
+    auth.set_security(&actor, "off").await.unwrap();
+    let actor = auth
+        .require_admin_session(&headers(&admin.token), true)
+        .await
+        .unwrap();
+    assert!(actor.fresh_stepup(ids::now_ms()));
+    let other = auth.require_session(&headers(&member.token)).await.unwrap();
+    assert!(!other.admin && !other.fresh_stepup(ids::now_ms()));
+}

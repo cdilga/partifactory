@@ -20,6 +20,11 @@ test('populated gallery opens permanent OAuth Connect and migrates old bookmarks
   await expect(page.locator('main')).not.toContainText('personal token');
   await expect(page.getByRole('link',{name:'Connected agents',exact:true}).last()).toHaveAttribute('href','/connected-agents');
   await expect(page.getByRole('link',{name:'Enter a device code',exact:true})).toHaveAttribute('href','/device');
+  // Step-by-step setup for each agent, all OAuth or device code.
+  for (const client of ['Claude Code','Codex','Cursor','Gemini CLI','Hermes']) await expect(page.locator('summary',{hasText:client}).first()).toBeVisible();
+  await expect(page.locator('.clients code.command').first()).toHaveText('claude mcp add --transport http partifactory https://parts.pf.test/mcp');
+  await page.locator('summary',{hasText:'Hermes'}).click();
+  await expect(page.locator('.clients')).toContainText('auth: oauth');
   await page.goto('/#connect');
   await expect(page).toHaveURL('https://parts.pf.test/connect');
   await expect(page.locator('html')).toHaveAttribute('data-pf-hydrated','1');
@@ -87,4 +92,21 @@ test('Public links remains administrator-only while Connect is available to memb
   expect((await page.goto('/admin/links'))?.status()).toBe(403);
   expect((await page.goto('/connect'))?.status()).toBe(200);
   await expect(page.getByRole('heading',{name:'Connect an agent',exact:true})).toBeVisible();
+});
+
+test('Security shows how admin actions are confirmed, as a choice', async ({page}, info) => {
+  await signIn(page);
+  await page.getByLabel('Account menu').click();
+  await page.getByRole('link',{name:'Security',exact:true}).click();
+  await expect(page).toHaveURL('https://parts.pf.test/admin/security');
+  await expect(page.getByRole('heading',{name:'Confirm high-risk actions with',exact:true})).toBeVisible();
+  // The checked option is the mode in force; the harness keeps the passkey default.
+  await expect(page.getByRole('radio',{name:/Your partifactory passkey/})).toBeChecked();
+  await expect(page.getByRole('radio',{name:/Nothing extra/})).not.toBeChecked();
+  await expect(page.getByRole('radio',{name:/fresh sign-in/})).toBeDisabled();
+  const evidence=path.resolve('../../target/evidence/pf-security',info.project.name);fs.mkdirSync(evidence,{recursive:true});
+  await page.screenshot({path:path.join(evidence,'security.png'),fullPage:true});
+  await page.setViewportSize({width:360,height:740});
+  await noPageOverflow(page);
+  expect((await waitForLog({event:'ui.render'})).some(l=>l.page==='security')).toBe(true);
 });

@@ -39,7 +39,7 @@ pub fn Shell(user: String, query: String, admin: bool, body: String) -> impl Int
                 <form class="search" method="get" action="/"><input id="search" name="q" aria-label="Search parts" placeholder="Search parts  /" value=query.clone()/></form>
                 <button id="theme" aria-label="Toggle theme" on:click=theme>"◐"</button>
                 <details><summary aria-label="Account menu">{avatar}</summary><div class="menu">
-                    {admin.then(||view!{<a href="/admin/links">"Public links"</a>})}
+                    {admin.then(||view!{<a href="/admin/links">"Public links"</a><a href="/admin/security">"Security"</a>})}
                     <a href="/connect">"Connect an agent"</a>
                     <a href="/connected-agents">"Connected agents"</a>
                     <button data-signout="/signout" on:click=move |_| signout("/signout")>"Sign out"</button>

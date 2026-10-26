@@ -141,7 +141,80 @@ async fn page() -> Response {
     r
 }
 pub(crate) fn install(builder: &mut ServerBuilder) {
-    builder.workspace(Router::new().route("/admin/recover", get(page).post(recover)));
+    builder.workspace(
+        Router::new()
+            .route("/admin/recover", get(page).post(recover))
+            .route("/api/admin/v1/security", get(security).post(set_security)),
+    );
+}
+
+#[derive(Deserialize)]
+struct Security {
+    confirm: String,
+}
+impl AuthService {
+    /// The admin's confirmation mode and whether a passkey exists to satisfy `passkey`.
+    pub async fn security(&self, uid: &str) -> Result<serde_json::Value, PfError> {
+        let uid = uid.to_owned();
+        self.0.db.read(move |c| {
+            let mode: Option<String> = c.query_row("SELECT value FROM kv WHERE key=?1", [crate::service::CONFIRM_KEY], |r| r.get(0)).optional()?;
+            let keys: i64 = c.query_row("SELECT COUNT(*) FROM passkeys WHERE user_id=?1 AND revoked_at IS NULL", [uid], |r| r.get(0))?;
+            Ok::<_, PfError>(serde_json::json!({"confirm": mode.unwrap_or_else(|| "passkey".into()), "passkeys": keys}))
+        }).await
+    }
+    /// Changing the mode is itself an admin action, confirmed under the mode in force.
+    pub async fn set_security(
+        &self,
+        actor: &crate::SessionActor,
+        mode: &str,
+    ) -> Result<(), PfError> {
+        if !crate::service::CONFIRM_MODES.contains(&mode) {
+            return Err(PfError::invalid("confirm", "Choose passkey or off."));
+        }
+        if mode == "passkey" && self.security(&actor.user_id).await?["passkeys"] == 0 {
+            return Err(PfError::invalid(
+                "confirm",
+                "Register a passkey before turning passkey confirmation on.",
+            ));
+        }
+        let (mode, uid, now) = (mode.to_owned(), actor.user_id.clone(), ids::now_ms());
+        self.0.db.write(move |tx| {
+            tx.execute("INSERT INTO kv(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![crate::service::CONFIRM_KEY, mode])?;
+            tx.execute("INSERT INTO audit(at,user_id,action,target_kind,target_id) VALUES(?1,?2,?3,'setting','admin.confirm')", params![now, uid, format!("admin.confirm.{mode}")])?;
+            tracing::info!(event = "admin.confirm", mode = %mode, outcome = "ok");
+            Ok::<_, PfError>(())
+        }).await
+    }
+}
+async fn security(State(state): State<AppState>, headers: http::HeaderMap) -> Response {
+    let auth = state.ext::<AuthService>().expect("auth");
+    let result = async {
+        let actor = auth.require_admin_session(&headers, false).await?;
+        auth.security(&actor.user_id).await
+    }
+    .await;
+    match result {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => fail(e),
+    }
+}
+async fn set_security(
+    State(state): State<AppState>,
+    headers: http::HeaderMap,
+    Json(body): Json<Security>,
+) -> Response {
+    let auth = state.ext::<AuthService>().expect("auth");
+    let result = async {
+        auth.check_origin(&headers)?;
+        let actor = auth.require_admin_session(&headers, true).await?;
+        auth.set_security(&actor, &body.confirm).await?;
+        auth.security(&actor.user_id).await
+    }
+    .await;
+    match result {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => fail(e),
+    }
 }
 const RECOVERY_HTML: &str = r#"<!doctype html><meta name="viewport" content="width=device-width"><title>Admin recovery · partifactory</title><style>body{font:17px system-ui;max-width:36rem;margin:4rem auto;padding:1rem}button{padding:.8rem 1.2rem;font:inherit}</style><h1>Admin recovery</h1><p id="status">Use the one-time link printed by the host console.</p><button id="continue">Continue</button><button id="register" hidden>Register admin passkey</button><script>
 const status=document.querySelector('#status'), next=document.querySelector('#continue'),register=document.querySelector('#register');

@@ -3154,6 +3154,8 @@ Every line runs against the example deployment's staging (Cloudflare + Authentik
     *Why:* the people who read a write-up are the ones who'll fix a sentence in it, and they shouldn't need Markdown to do it.
 55. **Agents hold only short-lived OAuth credentials** (the admin, 2026-10-26). Personal agent tokens are retired: every agent connects by OAuth authorization code (MCP clients) or the device grant (the CLI, headless and unattended agents), with one-hour access tokens and single-use rotating refresh tokens. Lifetimes follow common provider practice instead of a picker: a refresh token expires after 30 days unused and a connection ends 90 days after consent. Supersedes the personal-token parts of decisions 14, 37 and 43.
     *Why:* a long-lived static token is the credential that leaks from env files and CI logs, and once authorization code shipped nothing needed one.
+56. **The admin chooses how admin actions are confirmed** (the admin, 2026-10-26). Security settings (`/admin/security`) offer: nothing extra (the signed-in session is enough), the partifactory passkey (the default for a new deployment, as before), or a fresh sign-in at the identity provider (OIDC `prompt=login` with `max_age=0`, checking `auth_time`; provider-neutral, and next to build). Changing the mode is itself an admin action, confirmed under the mode in force, and passkey mode can't be turned on without a registered passkey. Refines §4 "One admin, and only one".
+    *Why:* the admin already signs in with a phishing-resistant method at the provider and prefers no second prompt for now; the passkey stays one click away.
 
 ## 9. Non-goals (v1)
 

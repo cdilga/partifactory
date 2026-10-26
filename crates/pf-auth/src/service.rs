@@ -40,14 +40,21 @@ pub struct SessionActor {
     pub subject: String,
     pub username: String,
     pub admin: bool,
+    /// The admin turned off the extra confirmation for admin actions (Security settings).
+    pub confirm_off: bool,
 }
+/// How the admin confirms high-risk actions: `kv` key `admin.confirm`.
+pub const CONFIRM_KEY: &str = "admin.confirm";
+pub const CONFIRM_MODES: [&str; 2] = ["passkey", "off"];
 impl SessionActor {
     pub fn principal(&self) -> Principal {
         Principal::person(&self.user_id)
     }
     pub fn fresh_stepup(&self, now: i64) -> bool {
-        self.stepup_at
-            .is_some_and(|t| t <= now && now - t < STEPUP_TTL)
+        (self.admin && self.confirm_off)
+            || self
+                .stepup_at
+                .is_some_and(|t| t <= now && now - t < STEPUP_TTL)
     }
 }
 
@@ -311,6 +318,7 @@ impl AuthService {
         let pin = self.0.admin.clone();
         self.0.db.write(move |tx| {
             let pin = if pin.is_empty() { tx.query_row("SELECT value FROM kv WHERE key='admin.subject'",[],|r|r.get::<_,String>(0)).optional()?.unwrap_or_default() } else { pin };
+            let confirm_off = tx.query_row("SELECT value FROM kv WHERE key=?1",[CONFIRM_KEY],|r|r.get::<_,String>(0)).optional()?.as_deref()==Some("off");
             let actor = tx.query_row(
                 "SELECT u.id, u.auth_source, u.idp_issuer, u.idp_sub, u.username, s.stepup_at, s.idp_refresh_enc IS NOT NULL FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id_hash=?1 AND s.revoked_at IS NULL AND s.expires_at>?2 AND u.status='active'",
                 params![hash,now], |r| {
@@ -318,7 +326,7 @@ impl AuthService {
                     let source: String=r.get(1)?;
                     let subject=if source=="local" { format!("local:{user_id}") } else { format!("oidc:{}#{}",r.get::<_,String>(2)?,r.get::<_,String>(3)?) };
                     let refresh: bool=r.get(6)?;
-                    Ok((SessionActor {user_id, session_id:hex(&hash),stepup_at:r.get(5)?,admin: !pin.is_empty() && subject==pin,subject,username:r.get(4)?},refresh))
+                    Ok((SessionActor {user_id, session_id:hex(&hash),stepup_at:r.get(5)?,admin: !pin.is_empty() && subject==pin,subject,username:r.get(4)?,confirm_off},refresh))
                 }).optional()?;
             if let Some((actor,refresh))=actor {
                 // A session without a refresh token has a fixed 12-hour lifetime.
