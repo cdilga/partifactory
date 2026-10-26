@@ -2,6 +2,11 @@ import { test, expect, waitForLog } from './harness/fixtures';
 import { signIn } from './lib/public-auth';
 import { oauthToken } from './lib/agent-tokens';
 
+/** The directory username a signed-in page's person has (the IdP may not send one). */
+async function usernameOf(p: import('@playwright/test').Page) {
+  return (await (await p.request.get('https://parts.pf.test/api/session')).json()).username as string;
+}
+
 // Comments (pf-h6y.4): a Comment member posts beside a part and the owner's open rail shows it
 // within a second; a View member reads only; bodies stay text; an agent's reply is labelled.
 test('household comments arrive live, stay inert and follow roles', async ({ page, browser }, info) => {
@@ -25,8 +30,8 @@ test('household comments arrive live, stay inert and follow roles', async ({ pag
   };
   const created = await page.request.post('/api/v1/part_create', { headers: { Authorization: `Bearer ${token}` }, data: { name, title: `Plans ${info.project.name}`, kind: 'html', content: '<!doctype html><h1>Holiday plans</h1>', request_id: `${name}-${Date.now()}` } });
   expect([200, 409].includes(created.status()), await created.text()).toBeTruthy();
-  await call('part_share', { name, action: 'set', subject: 'user:member-b', role: 'comment' });
-  await call('part_share', { name, action: 'set', subject: 'user:member-a', role: 'view' });
+  await call('part_share', { name, action: 'set', subject: `user:${await usernameOf(commenter.page)}`, role: 'comment' });
+  await call('part_share', { name, action: 'set', subject: `user:${await usernameOf(viewer.page)}`, role: 'view' });
 
   await page.goto(`https://${name}-part.pf.test/`);
   await page.getByRole('button', { name: /^Comments/ }).click();

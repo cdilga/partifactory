@@ -26,8 +26,8 @@ test('the owner shares a part with a member, who opens it until removed', async 
   await page.goto(`https://${name}-part.pf.test/`);
   await page.getByRole('button', { name: 'Share', exact: true }).click();
   await page.getByRole('radio', { name: /People you add/ }).check();
-  await page.getByRole('searchbox').fill('member-b');
-  await page.getByRole('option', { name: /member-b/ }).click();
+  await page.getByRole('searchbox').fill('Member B');
+  await page.getByRole('option', { name: /Member B/ }).click();
   await page.getByLabel('Role for new people').selectOption('view');
   await page.getByRole('button', { name: 'Add', exact: true }).click();
   await expect(page.locator('.pf-sentence')).toContainText('can open this part');

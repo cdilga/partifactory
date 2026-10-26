@@ -2,6 +2,11 @@ import { test, expect, waitForLog } from './harness/fixtures';
 import { signIn } from './lib/public-auth';
 import { oauthToken } from './lib/agent-tokens';
 
+/** The directory username a signed-in page's person has (the IdP may not send one). */
+async function usernameOf(p: import('@playwright/test').Page) {
+  return (await (await p.request.get('https://parts.pf.test/api/session')).json()).username as string;
+}
+
 // The source editor (pf-h6y.5): an Edit member changes a Markdown part in the browser, an agent
 // sees the change, a concurrent agent edit raises the conflict notice, and View sees no Edit.
 test('an Edit member changes a Markdown part in the browser, with drafts and conflicts', async ({ page, browser }, info) => {
@@ -25,8 +30,8 @@ test('an Edit member changes a Markdown part in the browser, with drafts and con
   };
   const created = await page.request.post('/api/v1/part_create', { headers: { Authorization: `Bearer ${token}` }, data: { name, title: `Notes ${info.project.name}`, kind: 'markdown', content: '# Shopping  list\n\n- milk\n\n| Item | Qty |\n|---|--:|\n| eggs | 6 |\n', request_id: `${name}-${Date.now()}` } });
   expect([200, 409].includes(created.status()), await created.text()).toBeTruthy();
-  await call('part_share', { name, action: 'set', subject: 'user:member-b', role: 'edit' });
-  await call('part_share', { name, action: 'set', subject: 'user:member-a', role: 'view' });
+  await call('part_share', { name, action: 'set', subject: `user:${await usernameOf(editor.page)}`, role: 'edit' });
+  await call('part_share', { name, action: 'set', subject: `user:${await usernameOf(viewer.page)}`, role: 'view' });
 
   await viewer.page.goto(`https://${name}-part.pf.test/`);
   await expect(viewer.page.getByRole('button', { name: 'Share', exact: true })).toBeVisible();
