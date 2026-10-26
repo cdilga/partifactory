@@ -93,10 +93,19 @@ fn concurrent_refresh_exchanges_single_use_token_once() {
     let count = requests.clone();
     let expected_resource = format!("{url}/");
     let server = std::thread::spawn(move || {
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        // Wait up to 20 s for the first request (slow under a loaded test run), then watch for
+        // 2 s more: a second refresh exchange in that window is the bug this test catches.
+        let mut deadline = std::time::Instant::now() + Duration::from_secs(20);
+        let mut seen = false;
         while std::time::Instant::now() < deadline {
             let (mut stream, _) = match listener.accept() {
-                Ok(connection) => connection,
+                Ok(connection) => {
+                    if !seen {
+                        seen = true;
+                        deadline = std::time::Instant::now() + Duration::from_secs(2);
+                    }
+                    connection
+                }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                     std::thread::sleep(Duration::from_millis(5));
                     continue;

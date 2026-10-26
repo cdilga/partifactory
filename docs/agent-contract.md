@@ -351,7 +351,7 @@ Call `partifactory.ready()` once the page has drawn its first real state, so `pa
 | writes | 60 a minute per guest (300 per IP), 600 a minute per signed-in person per part |
 | reads | 600 requests a minute per viewer per part; a `getMany` or a `list` page counts as one |
 
-Write once per action, not per pointer move, and use one key per independent item, so two people never overwrite each other. `claude.use("db")` comes after Slice 1.
+Write once per action, not per pointer move, and use one key per independent item, so two people never overwrite each other. `window.storage` is the data API; there is no `claude.use`.
 
 **Who can write shared data.** One per-part field decides it, `shared_data_writers: "editors" | "viewers"` (default `"viewers"`), set by the owner ("Data: view only" in the share sheet) or by you at create or in `meta`.
 
@@ -485,6 +485,6 @@ Later, `part_data {"name":"pixel","action":"list","prefix":"px:"}` shows what gu
 
 ## After Slice 1
 
-Not available yet, so don't call them: `part_find` (search), `part_share` (inward sharing), `part_comments`, `part_watch` (the event feed), `design_system` (Jig), `part_inbox`; block edits and leases in `part_edit`; `notes`, `render: "text"` and `advisories` in `part_get`; `update` in `part_edit`; `part_data` collections other than `__storage`; `upload` URLs in `part_create`/`part_edit`; backends; `claude.use(...)`; kinds `tsx` and `slides`; `part_link_for` actions other than `public_link` and `contribute`.
+Not available yet, so don't call them: `part_find` (search), `part_watch` (the event feed), `design_system` (Jig); block edits in `part_edit`; `notes`, `render: "text"` and `advisories` in `part_get`; `update` in `part_edit`; `part_data` collections other than `__storage`; backends; the `tsx` kind; `part_link_for` actions other than `public_link` and `contribute`.
 
 Coming right after Slice 1: **previews**. Every part gets an automatic screenshot poster, used as its gallery thumbnail and as the `og:image` of its public links. You may also give a part a short muted `og:video` clip with a `preview` field on `part_create`/`part_edit {meta}`, either your own MP4 or `"record"` with `actions` that show it working. Check the clip with `part_check {record: true}` before you share the link. A clip is optional, so consider one for anything animated or interactive. Until then, don't send `preview`.
