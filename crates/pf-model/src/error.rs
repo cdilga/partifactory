@@ -53,7 +53,8 @@ impl PfError {
             "unauthenticated" => 401,
             "forbidden" | "forbidden_view_only" => 403,
             "not_found" | "file_not_found" => 404,
-            "name_taken" | "if_match_failed" | "file_exists" | "request_id_reused" => 409,
+            "name_taken" | "if_match_failed" | "file_exists" | "request_id_reused"
+            | "block_not_found" | "block_changed" => 409,
             "too_large" => 413,
             "anchor_not_found" | "anchor_ambiguous" | "base_unknown" | "invalid_against_base" => {
                 422

@@ -288,6 +288,98 @@
                 "if_match"
               ],
               "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Markdown: the block's text becomes `markdown`; it keeps its id.",
+              "properties": {
+                "block": {
+                  "type": "string"
+                },
+                "file": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "if_hash": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "markdown": {
+                  "type": "string"
+                },
+                "op": {
+                  "const": "replace_block",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "op",
+                "block",
+                "markdown"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Markdown: new block(s) after `block` (or `\"start\"`).",
+              "properties": {
+                "block": {
+                  "type": "string"
+                },
+                "file": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "markdown": {
+                  "type": "string"
+                },
+                "op": {
+                  "const": "insert_after",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "op",
+                "block",
+                "markdown"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "Markdown: remove the block.",
+              "properties": {
+                "block": {
+                  "type": "string"
+                },
+                "file": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "if_hash": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "op": {
+                  "const": "delete_block",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "op",
+                "block"
+              ],
+              "type": "object"
             }
           ]
         },

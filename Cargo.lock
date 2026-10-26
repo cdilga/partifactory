@@ -3528,6 +3528,7 @@ dependencies = [
 name = "pf-model"
 version = "0.1.0"
 dependencies = [
+ "comrak",
  "pf-auth",
  "pf-blobs",
  "pf-caps",

@@ -80,15 +80,76 @@ pub fn commit_version(
     files: &BTreeMap<String, FileEntry>,
     meta: &CommitMeta,
 ) -> Result<Committed, PfError> {
+    commit_version_with_blocks(tx, blobs, part, entry, files, meta, None)
+}
+
+/// The block ids of a version's Markdown files, from its manifest (empty for other files).
+pub fn version_blocks(blobs: &BlobStore, version_id: &str) -> crate::blocks::FileBlocks {
+    blobs
+        .get(version_id)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        .map(|m| crate::blocks::from_meta(&m["meta"]))
+        .unwrap_or_default()
+}
+
+/// Block ids for every Markdown file in `files`: `given` where the caller already derived them
+/// (block ops pin a replaced block's id), otherwise carried over from the parent version.
+fn derive_blocks(
+    tx: &Connection,
+    blobs: &BlobStore,
+    part: &PartHead,
+    files: &BTreeMap<String, FileEntry>,
+    given: Option<&crate::blocks::FileBlocks>,
+) -> Result<crate::blocks::FileBlocks, PfError> {
+    let mut out = crate::blocks::FileBlocks::new();
+    let parent = part.head_version_id.as_deref();
+    let parent_blocks = parent.map(|v| version_blocks(blobs, v)).unwrap_or_default();
+    let parent_files = match parent {
+        Some(v) => version_files(tx, v)?,
+        None => BTreeMap::new(),
+    };
+    for (path, f) in files.iter().filter(|(p, _)| crate::blocks::is_markdown(p)) {
+        if let Some(recs) = given.and_then(|g| g.get(path)) {
+            out.insert(path.clone(), recs.clone());
+            continue;
+        }
+        let Ok(text) = String::from_utf8(blobs.get(&f.hash)?) else {
+            continue;
+        };
+        let old_text = parent_files
+            .get(path)
+            .and_then(|pf| blobs.get(&pf.hash).ok())
+            .and_then(|b| String::from_utf8(b).ok())
+            .unwrap_or_default();
+        let old = parent_blocks
+            .get(path)
+            .cloned()
+            .unwrap_or_else(|| crate::blocks::carry(&[], "", &old_text));
+        out.insert(path.clone(), crate::blocks::carry(&old, &old_text, &text));
+    }
+    Ok(out)
+}
+
+pub fn commit_version_with_blocks(
+    tx: &Connection,
+    blobs: &BlobStore,
+    part: &PartHead,
+    entry: &str,
+    files: &BTreeMap<String, FileEntry>,
+    meta: &CommitMeta,
+    blocks: Option<&crate::blocks::FileBlocks>,
+) -> Result<Committed, PfError> {
     blobs.check_capacity(0)?;
     let n = part.head_n + 1;
+    let blocks = derive_blocks(tx, blobs, part, files, blocks)?;
     let manifest = Manifest {
         part_id: part.id.clone(),
         n,
         kind: part.kind.clone(),
         entry: entry.to_string(),
         files: files.clone(),
-        meta: json!({}),
+        meta: crate::blocks::to_meta(&blocks),
         parent: part.head_version_id.clone(),
         author: meta.principal.user_id.clone(),
         actor: meta.principal.conn_id.clone(),

@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 schemars = "1"
 pf-blobs = { path = "../pf-blobs" }
+comrak = { version = "0.57", default-features = false }
 pf-caps = { path = "../pf-caps" }
 pf-db = { path = "../pf-db" }
 pf-obs = { path = "../pf-obs" }

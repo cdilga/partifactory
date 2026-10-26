@@ -28,6 +28,25 @@ pub enum Edit {
         to: String,
         if_match: Match,
     },
+    /// Markdown: the block's text becomes `markdown`; it keeps its id.
+    ReplaceBlock {
+        file: Option<String>,
+        block: String,
+        markdown: String,
+        if_hash: Option<String>,
+    },
+    /// Markdown: new block(s) after `block` (or `"start"`).
+    InsertAfter {
+        file: Option<String>,
+        block: String,
+        markdown: String,
+    },
+    /// Markdown: remove the block.
+    DeleteBlock {
+        file: Option<String>,
+        block: String,
+        if_hash: Option<String>,
+    },
 }
 
 /// Required even for null: omission must never silently mean “create”.
@@ -89,16 +108,90 @@ fn matches(files: &Files, file: &str, expected: &Match) -> Result<(), PfError> {
     Ok(())
 }
 
-/// Apply to a private copy. No blob or database writes happen on failure.
+/// Apply to a private copy. No blob or database writes happen on failure. `blocks` holds the
+/// block ids of the Markdown files and is kept current as edits change them.
 fn apply(
     mut files: Files,
     entry: &str,
     edits: &[Edit],
     blobs: &pf_blobs::BlobStore,
+    blocks: &mut crate::blocks::FileBlocks,
 ) -> Result<Files, PfError> {
     for (index, edit) in edits.iter().enumerate() {
+        let before = files.clone();
+        let mut pinned: Option<(String, (usize, String))> = None;
         let result = (|| {
+            let block_text = |files: &Files, file: &str| -> Result<String, PfError> {
+                if !crate::blocks::is_markdown(file) {
+                    return Err(
+                        PfError::new("invalid_edit", "block ops work on Markdown files")
+                            .with("file", file),
+                    );
+                }
+                let bytes = files.get(file).ok_or_else(|| {
+                    PfError::new("file_not_found", "file does not exist").with("file", file)
+                })?;
+                String::from_utf8(bytes.clone())
+                    .map_err(|_| PfError::new("invalid_edit", "block ops need a UTF-8 file"))
+            };
+            let recs = |blocks: &crate::blocks::FileBlocks,
+                        file: &str,
+                        text: &str|
+             -> Vec<crate::blocks::BlockRec> {
+                blocks
+                    .get(file)
+                    .cloned()
+                    .unwrap_or_else(|| crate::blocks::carry(&[], "", text))
+            };
             match edit {
+                Edit::ReplaceBlock {
+                    file,
+                    block,
+                    markdown,
+                    if_hash,
+                } => {
+                    let file = file.as_deref().unwrap_or(entry);
+                    let text = block_text(&files, file)?;
+                    let (out, pin) = crate::blocks::replace(
+                        &text,
+                        &recs(blocks, file, &text),
+                        block,
+                        markdown,
+                        if_hash.as_deref(),
+                    )?;
+                    pinned = pin.map(|p| (file.to_owned(), p));
+                    files.insert(file.into(), out.into_bytes());
+                }
+                Edit::InsertAfter {
+                    file,
+                    block,
+                    markdown,
+                } => {
+                    let file = file.as_deref().unwrap_or(entry);
+                    let text = block_text(&files, file)?;
+                    let out = crate::blocks::insert_after(
+                        &text,
+                        &recs(blocks, file, &text),
+                        block,
+                        markdown,
+                    )?;
+                    files.insert(file.into(), out.into_bytes());
+                }
+                Edit::DeleteBlock {
+                    file,
+                    block,
+                    if_hash,
+                } => {
+                    let file = file.as_deref().unwrap_or(entry);
+                    let text = block_text(&files, file)?;
+                    let out = crate::blocks::delete(
+                        &text,
+                        &recs(blocks, file, &text),
+                        block,
+                        if_hash.as_deref(),
+                    )?;
+                    files.insert(file.into(), out.into_bytes());
+                }
                 Edit::Replace {
                     file,
                     old_str,
@@ -184,6 +277,34 @@ fn apply(
             Ok(())
         })();
         result.map_err(|e: PfError| e.with("edit_index", index))?;
+        // Keep block ids current for the next edit in the same request.
+        for (path, bytes) in files.iter().filter(|(p, _)| crate::blocks::is_markdown(p)) {
+            if before.get(path) == Some(bytes) {
+                continue;
+            }
+            let (Ok(new), old) = (
+                std::str::from_utf8(bytes),
+                before
+                    .get(path)
+                    .and_then(|b| std::str::from_utf8(b).ok())
+                    .unwrap_or(""),
+            ) else {
+                continue;
+            };
+            let old_recs = blocks
+                .get(path)
+                .cloned()
+                .unwrap_or_else(|| crate::blocks::carry(&[], "", old));
+            let pin = pinned
+                .as_ref()
+                .filter(|(f, _)| f == path)
+                .map(|(_, p)| p.clone());
+            blocks.insert(
+                path.clone(),
+                crate::blocks::reblock(&old_recs, old, new, pin),
+            );
+        }
+        blocks.retain(|path, _| files.contains_key(path));
     }
     if files.is_empty() {
         return Err(PfError::new(
@@ -302,20 +423,20 @@ impl PartService {
                 let vid = head.head_version_id.as_ref().ok_or_else(|| PfError::invalid("rebuild", "part has no version"))?;
                 crate::builds::enqueue(tx, &row.id, vid, &row.kind, now)?;
             } else if let Some(edits) = &req.edits {
-                let load = |n| -> Result<(String, Files), PfError> {
-                    if n == 0 { return Ok((manifest::content_entry(&row.kind).into(), BTreeMap::new())); }
+                let load = |n| -> Result<(String, Files, crate::blocks::FileBlocks), PfError> {
+                    if n == 0 { return Ok((manifest::content_entry(&row.kind).into(), BTreeMap::new(), BTreeMap::new())); }
                     let (vid, entry) = version::version_by_n(tx, &row.id, n)?.ok_or_else(|| PfError::new("base_unknown", "base_version is not a version of this part"))?;
                     let fs = version::version_files(tx, &vid)?.into_iter().map(|(path,f)| Ok((path,blobs.get(&f.hash)?))).collect::<Result<_,PfError>>()?;
-                    Ok((entry,fs))
+                    Ok((entry,fs,version::version_blocks(&blobs,&vid)))
                 };
                 let base = req.base_version.unwrap_or(head.head_n);
                 if base != head.head_n {
-                    let (entry, files) = load(base)?;
-                    apply(files, &entry, edits, &blobs).map_err(|e| PfError::new("invalid_against_base", "edits do not apply to base_version").with("cause", e.to_json()["error"].clone()))?;
+                    let (entry, files, mut base_blocks) = load(base)?;
+                    apply(files, &entry, edits, &blobs, &mut base_blocks).map_err(|e| PfError::new("invalid_against_base", "edits do not apply to base_version").with("cause", e.to_json()["error"].clone()))?;
                     rebased = Some(base);
                 }
-                let (mut entry, files) = load(head.head_n)?;
-                let files = apply(files, &entry, edits, &blobs)?;
+                let (mut entry, files, mut file_blocks) = load(head.head_n)?;
+                let files = apply(files, &entry, edits, &blobs, &mut file_blocks)?;
                 if !files.contains_key(&entry) { entry = manifest::detect_kind(&files.keys().map(String::as_str).collect::<Vec<_>>()).1; }
                 let entries = files.into_iter().map(|(path,bytes)| {
                     let put = blobs.put(&bytes)?;
@@ -323,7 +444,7 @@ impl PartService {
                     Ok((path,file))
                 }).collect::<Result<BTreeMap<_,_>,PfError>>()?;
                 let meta = version::CommitMeta { principal:&p, via, message:req.message, restored_from:None, live_gate:req.live.as_deref().unwrap_or("always"), now };
-                committed = Some(version::commit_version(tx,&blobs,&head,&entry,&entries,&meta)?);
+                committed = Some(version::commit_version_with_blocks(tx,&blobs,&head,&entry,&entries,&meta,Some(&file_blocks))?);
             }
             let mut out = read::mutation(tx,&row.id,&url)?;
             if let Some(base) = rebased { out["rebased_from"] = json!(base); }

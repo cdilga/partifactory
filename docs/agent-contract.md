@@ -143,11 +143,12 @@ An `Edit` is one of:
 - `{op: "replace", file?, old_str, new_str}`: `old_str` is non-empty, ≤ 64 KiB, and must occur exactly once; `file` defaults to the entry file.
 - `{op: "write", file, content | blob, if_match}`: whole-file write; `if_match` is the file's current sha256, or `null` for a new file.
 - `{op: "delete", file, if_match}` and `{op: "rename", from, to, if_match}`.
+- Markdown files only, by block id from `part_get`'s `blocks`: `{op: "replace_block", block, markdown, if_hash?, file?}` (the block keeps its id), `{op: "insert_after", block, markdown, file?}` (`block: "start"` puts it first) and `{op: "delete_block", block, if_hash?, file?}`. A block is a top-level element: a heading, paragraph, whole list, quote, code block, table or divider. Ids carry across versions, so block edits to different blocks never conflict, and a person editing the page in the formatted view saves the same way. `if_hash` is the block's `hash`; if it changed, you get `block_changed` with the current text. An unknown id is `block_not_found` with the current ids.
 
 Output: the mutation shape (`head` is the new version), plus `rebased_from` when it was rebased, `replayed: true` when this `request_id` was already applied, and `check` when you asked for it or sent `live: "after_check"`.
 `check` is `{version, passed, blank, height, errors, console, failed_requests, actions, timing, screenshot}`, the same fields as `part_check`; `passed` is `true` when there's no `error` or `unhandledrejection` and `blank` is `false`. With `live: "after_check"` and `passed: false`, `live` stays where it was.
 If the renderer is off, `after_check` behaves as `always` and `build.warnings` carries `check_skipped`.
-Errors: `invalid_input`, `invalid_edit`, `unknown_field`, `unauthenticated`, `forbidden`, `not_found`, `file_not_found`, `if_match_failed`, `file_exists`, `anchor_not_found`, `anchor_ambiguous`, `base_unknown`, `invalid_against_base`, `request_id_reused`, `quota_exceeded`, `rate_limited`, `too_large`, `storage_full`, `internal`.
+Errors: `invalid_input`, `invalid_edit`, `unknown_field`, `unauthenticated`, `forbidden`, `not_found`, `file_not_found`, `if_match_failed`, `file_exists`, `anchor_not_found`, `anchor_ambiguous`, `block_not_found`, `block_changed`, `base_unknown`, `invalid_against_base`, `request_id_reused`, `quota_exceeded`, `rate_limited`, `too_large`, `storage_full`, `internal`.
 A build failure is not an error: the call succeeds with `build.status: "failed"` and `build.errors: [{file, line, col, message}]` (or `{code: "mirror_failed", url, reason}`).
 ```json
 {"name":"packing-list","base_version":1,"request_id":"c2d4a9e1-packing-chargers","live":"after_check",
@@ -171,7 +172,7 @@ Read a part: everything for a small part, or the file list and the slice you ask
 | `diff_from`, `diff_to` | int | no | `diff_to` = head | add a diff between two versions |
 | `build` | int | no | — | return that build record, with its log, as `build` |
 
-Output: `{id, name, url, title, kind, space, version, head, live, build, files, content?, runtime_errors, history?, diff?}`.
+Output: `{id, name, url, title, kind, space, version, head, live, build, files, content?, blocks?, runtime_errors, history?, diff?}`. `blocks` maps each Markdown file to its blocks, `{id, kind, hash, text}` (`text` is the first line), for block edits.
 `files` is `{path: {hash, size, mime}}` (use `hash` as `if_match`). `content` is `{path: text}` for every text file when the part is ≤ 32 KiB in total, otherwise only for the `file` (or `range`) you asked for.
 `runtime_errors` is always the latest 20 errors seen in people's browsers and the renderer: `[{kind, message, stack, url, count, source, version, last_at}]`. `history` is `[{n, author, actor, via, message, created_at, build_status}]`; `diff` is `{from, to, files: [{path, status, added, removed, patch}]}`.
 Errors: `invalid_input`, `unknown_field`, `unauthenticated`, `forbidden`, `not_found`, `file_not_found`, `rate_limited`, `internal`.
@@ -397,6 +398,7 @@ Read `message` (expected, found), then do what `hint` says. `retryable: true` me
 | `if_match_failed`, `file_exists` | 409 | 5 | re-read with `part_get` and use the current hash (or `rev`) |
 | `request_id_reused` | 409 | 5 | use a new `request_id` for a new change |
 | `anchor_not_found`, `anchor_ambiguous` | 422 | 5 | Rule 2 |
+| `block_not_found`, `block_changed` | 409 | 5 | read the current `blocks` from `part_get` and retry |
 | `base_unknown`, `invalid_against_base` | 422 | 5 | drop `base_version`, or re-read and rebuild the edits |
 | `quota_exceeded`, `rate_limited` | 429 | 6 | wait `details.retry_after` seconds; stop looping |
 | `too_large` | 413 | 2 | split the change; `details.limit` |
@@ -485,6 +487,6 @@ Later, `part_data {"name":"pixel","action":"list","prefix":"px:"}` shows what gu
 
 ## After Slice 1
 
-Not available yet, so don't call them: `part_find` (search), `part_watch` (the event feed), `design_system` (Jig); block edits in `part_edit`; `notes`, `render: "text"` and `advisories` in `part_get`; `update` in `part_edit`; `part_data` collections other than `__storage`; backends; the `tsx` kind; `part_link_for` actions other than `public_link` and `contribute`.
+Not available yet, so don't call them: `part_find` (search), `part_watch` (the event feed), `design_system` (Jig); `append_to_section` block edits; `notes`, `render: "text"` and `advisories` in `part_get`; `update` in `part_edit`; `part_data` collections other than `__storage`; backends; the `tsx` kind; `part_link_for` actions other than `public_link` and `contribute`.
 
 Coming right after Slice 1: **previews**. Every part gets an automatic screenshot poster, used as its gallery thumbnail and as the `og:image` of its public links. You may also give a part a short muted `og:video` clip with a `preview` field on `part_create`/`part_edit {meta}`, either your own MP4 or `"record"` with `actions` that show it working. Check the clip with `part_check {record: true}` before you share the link. A clip is optional, so consider one for anything animated or interactive. Until then, don't send `preview`.

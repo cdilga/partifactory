@@ -261,6 +261,7 @@ impl PartService {
                     }
                 };
                 let mut build = Value::Null;
+                let mut version_id: Option<String> = None;
                 let files = if n == 0 {
                     BTreeMap::new()
                 } else {
@@ -287,6 +288,7 @@ impl PartService {
                             };
                         }
                     }
+                    version_id = Some(vid.clone());
                     version_files(c, &vid)?
                 };
                 let total: u64 = files.values().map(|f| f.size).sum();
@@ -339,6 +341,20 @@ impl PartService {
                     "files": files_json(&files),
                     "runtime_errors": runtime_errors(c, &row.id)?,
                 });
+                // Block ids for Markdown files (§3c): an outline agents edit by id.
+                let stored = version_id.as_deref().map(|v| crate::version::version_blocks(&blobs, v)).unwrap_or_default();
+                let mut outline = serde_json::Map::new();
+                for (path, f) in files.iter().filter(|(p, _)| crate::blocks::is_markdown(p)) {
+                    let Ok(text) = String::from_utf8(blobs.get(&f.hash)?) else { continue };
+                    let recs = stored.get(path).cloned().unwrap_or_else(|| crate::blocks::carry(&[], "", &text));
+                    outline.insert(path.clone(), Value::Array(recs.iter().map(|b| {
+                        let first: String = text.get(b.start..b.end).unwrap_or("").lines().next().unwrap_or("").chars().take(80).collect();
+                        json!({"id": b.id, "kind": b.kind, "hash": b.hash, "text": first})
+                    }).collect()));
+                }
+                if !outline.is_empty() {
+                    out["blocks"] = Value::Object(outline);
+                }
                 if !content.is_empty() {
                     out["content"] = Value::Object(content);
                 }

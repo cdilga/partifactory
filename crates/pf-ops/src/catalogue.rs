@@ -16,6 +16,8 @@ pub const CODES: &[&str] = &[
     "too_large",
     "anchor_not_found",
     "anchor_ambiguous",
+    "block_not_found",
+    "block_changed",
     "base_unknown",
     "invalid_against_base",
     "quota_exceeded",
@@ -53,6 +55,8 @@ pub fn for_op(op: &str) -> &'static [&'static str] {
             "file_exists",
             "anchor_not_found",
             "anchor_ambiguous",
+            "block_not_found",
+            "block_changed",
             "base_unknown",
             "invalid_against_base",
             "request_id_reused",
@@ -138,6 +142,9 @@ pub fn hint(code: &str) -> &'static str {
         "if_match_failed" | "file_exists" => "Re-read the current file hash or document revision.",
         "request_id_reused" => "Use a fresh request_id for different arguments.",
         "anchor_not_found" | "anchor_ambiguous" => "Copy a unique byte-exact anchor from part_get.",
+        "block_not_found" | "block_changed" => {
+            "Read the current block ids and hashes from part_get."
+        }
         "base_unknown" | "invalid_against_base" => {
             "Read a current version and construct edits against it."
         }
@@ -160,6 +167,8 @@ pub fn exit_code(code: &str) -> i32 {
         | "request_id_reused"
         | "anchor_not_found"
         | "anchor_ambiguous"
+        | "block_not_found"
+        | "block_changed"
         | "base_unknown"
         | "invalid_against_base" => 5,
         "rate_limited" | "quota_exceeded" => 6,

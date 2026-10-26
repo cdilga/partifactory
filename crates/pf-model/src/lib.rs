@@ -5,6 +5,7 @@
 //! Ops take and return the agent contract's JSON shapes (`part_create`, `part_get`, the
 //! mutation shape), so the HTTP, MCP and CLI surfaces are thin.
 
+pub mod blocks;
 pub mod builds;
 pub mod comments;
 pub mod create;
