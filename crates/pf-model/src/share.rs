@@ -176,6 +176,8 @@ impl PartService {
         let policy = self.policy.clone();
         let now = self.now();
         let name = name.to_owned();
+        // An email matches only as the whole address, so addresses can't be guessed letter by letter.
+        let email = Some(query.trim().to_lowercase()).filter(|e| e.contains('@') && e.len() <= 254);
         let q = format!(
             "%{}%",
             query
@@ -196,9 +198,9 @@ impl PartService {
                 let mut out = vec![];
                 let mut people = c.prepare(
                     "SELECT username, display_name FROM users WHERE status='active' AND id<>?1
-                     AND (lower(username) LIKE ?2 OR lower(display_name) LIKE ?2) ORDER BY display_name LIMIT 12",
+                     AND (lower(username) LIKE ?2 OR lower(display_name) LIKE ?2 OR lower(email)=?3) ORDER BY display_name LIMIT 12",
                 )?;
-                for r in people.query_map(params![row.owner_user_id, q], |r| {
+                for r in people.query_map(params![row.owner_user_id, q, email], |r| {
                     Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
                 })? {
                     let (username, display) = r?;

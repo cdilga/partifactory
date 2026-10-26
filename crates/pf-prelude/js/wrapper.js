@@ -82,7 +82,7 @@ window.pfShareChrome = function (part, WS) {
   var peopleList = null, addForm = null, doneButton = null, ownerNote = null;
   function buildAddForm() {
     var add = el('form', null, null); add.className = 'pf-add';
-    var fl = el('label', 'Add people or groups', add); var q = el('input', null, fl); q.type = 'search'; q.autocomplete = 'off'; q.placeholder = 'Name or group';
+    var fl = el('label', 'Add people or groups', add); var q = el('input', null, fl); q.type = 'search'; q.autocomplete = 'off'; q.placeholder = 'Add by name, group, or email';
     var picks = el('div', null, add); picks.className = 'pf-picks'; picks.setAttribute('role', 'listbox'); picks.setAttribute('aria-label', 'Matching people and groups');
     var chosen = null; var role = roleSelect(add, 'comment', 'Role for new people', function () {});
     var addButton = button('Add', add, function () {}); addButton.type = 'submit'; addButton.disabled = true;

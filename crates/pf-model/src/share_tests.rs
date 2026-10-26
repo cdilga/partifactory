@@ -167,6 +167,30 @@ fn candidates_match_people_and_groups_for_managers_only() {
             .unwrap();
         let subjects: Vec<_> = found.iter().map(|c| c.subject.as_str()).collect();
         assert_eq!(subjects, ["user:sam", "user:samira"]);
+        // An email finds its person only as the whole address.
+        k.tdb
+            .write_blocking(|tx| {
+                tx.execute(
+                    "UPDATE users SET email='Sam.Smith@example.com' WHERE username='sam'",
+                    [],
+                )
+                .map_err(pf_db::DbError::from)
+            })
+            .unwrap();
+        let by_email = k
+            .svc
+            .share_candidates(&alice, "notes", " sam.smith@EXAMPLE.com ")
+            .await
+            .unwrap();
+        assert_eq!(by_email[0].subject, "user:sam");
+        assert!(
+            k.svc
+                .share_candidates(&alice, "notes", "smith@example")
+                .await
+                .unwrap()
+                .is_empty(),
+            "a partial address finds no one"
+        );
         assert!(
             k.svc
                 .share_candidates(&alice, "notes", "%")
