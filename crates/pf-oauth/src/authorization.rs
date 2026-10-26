@@ -6,6 +6,9 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde_json::{Value, json};
 use url::Url;
 
+#[path = "cimd.rs"]
+pub(crate) mod cimd;
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Registration {
     #[serde(default = "client_name")]

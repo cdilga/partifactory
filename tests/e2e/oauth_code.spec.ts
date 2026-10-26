@@ -21,6 +21,8 @@ test('MCP client discovers, registers, gets browser consent and edits parts dire
   const as = await (await request.get(`${prm.authorization_servers[0]}/.well-known/oauth-authorization-server`)).json();
   expect(as.code_challenge_methods_supported).toEqual(['S256']);
   expect(as.authorization_response_iss_parameter_supported).toBe(true);
+  // claude.ai and Codex identify themselves by a metadata document URL (pf-di2).
+  expect(as.client_id_metadata_document_supported).toBe(true);
 
   const redirect = 'http://127.0.0.1:47123/callback';
   const registered = await request.post(as.registration_endpoint, { data: { client_name: 'OAuth gate agent', redirect_uris: [redirect], grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], token_endpoint_auth_method: 'none' } });
@@ -45,6 +47,9 @@ test('MCP client discovers, registers, gets browser consent and edits parts dire
   await expect(page.getByRole('heading', { name: 'Allow an agent', exact: true })).toBeVisible();
   await expect(page.locator('#agent')).toHaveText('OAuth gate agent');
   await expect(page.locator('#redirect-host')).toHaveText('127.0.0.1');
+  // Lifetimes are fixed (decision 55): no picker on the sheet (pf-vp3).
+  await expect(page.getByText('Connection lifetime')).toHaveCount(0);
+  await expect(page.locator('select#days')).toHaveCount(0);
   await page.screenshot({ path: info.outputPath('oauth-consent.png'), fullPage: true });
   await page.getByRole('button', { name: 'Allow', exact: true }).click();
   const returned = new URL((await callback).url());

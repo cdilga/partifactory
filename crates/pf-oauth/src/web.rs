@@ -166,7 +166,7 @@ async fn revoke(State(state): State<AppState>, Form(body): Form<Revoke>) -> Resp
 async fn metadata(State(state): State<AppState>) -> Json<Value> {
     let service = service(&state);
     Json(
-        json!({"issuer":service.origin,"authorization_endpoint":format!("{}/oauth/authorize",service.origin),"registration_endpoint":format!("{}/oauth/register",service.origin),"token_endpoint":format!("{}/oauth/token",service.origin),"device_authorization_endpoint":format!("{}/oauth/device_authorization",service.origin),"revocation_endpoint":format!("{}/oauth/revoke",service.origin),"grant_types_supported":["authorization_code","urn:ietf:params:oauth:grant-type:device_code","refresh_token"],"token_endpoint_auth_methods_supported":["none"],"response_types_supported":["code"],"code_challenge_methods_supported":["S256"],"authorization_response_iss_parameter_supported":true,"scopes_supported":SCOPES}),
+        json!({"issuer":service.origin,"authorization_endpoint":format!("{}/oauth/authorize",service.origin),"registration_endpoint":format!("{}/oauth/register",service.origin),"token_endpoint":format!("{}/oauth/token",service.origin),"device_authorization_endpoint":format!("{}/oauth/device_authorization",service.origin),"revocation_endpoint":format!("{}/oauth/revoke",service.origin),"grant_types_supported":["authorization_code","urn:ietf:params:oauth:grant-type:device_code","refresh_token"],"token_endpoint_auth_methods_supported":["none"],"response_types_supported":["code"],"code_challenge_methods_supported":["S256"],"authorization_response_iss_parameter_supported":true,"client_id_metadata_document_supported":true,"scopes_supported":SCOPES}),
     )
 }
 async fn resource(State(state): State<AppState>) -> Json<Value> {
@@ -191,6 +191,10 @@ async fn authorize(
     Query(request): Query<AuthorizationRequest>,
 ) -> Response {
     let service = service(&state);
+    // A CIMD client is fetched (or refreshed) before anything else checks it.
+    if let Err(error) = service.ensure_cimd(&request.client_id).await {
+        return failure(error);
+    }
     if let Err(error) = service.validate_authorization(&request).await {
         return failure(error);
     }

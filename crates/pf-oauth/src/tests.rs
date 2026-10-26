@@ -697,3 +697,94 @@ async fn refresh_tokens_expire_when_idle_and_connections_at_ninety_days() {
     let next = service.refresh(&refresh, None).await.unwrap();
     assert!(next.refresh_token.is_some());
 }
+#[tokio::test]
+async fn cimd_clients_are_fetched_checked_and_authorized_without_registration() {
+    use crate::authorization::cimd::{check_document, check_url, public_ip, tests_cimd::FIXTURES};
+    use crate::authorization::{AuthorizationRequest, CodeConsent, CodeExchange};
+    let (_db, service) = setup();
+    let person = actor(&service, "member").await;
+    let id = "https://claude.example.com/oauth/client.json";
+    let redirect = "https://claude.example.com/api/callback";
+    // URL and document rules.
+    for bad in [
+        "http://a.example.com/c",
+        "https://a.example.com/",
+        "https://a.example.com/c?x=1",
+        "https://a.example.com:8443/c",
+        "https://u:p@a.example.com/c",
+    ] {
+        assert!(check_url(bad).is_err(), "{bad}");
+    }
+    assert!(check_document(id, br#"{"client_id":"https://other.example.com/c","redirect_uris":["https://x.example.com/cb"]}"#).is_err());
+    assert!(
+        check_document(
+            id,
+            br#"{"client_id":"https://claude.example.com/oauth/client.json","redirect_uris":[]}"#
+        )
+        .is_err()
+    );
+    assert!(check_document(id, &vec![b' '; 6000]).is_err());
+    assert!(
+        !public_ip("10.0.0.1".parse().unwrap())
+            && !public_ip("::1".parse().unwrap())
+            && !public_ip("169.254.1.1".parse().unwrap())
+            && !public_ip("100.64.0.1".parse().unwrap())
+    );
+    assert!(public_ip("1.1.1.1".parse().unwrap()));
+    FIXTURES.lock().unwrap().push((id.to_owned(), format!(r#"{{"client_id":"{id}","client_name":"Claude","redirect_uris":["{redirect}"],"token_endpoint_auth_method":"none"}}"#).into_bytes()));
+    service.ensure_cimd(id).await.unwrap();
+    let verifier = "c".repeat(43);
+    let pending = service
+        .begin_authorization(
+            &person,
+            AuthorizationRequest {
+                response_type: "code".into(),
+                client_id: id.into(),
+                redirect_uri: redirect.into(),
+                code_challenge: base64::Engine::encode(
+                    &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+                    pf_auth::secret_hash(&verifier),
+                ),
+                code_challenge_method: "S256".into(),
+                resource: None,
+                scope: "parts:read".into(),
+                state: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        service.authorization_info(&person, &pending).await.unwrap()["agent_name"],
+        "Claude"
+    );
+    let redirected = service
+        .authorize_code(
+            &person,
+            CodeConsent {
+                request: pending,
+                scopes: scopes("parts:read").unwrap(),
+                spaces: ownspace(&person),
+                allow: true,
+            },
+        )
+        .await
+        .unwrap();
+    let code = url::Url::parse(&redirected)
+        .unwrap()
+        .query_pairs()
+        .find(|(k, _)| k == "code")
+        .unwrap()
+        .1
+        .into_owned();
+    let token = service
+        .exchange_code(CodeExchange {
+            client_id: id.into(),
+            code,
+            redirect_uri: redirect.into(),
+            code_verifier: verifier,
+            resource: None,
+        })
+        .await
+        .unwrap();
+    assert!(service.resolve(&token.access_token).await.is_ok());
+}
