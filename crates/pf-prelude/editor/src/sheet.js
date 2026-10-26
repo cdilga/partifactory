@@ -34,7 +34,14 @@ function openEditor() {
     var timer;
     editor.changed = function (value) {
       editor.edits[editor.file.value] = value; clearTimeout(timer);
-      timer = setTimeout(function () { ctx.api('/draft', { files: editor.edits, base: editor.head }).then(function () { editor.status.textContent = 'Draft saved.'; }).catch(function () {}); }, 800);
+      timer = setTimeout(function () {
+        // A save started after this draft was queued wins: never report or keep a stale draft.
+        var seq = editor.saves;
+        ctx.api('/draft', { files: editor.edits, base: editor.head }).then(function () { if (seq === editor.saves) editor.status.textContent = 'Draft saved.'; }).catch(function () {});
+      }, 800);
+    };
+    editor.saves = 0;
+    editor.cancelDraft = function () { clearTimeout(timer);
     };
     editor.text.oninput = function () { editor.changed(editor.text.value); };
     editor.file.onchange = function () { setMode(editor.mode); };
@@ -79,6 +86,7 @@ function commentOnSelection(c) {
   ctx.openComments({ quote: c.quote, block: block });
 }
 function saveEditor(force) {
+  editor.cancelDraft(); editor.saves++;
   var files = Object.keys(editor.edits); if (!files.length) { editor.status.textContent = 'No changes.'; return; }
   var chain = Promise.resolve(), saved = null;
   files.forEach(function (f) {
