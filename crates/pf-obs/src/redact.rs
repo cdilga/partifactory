@@ -89,8 +89,9 @@ fn patterns() -> &'static Patterns {
     static P: OnceLock<Patterns> = OnceLock::new();
     P.get_or_init(|| Patterns {
         // A cap segment runs to the next `/`, whitespace, quote, `?`, `#` or backslash (a JSON
-        // escape), so the whole value goes whatever alphabet it uses.
-        cap: Regex::new(r#"/c/[^/\s"'?#\\]+"#).expect("cap regex"),
+        // escape), so the whole value goes whatever alphabet it uses. A run of `/c` segments is
+        // taken whole, so `/c/c/<cap>` can't hide the cap behind a decoy `c` segment.
+        cap: Regex::new(r#"/c(?:/c)*/[^/\s"'?#\\]+"#).expect("cap regex"),
         token: Regex::new(r"pf_(at|rt|pat)_[A-Za-z0-9_\-.~+/=]+").expect("token regex"),
         bearer: Regex::new(r"(?i)\bbearer\s+[^\s\x22\\]+").expect("bearer regex"),
         fragment: Regex::new(r#"#pf=[^\s"'\\]*"#).expect("fragment regex"),
