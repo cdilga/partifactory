@@ -615,7 +615,59 @@ async fn grant_route(
                 .append_pair("return", &format!("/grant?{query}"));
             Redirect::to(u.as_str()).into_response()
         }
-        Err(e) if e.code == "forbidden" => pf_serve::not_shared(&a.0.origin),
+        Err(e) if e.code == "forbidden" => pf_serve::not_shared(&a.0.origin, &q.part),
+        Err(e) => fail(e),
+    }
+}
+#[derive(Deserialize)]
+struct Ask {
+    part: String,
+    #[serde(default)]
+    note: String,
+}
+/// Ask for access (§3a): a note to the part's owner, shown in its share sheet. The answer is
+/// the same whether the part exists, so asking reveals nothing.
+async fn ask_route(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    axum::Form(ask): axum::Form<Ask>,
+) -> Response {
+    let a = s.ext::<AuthService>().expect("auth service");
+    let result = async {
+        a.check_origin(&headers)?;
+        let actor = a.require_session(&headers).await?;
+        let note = ask.note.trim().chars().take(280).collect::<String>();
+        let now = a.now();
+        a.0.db
+            .write(move |tx| {
+                let recent: i64 = tx.query_row(
+                    "SELECT COUNT(*) FROM access_asks WHERE user_id=?1 AND created_at>?2",
+                    params![actor.user_id, now - 86_400_000],
+                    |r| r.get(0),
+                )?;
+                if recent >= 20 {
+                    return Err(PfError::new("rate_limited", "You've asked for a lot today; try again tomorrow."));
+                }
+                let part: Option<String> = tx
+                    .query_row("SELECT id FROM parts WHERE name=?1 AND deleted_at IS NULL", [&ask.part], |r| r.get(0))
+                    .optional()?;
+                if let Some(part) = part {
+                    tx.execute(
+                        "INSERT INTO access_asks(part_id,user_id,note,created_at) VALUES(?1,?2,?3,?4)
+                         ON CONFLICT(part_id,user_id) DO UPDATE SET note=excluded.note, created_at=excluded.created_at, closed_at=NULL, closed_as=NULL
+                         WHERE access_asks.closed_as IS NOT 'dismissed' OR access_asks.closed_at < ?4 - 604800000",
+                        params![part, actor.user_id, (!note.is_empty()).then_some(note), now],
+                    )?;
+                    tracing::info!(event = "access.ask", part_id = %part, outcome = "ok");
+                }
+                Ok::<_, PfError>(())
+            })
+            .await
+    }
+    .await;
+    match result {
+        Ok(()) => pf_serve::asked(&a.0.origin),
+        Err(e) if e.code == "unauthenticated" => Redirect::to("/signin?return=/").into_response(),
         Err(e) => fail(e),
     }
 }
@@ -821,6 +873,7 @@ pub fn install(builder: &mut ServerBuilder, service: AuthService) {
     builder.workspace(
         Router::new()
             .route("/grant", get(grant_route))
+            .route("/asks", post(ask_route))
             .route_layer(pf_serve::ratelimit::layer("grant")),
     );
     builder.workspace(

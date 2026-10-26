@@ -95,3 +95,39 @@ test('Move to Family opens a part to the household and not to outsiders', async 
   await member.context.close();
   await outsider.context.close();
 });
+
+// Ask for access (pf-h6y.3): a member asks from the 403 page; the owner adds them in two taps.
+test('a member asks for access and the owner adds them from the share sheet', async ({ page, browser }, info) => {
+  test.skip(!['chromium-desktop', 'webkit-mobile', 'firefox-desktop'].includes(info.project.name), 'Fixed part hosts exist for these lanes');
+  test.setTimeout(120000);
+  const name = `ask-${info.project.name}`;
+  const title = `Secret plans ${info.project.name}`;
+  const memberContext = await browser.newContext({ ignoreHTTPSErrors: true });
+  const member = await memberContext.newPage();
+  await signIn(member, 'member-b');
+  await signIn(page, 'admin');
+  const token = (await oauthToken(page, page.request, 'Ask gate', ['parts:read', 'parts:write'])).access_token;
+  const created = await page.request.post('/api/v1/part_create', { headers: { Authorization: `Bearer ${token}` }, data: { name, title, kind: 'html', content: '<!doctype html><h1>Plans</h1>', request_id: `${name}-${Date.now()}` } });
+  expect([200, 409].includes(created.status()), await created.text()).toBeTruthy();
+
+  expect((await member.goto(`https://parts.pf.test/grant?part=${name}`))?.status()).toBe(403);
+  await expect(member.locator('body')).not.toContainText(title);
+  await member.getByLabel('Add a note for the owner (optional)').fill('For the holiday?');
+  await member.getByRole('button', { name: 'Ask for access', exact: true }).click();
+  await expect(member.getByRole('heading', { name: /ACCESS REQUESTED/ })).toBeVisible();
+  await expect(member.locator('body')).not.toContainText(title);
+
+  await page.goto(`https://${name}-part.pf.test/`);
+  await page.getByRole('button', { name: 'Share', exact: true }).click();
+  await expect(page.locator('.pf-asks')).toContainText('1 person is asking for access');
+  await expect(page.locator('.pf-asks')).toContainText('For the holiday?');
+  await page.screenshot({ path: info.outputPath('ask-for-access.png'), fullPage: true });
+  await page.locator('.pf-asks').getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(page.locator('#pf-status')).toContainText('can now open it');
+  await expect(page.locator('.pf-asks')).toBeHidden();
+
+  expect((await member.goto(`https://${name}-part.pf.test/`))?.status()).toBeLessThan(400);
+  await expect(member.frameLocator('#pf-frame').getByRole('heading', { name: 'Plans' })).toBeVisible();
+  expect((await waitForLog({ event: 'access.ask' })).some(l => l.outcome === 'ok')).toBe(true);
+  await memberContext.close();
+});

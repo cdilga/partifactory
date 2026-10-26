@@ -38,7 +38,7 @@ pub mod tls;
 pub use access::{AccessInfo, AccessSlot, Listener};
 pub use config::ServeConfig;
 pub use error_page::error_page;
-pub use error_page::not_shared;
+pub use error_page::{asked, not_shared};
 pub use health::{CheckKind, ReadyRegistry};
 pub use hosts::{HostClass, HostRules, PartHost};
 pub use ingress::{ClientAddr, IngressPolicy, RequestId};

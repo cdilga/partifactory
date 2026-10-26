@@ -42,7 +42,14 @@ impl PartService {
         outward: bool,
     ) -> Result<Value, PfError> {
         let action = req.action.clone().unwrap_or_else(|| "list".into());
-        if !["list", "set", "remove"].contains(&action.as_str()) {
+        // Dismissing an ask for access is a person's choice in the share sheet, never an agent's.
+        if action == "dismiss" && (caller.principal.conn_id.is_some() || caller.via != "chrome") {
+            return Err(PfError::new(
+                "forbidden",
+                "Only a person can answer an ask for access.",
+            ));
+        }
+        if !["list", "set", "remove", "dismiss"].contains(&action.as_str()) {
             return Err(PfError::invalid("action", "action is list, set or remove")
                 .with("actions", json!(["list", "set", "remove"])));
         }
@@ -84,6 +91,13 @@ impl PartService {
                             "Only the admin can share with everyone signed in, from the share sheet.",
                         ));
                     }
+                    if action == "dismiss" {
+                        let who = subject.strip_prefix("user:").unwrap_or_default().to_owned();
+                        tx.execute("UPDATE access_asks SET closed_at=?3, closed_as='dismissed' WHERE part_id=?1 AND user_id=?2 AND closed_at IS NULL", params![row.id, who, now])?;
+                        tracing::info!(event = "access.dismiss", part_id = %row.id, outcome = "ok");
+                        let out = describe(tx, &row, &p.user_id, now, seen.unwrap_or(0), can_share, outward, via == "chrome")?;
+                        return Ok((out, None));
+                    }
                     if subject == format!("user:{}", row.owner_user_id) {
                         return Err(PfError::invalid("subject", "the owner always has access"));
                     }
@@ -117,6 +131,10 @@ impl PartService {
                         tx.execute("INSERT INTO audit(at,user_id,actor,action,target_kind,target_id,before,after) VALUES(?1,?2,?3,'grant.set','part',?4,?5,?6)",
                             params![now, p.user_id, actor, row.id, before.map(|r| json!({"subject":subject,"role":ROLES[r as usize]}).to_string()), json!({"subject":subject,"role":ROLES[role as usize]}).to_string()])?;
                         tracing::info!(event = "grant.set", part_id = %row.id, role = ROLES[role as usize], surface = via, outcome = "ok");
+                        // Adding someone answers their ask for access, if they made one.
+                        if let Some(who) = subject.strip_prefix("user:") {
+                            tx.execute("UPDATE access_asks SET closed_at=?3, closed_as='added' WHERE part_id=?1 AND user_id=?2 AND closed_at IS NULL", params![row.id, who, now])?;
+                        }
                         // Lowering a role must reach open tabs too.
                         if before.is_some_and(|b| b > role) {
                             let key = pf_caps::part_key(&row.id);
@@ -137,7 +155,7 @@ impl PartService {
                         tracing::info!(event = "grant.remove", part_id = %row.id, surface = via, outcome = if removed > 0 { "ok" } else { "noop" });
                     }
                 }
-                let out = describe(tx, &row, &p.user_id, now, seen.unwrap_or(0), can_share, outward)?;
+                let out = describe(tx, &row, &p.user_id, now, seen.unwrap_or(0), can_share, outward, via == "chrome")?;
                 Ok::<_, PfError>((out, bumped))
             })
             .await?;
@@ -254,6 +272,7 @@ fn describe(
     role: u8,
     can_share: bool,
     outward: bool,
+    person: bool,
 ) -> Result<Value, PfError> {
     let label = |subject: &str| -> Result<(String, String), PfError> {
         Ok(if let Some(id) = subject.strip_prefix("user:") {
@@ -345,8 +364,22 @@ fn describe(
             |r| r.get(0),
         )
         .optional()?;
+    // Open asks, for the people who can answer them in the share sheet (never for agents).
+    let mut asks = vec![];
+    if can_share && person {
+        let mut q = c.prepare(
+            "SELECT u.username, u.display_name, a.note, a.created_at FROM access_asks a JOIN users u ON u.id=a.user_id
+             WHERE a.part_id=?1 AND a.closed_at IS NULL AND u.status='active' ORDER BY a.created_at",
+        )?;
+        for r in q.query_map([&row.id], |r| {
+            Ok(json!({"subject": format!("user:{}", r.get::<_, String>(0)?), "label": r.get::<_, String>(1)?, "note": r.get::<_, Option<String>>(2)?, "at": r.get::<_, i64>(3)?}))
+        })? {
+            asks.push(r?);
+        }
+    }
     Ok(json!({
         "name": row.name,
+        "asks": asks,
         "family": {"available": can_family, "in_family": row.space_slug == "family", "home": home},
         "owner": {"label": owner.0, "subject": format!("user:{}", owner.1)},
         "space": row.space_slug,

@@ -273,11 +273,11 @@ See or change who can open a part, inside the household: people and groups who a
 | `role` | string | no | — | `view`, `comment`, `edit` or `manage`. Agents may grant up to `edit`. |
 | `subject` | string | no | — | `user:<username>`, `group:<name>`, or `everyone-signed-in` (the admin only, in the UI). |
 
-Output: `{name, owner, space, family, grants, inherited, sentence, you}`. `family` says whether the part can move to the household's `family` space (`part_edit {meta: {space: "family"}}`), which opens it to the whole household. `grants` are the part's own `{subject, label, role, by_agent}`; `inherited` come from its space; `sentence` says who can open it now. A grant you make is labelled with your agent name and the person can undo it. Removing someone takes effect on their next request.
+Output: `{name, owner, space, family, asks, grants, inherited, sentence, you}`. `asks` (people asking for access) is always empty for agents: answering them is a person's choice. `family` says whether the part can move to the household's `family` space (`part_edit {meta: {space: "family"}}`), which opens it to the whole household. `grants` are the part's own `{subject, label, role, by_agent}`; `inherited` come from its space; `sentence` says who can open it now. A grant you make is labelled with your agent name and the person can undo it. Removing someone takes effect on their next request.
 Errors: `invalid_input`, `unknown_field`, `unauthenticated`, `forbidden`, `not_found`, `rate_limited`, `internal`.
 ```json
 {"name":"packing","action":"set","subject":"user:alex","role":"comment"}
-→ {"name":"packing","owner":{"label":"The admin","subject":"user:admin"},"space":"~admin","family":{"available":true,"in_family":false,"home":"~admin"},"grants":[{"subject":"user:alex","label":"Alex","role":"comment","by_agent":"Hermes"}],"inherited":[],"sentence":"The admin and Alex can open this part.","you":{"role":"manage","can_share":true,"can_share_everyone":false}}
+→ {"name":"packing","owner":{"label":"The admin","subject":"user:admin"},"space":"~admin","family":{"available":true,"in_family":false,"home":"~admin"},"asks":[],"grants":[{"subject":"user:alex","label":"Alex","role":"comment","by_agent":"Hermes"}],"inherited":[],"sentence":"The admin and Alex can open this part.","you":{"role":"manage","can_share":true,"can_share_everyone":false}}
 ```
 
 ## Kinds

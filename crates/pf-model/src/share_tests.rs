@@ -293,3 +293,37 @@ fn move_to_family_opens_the_part_to_the_household_and_back() {
         );
     });
 }
+
+#[test]
+fn asks_for_access_show_to_sharers_and_close_on_add_or_dismiss() {
+    let k = kit_with(Arc::new(GrantPolicy), ServiceConfig::default());
+    let (alice, sam, bob) = (k.person("alice"), k.person("sam"), k.person("bob"));
+    let chrome = Caller {
+        principal: alice.principal.clone(),
+        via: "chrome",
+    };
+    rt().block_on(async {
+        let made = k.svc.create(&alice, CreateRequest { title: Some("Notes".into()), name: Some("notes".into()), request_id: Some("c".into()), ..Default::default() }).await.unwrap();
+        let part = made["id"].as_str().unwrap().to_owned();
+        for who in [&sam, &bob] {
+            let (part, uid) = (part.clone(), who.principal.user_id.clone());
+            k.tdb.write_blocking(move |tx| {
+                tx.execute("INSERT INTO access_asks(part_id,user_id,note,created_at) VALUES(?1,?2,'please',0)", [&part, &uid])?;
+                Ok::<_, pf_db::DbError>(())
+            }).unwrap();
+        }
+        let list = ShareRequest { name: "notes".into(), ..Default::default() };
+        assert_eq!(k.svc.share(&chrome, list.clone(), false).await.unwrap()["asks"].as_array().unwrap().len(), 2);
+        // Agents never see or answer asks.
+        let agent = Caller::api(Principal::agent(alice.principal.user_id.clone(), "c_agent"));
+        assert_eq!(k.svc.share(&agent, list.clone(), false).await.unwrap()["asks"].as_array().unwrap().len(), 0);
+        assert_eq!(k.svc.share(&agent, req("dismiss", "user:bob", None), false).await.unwrap_err().code, "forbidden");
+        // Add answers Sam's ask; Dismiss answers Bob's without a grant.
+        k.svc.share(&chrome, req("set", "user:sam", Some("view")), false).await.unwrap();
+        let after = k.svc.share(&chrome, req("dismiss", "user:bob", None), false).await.unwrap();
+        assert_eq!(after["asks"].as_array().unwrap().len(), 0);
+        assert_eq!(after["grants"].as_array().unwrap().len(), 1);
+        assert_eq!(k.count("SELECT COUNT(*) FROM access_asks WHERE closed_as='added'"), 1);
+        assert_eq!(k.count("SELECT COUNT(*) FROM access_asks WHERE closed_as='dismissed'"), 1);
+    });
+}

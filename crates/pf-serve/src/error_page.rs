@@ -14,21 +14,41 @@ fn escape(s: &str) -> String {
 
 /// An HTML error response carrying the current request id.
 pub fn error_page(status: StatusCode, detail: &str) -> Response {
-    render(status, detail, None)
+    render(status, detail, None, "")
 }
 
-/// Content-free browser 403: access requests ship after Slice 1.
-pub fn not_shared(origin: &str) -> Response {
+/// Content-free browser 403 with Ask for access (§3a). The page never names the part's title;
+/// `part` is the name already in the asker's own link.
+pub fn not_shared(origin: &str, part: &str) -> Response {
+    let form = format!(
+        r#"<form class="ask" method="post" action="/asks"><input type="hidden" name="part" value="{}"><label for="note">Add a note for the owner (optional)</label><textarea id="note" name="note" maxlength="280" rows="3"></textarea><button type="submit">Ask for access</button></form>"#,
+        escape(part)
+    );
     render(
         StatusCode::FORBIDDEN,
         "This part has not been shared with you.",
         Some(origin),
+        &form,
     )
 }
 
-fn render(status: StatusCode, detail: &str, origin: Option<&str>) -> Response {
+/// After Ask for access: the same answer whether or not the part exists.
+pub fn asked(origin: &str) -> Response {
+    let mut r = render(
+        StatusCode::OK,
+        "Asked. The owner will see your request next time they open Share.",
+        Some(origin),
+        "",
+    );
+    *r.status_mut() = StatusCode::OK;
+    r
+}
+
+fn render(status: StatusCode, detail: &str, origin: Option<&str>, extra: &str) -> Response {
     let rid = pf_obs::request_id::current().unwrap_or_default();
-    let reason = if origin.is_some() {
+    let reason = if origin.is_some() && status == StatusCode::OK {
+        "ACCESS REQUESTED".into()
+    } else if origin.is_some() {
         "NOT SHARED WITH YOU".into()
     } else {
         status.canonical_reason().unwrap_or("Error").to_uppercase()
@@ -49,7 +69,8 @@ body{{margin:0;min-height:100vh;display:grid;place-items:center;background:var(-
 main{{max-width:36rem;padding:2rem 1rem;border-top:2px solid var(--fg)}}
 h1{{font-size:1.25rem;letter-spacing:.08em;margin:0 0 .5rem}}p{{margin:.25rem 0}}.rid{{color:var(--mute);font-size:.85rem;border-top:1px solid var(--line);margin-top:1rem;padding-top:.5rem}}
 .action{{display:inline-flex;min-height:44px;align-items:center;color:var(--signal);text-decoration:underline;text-underline-offset:4px;margin-top:16px}}
-</style></head><body><main><h1>{code} · {reason}</h1><p>{detail}</p>{action}<p class="rid">Request id: <code id="request-id">{rid}</code></p></main></body></html>"#,
+.ask{{display:grid;gap:8px;margin:16px 0 4px}}.ask textarea{{font:inherit;color:inherit;background:transparent;border:1px solid var(--line);border-radius:6px;padding:8px}}.ask button{{justify-self:start;min-height:44px;padding:0 16px;font:inherit;color:var(--bg);background:var(--signal);border:0;border-radius:6px;cursor:pointer}}
+</style></head><body><main><h1>{code} · {reason}</h1><p>{detail}</p>{extra}{action}<p class="rid">Request id: <code id="request-id">{rid}</code></p></main></body></html>"#,
         code = status.as_u16(),
         reason = escape(&reason),
         detail = escape(detail),

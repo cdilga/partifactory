@@ -58,10 +58,24 @@ window.pfShareChrome = function (part, WS) {
       el('small', 'Everyone in the household can open and edit it.', familyBox);
     }
   }
+  // Asks for access sit at the top of the sheet: Add (as View) or Dismiss, two taps (§4).
+  function renderAsks() {
+    asksBox.replaceChildren();
+    var asks = shareState && shareState.asks || []; asksBox.hidden = !asks.length;
+    if (!asks.length) return;
+    el('h3', asks.length === 1 ? '1 person is asking for access' : asks.length + ' people are asking for access', asksBox);
+    asks.forEach(function (a) {
+      var row = el('div', null, asksBox); row.className = 'pf-ask';
+      var who = el('span', a.label, row); if (a.note) el('small', '“' + a.note + '”', who);
+      button('Add', row, function () { shareChange({ action: 'set', subject: a.subject, role: 'view' }).then(function () { status.textContent = a.label + ' can now open it.'; }).catch(report); }).className = 'pf-primary';
+      button('Dismiss', row, function () { shareChange({ action: 'dismiss', subject: a.subject }).catch(report); });
+    });
+  }
   function moveTo(space, done) { mutation('/move', { space: space }).then(function (j) { shareState = j; status.textContent = done; render(); }).catch(report); }
   function renderPeople() {
     peopleBox.replaceChildren();
     renderFamily();
+    renderAsks();
     var st = shareState; if (!st) return;
     el('p', st.sentence, peopleBox).className = 'pf-sentence';
     var rows = el('ul', null, peopleBox); rows.className = 'pf-people';
@@ -179,6 +193,7 @@ window.pfShareChrome = function (part, WS) {
   updateSummary();
   sheet = el('dialog', null, document.body); sheet.id = 'pf-share'; sheet.setAttribute('aria-labelledby', 'pf-share-title');
   var head = el('header', null, sheet); el('h2', 'Share', head).id = 'pf-share-title'; button('Close', head, function () { sheet.close(); });
+  var asksBox = el('section', null, sheet); asksBox.className = 'pf-asks'; asksBox.hidden = true;
   var who = el('fieldset', null, sheet); who.className = 'pf-choice'; el('legend', 'Who can open it', who);
   function choice(value, text, hint) {
     var l = el('label', null, who), r = el('input', null, l); r.type = 'radio'; r.name = 'pf-audience'; r.value = value;
