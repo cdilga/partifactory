@@ -40,7 +40,9 @@ class BrokenStream(http.server.BaseHTTPRequestHandler):
 
 
 def observe(source, directory, port, label):
-    (directory / 'Caddyfile').write_text(source)
+    # A fresh file per lane: Docker Desktop can serve a stale, truncated view of a rewritten bind mount.
+    caddyfile = directory / f'Caddyfile.{label}'
+    caddyfile.write_text(source)
     name = 'pf-log-canary-' + uuid.uuid4().hex[:12]
     markers = [uuid.uuid4().hex for _ in range(4)]
     try:
@@ -48,12 +50,20 @@ def observe(source, directory, port, label):
                 '--add-host', 'host.docker.internal:host-gateway',
                 '--publish', '127.0.0.1::443',
                 '--env', f'PF_UPSTREAM_WORKSPACE=host.docker.internal:{port}',
-                '--mount', f'type=bind,src={directory}/Caddyfile,dst=/etc/caddy/Caddyfile,readonly',
+                '--mount', f'type=bind,src={caddyfile},dst=/etc/caddy/Caddyfile,readonly',
                 '--mount', f'type=bind,src={directory}/certs,dst=/etc/caddy/certs,readonly',
                 '--mount', f'type=bind,src={directory}/sites,dst=/etc/caddy/sites.d,readonly',
                 '--mount', f'type=bind,src={REPO}/deploy/proxy,dst=/srv/pf-proxy,readonly',
                 '--tmpfs', '/data', '--tmpfs', '/config', 'caddy:2.11.4-alpine')
-        published = json.loads(command('docker', 'inspect', name))[0]['NetworkSettings']['Ports']['443/tcp'][0]['HostPort']
+        # Docker can report the container before its port mapping is published.
+        for _ in range(40):
+            ports = json.loads(command('docker', 'inspect', name))[0]['NetworkSettings']['Ports'] or {}
+            if ports.get('443/tcp'):
+                break
+            time.sleep(.25)
+        else:
+            raise SystemExit(f'{name} never published 443: ' + subprocess.run(['docker', 'logs', name], capture_output=True, text=True).stderr[-2000:])
+        published = ports['443/tcp'][0]['HostPort']
         for _ in range(40):
             result = subprocess.run(['curl', '--silent', '--show-error', '--max-time', '3',
                 '--cacert', str(directory / 'certs/cert.pem'),
