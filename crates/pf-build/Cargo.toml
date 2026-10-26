@@ -1,6 +1,6 @@
 [package]
 name = "pf-build"
-description = "The build child protocol and the Slice 1 kinds (`html`, `markdown`, `text`, `files`), mirror-on-build"
+description = "Isolated kind renderers and mirror-on-build"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -31,6 +31,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 serde.workspace = true
 serde_bytes = "0.11"
 serde_json.workspace = true
+syntect = { version = "=5.3.0", default-features = false, features = ["default-fancy"] }
 thiserror.workspace = true
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "time", "sync", "macros", "io-util"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }

@@ -9,7 +9,8 @@ pub mod scan;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-pub const TOOLCHAIN: &str = "pf-slice1-1";
+// Includes the embedded syntax set: changing it must invalidate generated code viewers.
+pub const TOOLCHAIN: &str = "pf-kinds-2-syntect-5.3.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceFile {

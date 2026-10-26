@@ -1,21 +1,21 @@
-//! Kind detection for Slice 1 (§2 Kinds): `index.html` → html, `*.md` → markdown, `*.txt` →
-//! text. `files` is never detected (a bundle is sent with `kind: "files"`). Any other entry is
-//! `invalid_input` naming the kinds that exist, since `svg`, `code` and `tsx` come after the slice.
+//! Kind detection (§2 Kinds). Built bundles always explicitly request `files`.
 
 use serde::{Deserialize, Serialize};
 
-/// The kinds Slice 1 builds.
+/// The kinds the build child supports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
     Html,
     Markdown,
     Text,
+    Svg,
+    Code,
     Files,
 }
 
 /// The kinds that exist in this release, for error messages.
-pub const SLICE1_KINDS: &[&str] = &["html", "markdown", "text", "files"];
+pub const AVAILABLE_KINDS: &[&str] = &["html", "markdown", "text", "svg", "code", "files"];
 
 impl Kind {
     pub fn as_str(self) -> &'static str {
@@ -23,6 +23,8 @@ impl Kind {
             Kind::Html => "html",
             Kind::Markdown => "markdown",
             Kind::Text => "text",
+            Kind::Svg => "svg",
+            Kind::Code => "code",
             Kind::Files => "files",
         }
     }
@@ -32,6 +34,8 @@ impl Kind {
             "html" => Ok(Kind::Html),
             "markdown" => Ok(Kind::Markdown),
             "text" => Ok(Kind::Text),
+            "svg" => Ok(Kind::Svg),
+            "code" => Ok(Kind::Code),
             "files" => Ok(Kind::Files),
             other => Err(KindError::NotYet(other.to_string())),
         }
@@ -41,11 +45,11 @@ impl Kind {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum KindError {
     #[error(
-        "kind {0:?} isn't available yet; the kinds that exist are html, markdown, text and files"
+        "kind {0:?} isn't available yet; the kinds that exist are html, markdown, text, svg, code and files"
     )]
     NotYet(String),
     #[error(
-        "can't tell the kind of entry {0:?}; use index.html (html), a .md file (markdown) or a .txt file (text), or send kind: \"files\" for a built bundle"
+        "can't tell the kind of entry {0:?}; use html, markdown, text, svg or code, or send kind: \"files\" for a built bundle"
     )]
     Undetected(String),
 }
@@ -69,6 +73,10 @@ pub fn detect(entry: &str) -> Result<Kind, KindError> {
         "html" | "htm" => Ok(Kind::Html),
         "md" | "markdown" => Ok(Kind::Markdown),
         "txt" => Ok(Kind::Text),
+        "svg" => Ok(Kind::Svg),
+        "rs" | "py" | "go" | "js" | "mjs" | "cjs" | "css" | "json" | "toml" | "yaml" | "yml"
+        | "sh" | "bash" | "zsh" | "c" | "h" | "cpp" | "hpp" | "java" | "sql" | "rb" | "php"
+        | "xml" | "swift" | "kt" => Ok(Kind::Code),
         _ => Err(KindError::Undetected(entry.to_string())),
     }
 }
@@ -87,9 +95,9 @@ mod tests {
             ("notes/plan.md", Ok(Kind::Markdown)),
             ("index.txt", Ok(Kind::Text)),
             ("list.txt", Ok(Kind::Text)),
-            ("logo.svg", Err(())),
+            ("logo.svg", Ok(Kind::Svg)),
             ("App.tsx", Err(())),
-            ("main.rs", Err(())),
+            ("main.rs", Ok(Kind::Code)),
             ("noext", Err(())),
         ];
         for (entry, want) in table {
@@ -104,15 +112,15 @@ mod tests {
     }
 
     #[test]
-    fn svg_refusal_names_the_kinds_that_exist() {
-        let e = detect("drawing.svg").unwrap_err();
+    fn refusal_names_the_kinds_that_exist() {
+        let e = detect("App.tsx").unwrap_err();
         assert_eq!(e.code(), "invalid_input");
         let msg = e.to_string();
         for k in ["html", "markdown", "text", "files"] {
             assert!(msg.contains(k), "{msg}");
         }
-        let e = Kind::parse("svg").unwrap_err().to_string();
-        for k in SLICE1_KINDS {
+        let e = Kind::parse("tsx").unwrap_err().to_string();
+        for k in AVAILABLE_KINDS {
             assert!(e.contains(k), "{e}");
         }
     }

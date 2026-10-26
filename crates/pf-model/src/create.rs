@@ -132,7 +132,7 @@ pub fn parse<T: for<'de> Deserialize<'de>>(v: Value) -> Result<T, PfError> {
     })
 }
 
-const KINDS_NOW: &[&str] = &["html", "markdown", "text", "files"];
+const KINDS_NOW: &[&str] = &["html", "markdown", "text", "svg", "code", "files"];
 
 fn one_of(
     path: &str,

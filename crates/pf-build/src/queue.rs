@@ -171,7 +171,7 @@ pub async fn execute(cfg: &Config, pool: &mut Pool, job: Job) -> Result<(), PfEr
     if let Err(error) = &result {
         finish_failed(cfg, &job, error).await?;
     }
-    tracing::info!(event="build.finished",build_id=job.id,part_id=%job.part,outcome=if result.is_ok(){"ok"}else{"failed"},duration_ms=start.elapsed().as_millis() as u64);
+    tracing::info!(event="build.finished",build_id=job.id,part_id=%job.part,kind=%job.kind,outcome=if result.is_ok(){"ok"}else{"failed"},duration_ms=start.elapsed().as_millis() as u64);
     result
 }
 

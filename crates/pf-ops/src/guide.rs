@@ -29,7 +29,7 @@ pub fn fields(op: &str) -> &'static [FieldDoc] {
             FieldDoc {
                 fields: &["kind"],
                 label: "`kind`",
-                kind: "`html` \\| `markdown` \\| `text` \\| `files`",
+                kind: "`html` \\| `markdown` \\| `text` \\| `svg` \\| `code` \\| `files`",
                 required: "no",
                 default: "detected from the entry file",
                 meaning: "required with `content`; `tsx` comes after Slice 1",

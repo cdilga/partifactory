@@ -1,7 +1,12 @@
 //! Deterministic Slice 1 rendering. Source bytes are never changed in storage.
 use crate::{BuildInput, BuildOutput, BuiltFile, Diagnostic, kinds::Kind, scan};
 use lol_html::{RewriteStrSettings, element, html_content::ContentType, rewrite_str, text};
-use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::LazyLock};
+use syntect::{
+    easy::HighlightLines,
+    highlighting::{Color, FontStyle, ThemeSet},
+    parsing::SyntaxSet,
+};
 
 pub const SHELL_CSS: &str = "html{color-scheme:light dark}body{max-width:72rem;margin:2rem auto;padding:0 1rem;font:17px/1.6 system-ui}pre,code{font-family:ui-monospace,monospace}pre{white-space:pre-wrap;overflow-wrap:anywhere}.pf-line{display:block;min-height:1.6em}.pf-line:before{content:attr(data-line);display:inline-block;width:3em;margin-right:1em;color:GrayText;user-select:none}.pf-line:target{background:Highlight;color:HighlightText}img{max-width:100%}table{border-collapse:collapse}td,th{padding:.3em .7em;border:1px solid GrayText}.pf-proportional{font-family:system-ui}";
 
@@ -38,6 +43,77 @@ pub fn text_shell(source: &str) -> String {
     }
     body.push_str("</pre>");
     shell(&body)
+}
+
+static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+static THEMES: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
+
+fn hex(color: Color) -> String {
+    format!("#{:02x}{:02x}{:02x}", color.r, color.g, color.b)
+}
+
+/// Highlight in the isolated worker, retaining syntax state across lines. Both themes use
+/// the same source; merge their token boundaries so light/dark colours remain accurate.
+pub fn code_shell(source: &str, path: &str) -> Result<String, String> {
+    let ext = path.rsplit_once('.').map(|(_, ext)| ext).unwrap_or("");
+    let syntax = SYNTAXES
+        .find_syntax_by_extension(ext)
+        .unwrap_or_else(|| SYNTAXES.find_syntax_plain_text());
+    let mut light = HighlightLines::new(syntax, &THEMES.themes["InspiredGitHub"]);
+    let mut dark = HighlightLines::new(syntax, &THEMES.themes["base16-ocean.dark"]);
+    let mut body = String::from(
+        "<style>#pf-code{background:light-dark(#fff,#2b303b);color:light-dark(#323232,#c0c5ce);tab-size:4}#pf-code code{font:inherit}</style><pre id=\"pf-code\" aria-label=\"Source code\"><code>",
+    );
+    for (i, line) in source.split_inclusive('\n').enumerate() {
+        let light = light
+            .highlight_line(line, &SYNTAXES)
+            .map_err(|e| e.to_string())?;
+        let dark = dark
+            .highlight_line(line, &SYNTAXES)
+            .map_err(|e| e.to_string())?;
+        body.push_str(&format!(
+            "<span class=\"pf-line\" id=\"L{}\" data-line=\"{}\">",
+            i + 1,
+            i + 1
+        ));
+        let (mut li, mut di, mut lo, mut d_offset) = (0, 0, 0, 0);
+        while li < light.len() && di < dark.len() {
+            let (ls, lt) = light[li];
+            let (ds, dt) = dark[di];
+            let len = (lt.len() - lo).min(dt.len() - d_offset);
+            let text = &lt[lo..lo + len];
+            let weight = if ls.font_style.contains(FontStyle::BOLD) {
+                "bold"
+            } else {
+                "normal"
+            };
+            let italic = if ls.font_style.contains(FontStyle::ITALIC) {
+                "italic"
+            } else {
+                "normal"
+            };
+            body.push_str(&format!("<span style=\"color:light-dark({},{});font-weight:{weight};font-style:{italic}\">{}</span>", hex(ls.foreground), hex(ds.foreground), escape(text).replace('\r', "&#13;")));
+            lo += len;
+            d_offset += len;
+            if lo == lt.len() {
+                li += 1;
+                lo = 0;
+            }
+            if d_offset == dt.len() {
+                di += 1;
+                d_offset = 0;
+            }
+        }
+        body.push_str("</span>");
+    }
+    if source.is_empty() || source.ends_with('\n') {
+        let n = source.bytes().filter(|b| *b == b'\n').count() + 1;
+        body.push_str(&format!(
+            "<span class=\"pf-line\" id=\"L{n}\" data-line=\"{n}\"></span>"
+        ));
+    }
+    body.push_str("</code></pre>");
+    Ok(shell(&body))
 }
 
 fn url(u: &str, path: &str, mirrored: &BTreeMap<String, String>) -> Option<String> {
@@ -163,28 +239,29 @@ pub fn render(input: BuildInput) -> Result<BuildOutput, String> {
     for (path, source) in input.files {
         let mut typ = source.content_type;
         let text = std::str::from_utf8(&source.bytes).ok();
-        let bytes = if path == input.entry && matches!(kind, Kind::Text | Kind::Markdown) {
-            typ = "text/html; charset=utf-8".into();
-            let text = text.ok_or("entry is not UTF-8")?;
-            let source = if kind == Kind::Text {
-                text_shell(text)
-            } else {
-                shell(&markdown(text))
-            };
-            html(&source, &path, &input.mirrored, &mut output.warnings)?.into_bytes()
-        } else if let Some(text) = text {
-            if typ.starts_with("text/html") {
-                html(text, &path, &input.mirrored, &mut output.warnings)?.into_bytes()
-            } else if typ.starts_with("text/css") {
-                css(text, &path, &input.mirrored).into_bytes()
-            } else if typ.contains("javascript") {
-                js(text, &path, &input.mirrored, &mut output.warnings).into_bytes()
+        let bytes =
+            if path == input.entry && matches!(kind, Kind::Text | Kind::Markdown | Kind::Code) {
+                typ = "text/html; charset=utf-8".into();
+                let text = text.ok_or("entry is not UTF-8")?;
+                let source = match kind {
+                    Kind::Text => text_shell(text),
+                    Kind::Code => code_shell(text, &path)?,
+                    _ => shell(&markdown(text)),
+                };
+                html(&source, &path, &input.mirrored, &mut output.warnings)?.into_bytes()
+            } else if let Some(text) = text {
+                if typ.starts_with("text/html") {
+                    html(text, &path, &input.mirrored, &mut output.warnings)?.into_bytes()
+                } else if typ.starts_with("text/css") {
+                    css(text, &path, &input.mirrored).into_bytes()
+                } else if typ.contains("javascript") {
+                    js(text, &path, &input.mirrored, &mut output.warnings).into_bytes()
+                } else {
+                    source.bytes
+                }
             } else {
                 source.bytes
-            }
-        } else {
-            source.bytes
-        };
+            };
         let compressed = if path != input.entry && compressible(&typ) {
             use std::io::Write;
             let mut compressed = Vec::new();

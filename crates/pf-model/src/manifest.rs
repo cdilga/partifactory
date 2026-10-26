@@ -172,6 +172,8 @@ pub fn mime_for(path: &str) -> &'static str {
         "json" | "map" => "application/json",
         "csv" => "text/csv",
         "xml" => "application/xml",
+        "rs" | "py" | "go" | "toml" | "yaml" | "yml" | "sh" | "bash" | "zsh" | "c" | "h"
+        | "cpp" | "hpp" | "java" | "sql" | "rb" | "php" | "swift" | "kt" => "text/plain",
         "svg" => "image/svg+xml",
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
@@ -209,6 +211,7 @@ pub fn detect_kind(paths: &[&str]) -> (&'static str, String) {
         ("index.html", "html"),
         ("index.md", "markdown"),
         ("index.txt", "text"),
+        ("index.svg", "svg"),
     ] {
         if paths.contains(&entry) {
             return (kind, entry.to_string());
@@ -216,10 +219,16 @@ pub fn detect_kind(paths: &[&str]) -> (&'static str, String) {
     }
     if paths.len() == 1 {
         let p = paths[0];
+        let ext = p
+            .rsplit_once('.')
+            .map(|(_, e)| e.to_ascii_lowercase())
+            .unwrap_or_default();
         let kind = match mime_for(p) {
             "text/html" => "html",
             "text/markdown" => "markdown",
-            "text/plain" => "text",
+            "image/svg+xml" => "svg",
+            "text/plain" if matches!(ext.as_str(), "txt" | "tsx" | "jsx" | "ts") => "text",
+            mime if is_text(mime) => "code",
             _ => "files",
         };
         return (kind, p.to_string());
@@ -239,6 +248,8 @@ pub fn content_entry(kind: &str) -> &'static str {
         "html" => "index.html",
         "markdown" => "index.md",
         "text" => "index.txt",
+        "svg" => "index.svg",
+        "code" => "index.txt",
         _ => "index.txt",
     }
 }
