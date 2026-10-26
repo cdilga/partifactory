@@ -35,13 +35,25 @@ test('an Edit member changes a Markdown part in the browser, with drafts and con
   const p = editor.page;
   await p.goto(`https://${name}-part.pf.test/`);
   await p.getByRole('button', { name: 'Edit', exact: true }).click();
+  // Markdown opens formatted; editing one list item saves only that block (pf-h6y.6).
+  await expect(p.locator('#pf-editor .pf-formatted h2')).toHaveText('Shopping');
+  await p.locator('#pf-editor .pf-formatted li').first().click();
+  await p.keyboard.press('End');
+  await p.keyboard.type(' (2 litres)');
+  await expect(p.locator('#pf-editor [role=status]')).toHaveText('Draft saved.');
+  await p.locator('#pf-editor').getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(p.locator('#pf-editor [role=status]')).toContainText('Saved as version');
+  await expect.poll(async () => (await call('part_get', { name })).content['index.md']).toBe('# Shopping\n\n- milk (2 litres)\n');
+  await p.screenshot({ path: info.outputPath('editor-formatted.png'), fullPage: true });
+  await p.getByRole('button', { name: 'Source', exact: true }).click();
   const source = p.getByLabel('Source');
-  await expect(source).toHaveValue(/- milk/);
-  await source.fill('# Shopping\n\n- milk\n- bread\n');
+  await expect(source).toHaveValue(/- milk \(2 litres\)/);
+  await source.fill('# Shopping\n\n- milk (2 litres)\n- bread\n');
   await expect(p.locator('#pf-editor [role=status]')).toHaveText('Draft saved.');
   // Reopening restores the draft.
   await p.getByRole('button', { name: 'Close', exact: true }).last().click();
   await p.getByRole('button', { name: 'Edit', exact: true }).click();
+  await p.getByRole('button', { name: 'Source', exact: true }).click();
   await expect(source).toHaveValue(/- bread/);
   await expect(p.locator('#pf-editor [role=status]')).toContainText('Restored your unsaved changes');
   await p.locator('#pf-editor').getByRole('button', { name: 'Save', exact: true }).click();
@@ -50,9 +62,9 @@ test('an Edit member changes a Markdown part in the browser, with drafts and con
   await expect.poll(async () => (await call('part_get', { name })).content['index.md']).toContain('- bread');
 
   // Someone else saves while this person is editing: the save stops and offers a choice.
-  await source.fill('# Shopping\n\n- milk\n- bread\n- eggs\n');
+  await source.fill('# Shopping\n\n- milk (2 litres)\n- bread\n- eggs\n');
   const got = await call('part_get', { name });
-  await call('part_edit', { name, edits: [{ op: 'replace', old_str: '- milk', new_str: '- oat milk' }], request_id: `${name}-agent-${Date.now()}` });
+  await call('part_edit', { name, edits: [{ op: 'replace', old_str: '# Shopping', new_str: '# Shopping list' }], request_id: `${name}-agent-${Date.now()}` });
   expect(got.head).toBeGreaterThan(1);
   await p.locator('#pf-editor').getByRole('button', { name: 'Save', exact: true }).click();
   await expect(p.locator('.pf-conflict')).toBeVisible();
