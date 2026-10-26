@@ -45,8 +45,23 @@ window.pfShareChrome = function (part, WS) {
   }
   function shareChange(body) { return mutation('/share', body).then(function (j) { shareState = j; render(); return j; }); }
   // Who can open it now, with each person's role; owners and Manage members can change it.
+  // Moving to Family is the one-tap household share (§3a); it sits outside the choices.
+  function renderFamily() {
+    familyBox.replaceChildren();
+    var st = shareState; if (!st || !st.family) { familyBox.hidden = true; return; }
+    var f = st.family; familyBox.hidden = !(f.in_family || f.available);
+    if (f.in_family) {
+      el('p', 'In Family: everyone in the household can open and edit it.', familyBox);
+      if (st.you.can_share && f.home) button('Move back to my space', familyBox, function () { moveTo(f.home, 'Moved to your space.'); });
+    } else if (f.available) {
+      button('Move to Family', familyBox, function () { moveTo('family', 'Moved to Family. Everyone in the household can open and edit it.'); }).className = 'pf-primary';
+      el('small', 'Everyone in the household can open and edit it.', familyBox);
+    }
+  }
+  function moveTo(space, done) { mutation('/move', { space: space }).then(function (j) { shareState = j; status.textContent = done; render(); }).catch(report); }
   function renderPeople() {
     peopleBox.replaceChildren();
+    renderFamily();
     var st = shareState; if (!st) return;
     el('p', st.sentence, peopleBox).className = 'pf-sentence';
     var rows = el('ul', null, peopleBox); rows.className = 'pf-people';
@@ -176,6 +191,7 @@ window.pfShareChrome = function (part, WS) {
   people.onchange = function () { options.hidden = true; peopleBox.hidden = false; };
   rung.onchange = function () { options.hidden = false; peopleBox.hidden = true; };
   var peopleBox = el('div', null, sheet); peopleBox.id = 'pf-people-options'; peopleBox.hidden = true;
+  var familyBox = el('div', null, who.parentNode); familyBox.className = 'pf-family'; familyBox.hidden = true; who.after(familyBox);
   var options = el('div', null, sheet); options.id = 'pf-public-options'; options.hidden = true;
   el('p', 'Anyone with the link can use it. Only you and people you add can change it.', options);
   var ml = el('label', 'Link access', options); mode = el('select', null, ml); mode.setAttribute('aria-label', 'Link access');

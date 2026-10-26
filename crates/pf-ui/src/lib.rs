@@ -7,7 +7,7 @@ use axum::{
     extract::{Path, Query, State},
     middleware,
     response::{Html, IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
 };
 use http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use pf_db::rusqlite::OptionalExtension;
@@ -335,6 +335,44 @@ async fn share_change(
     }
 }
 #[derive(Deserialize)]
+struct MoveTo {
+    space: String,
+}
+/// Move to Family (and back): `part_edit {meta: {space}}` as the signed-in person.
+async fn share_move(
+    State(s): State<AppState>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<MoveTo>,
+) -> Response {
+    let result = async {
+        let actor = auth(&s)?.require_session(&headers).await?;
+        let ctx = pf_ops::Ctx {
+            caller: pf_model::create::Caller {
+                principal: actor.principal(),
+                via: "chrome",
+            },
+            scopes: ["parts:read", "parts:write"].map(String::from).into(),
+            spaces: None,
+        };
+        let registry = pf_ops::Registry::new(parts(&s)?.clone());
+        let rid = format!("move-{}", pf_db::ids::new_id("r"));
+        registry
+            .run(
+                &ctx,
+                "part_edit",
+                json!({"name":name,"meta":{"space":body.space},"request_id":rid,"wait":false}),
+            )
+            .await?;
+        share_run(&s, &headers, json!({"name":name})).await
+    }
+    .await;
+    match result {
+        Ok(j) => Json(j).into_response(),
+        Err(e) => fail(e),
+    }
+}
+#[derive(Deserialize)]
 struct People {
     #[serde(default)]
     q: String,
@@ -587,6 +625,10 @@ pub fn install(b: &mut ServerBuilder) {
                 get(share_list)
                     .post(share_change)
                     .options(|| async { StatusCode::NO_CONTENT }),
+            )
+            .route(
+                "/api/chrome/v1/{name}/move",
+                post(share_move).options(|| async { StatusCode::NO_CONTENT }),
             )
             .route(
                 "/api/chrome/v1/{name}/people",

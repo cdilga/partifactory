@@ -125,6 +125,32 @@ impl Registry {
                 })
                 .await?;
         }
+        // A move must land inside the connection's spaces too.
+        if let (Some(allowed), Some(dest)) = (&ctx.spaces, input["meta"]["space"].as_str()) {
+            let dest = dest.to_owned();
+            let id: Option<String> = self
+                .parts
+                .db
+                .read({
+                    let dest = dest.clone();
+                    move |c| {
+                        Ok::<_, PfError>(
+                            c.query_row(
+                                "SELECT id FROM spaces WHERE slug=?1 OR id=?1",
+                                [&dest],
+                                |r| r.get(0),
+                            )
+                            .ok(),
+                        )
+                    }
+                })
+                .await?;
+            if !allowed.contains(&dest) && !id.is_some_and(|id| allowed.contains(&id)) {
+                return Err(PfError::not_found(
+                    "space is outside this connection's spaces",
+                ));
+            }
+        }
         let wait = input["wait"].as_bool().unwrap_or(true);
         let check =
             input["check"].as_bool() == Some(true) || input["live"].as_str() == Some("after_check");

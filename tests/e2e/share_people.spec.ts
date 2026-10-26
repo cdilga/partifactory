@@ -30,7 +30,8 @@ test('the owner shares a part with a member, who opens it until removed', async 
   await page.getByRole('option', { name: /member-b/ }).click();
   await page.getByLabel('Role for new people').selectOption('view');
   await page.getByRole('button', { name: 'Add', exact: true }).click();
-  await expect(page.locator('.pf-sentence')).toContainText('1 other can open this part');
+  await expect(page.locator('.pf-sentence')).toContainText('can open this part');
+  await expect(page.locator('.pf-people')).toContainText('Can view');
   await expect(page.locator('.pf-audience')).toHaveText('Shared');
   await page.screenshot({ path: info.outputPath('share-people.png'), fullPage: true });
 
@@ -55,4 +56,42 @@ test('the owner shares a part with a member, who opens it until removed', async 
   expect(logs.some(l => l.surface === 'chrome')).toBe(true);
   expect((await waitForLog({ event: 'grant.remove' })).some(l => l.outcome === 'ok')).toBe(true);
   await member.close();
+});
+
+// Move to Family (pf-h6y.2): one tap opens a part to the household group, and only to it.
+test('Move to Family opens a part to the household and not to outsiders', async ({ page, browser }, info) => {
+  test.skip(!['chromium-desktop', 'webkit-mobile', 'firefox-desktop'].includes(info.project.name), 'Fixed part hosts exist for these lanes');
+  test.setTimeout(120000);
+  const name = `family-${info.project.name}`;
+  const open = async (who: string) => {
+    const context = await browser.newContext({ ignoreHTTPSErrors: true });
+    const p = await context.newPage();
+    await signIn(p, who);
+    return { context, page: p };
+  };
+  const member = await open('member-b');
+  const outsider = await open('outsider');
+  await signIn(page, 'admin');
+  const token = (await oauthToken(page, page.request, 'Family gate', ['parts:read', 'parts:write'])).access_token;
+  const created = await page.request.post('/api/v1/part_create', { headers: { Authorization: `Bearer ${token}` }, data: { name, title: `Family ${info.project.name}`, kind: 'html', content: '<!doctype html><h1>For everyone at home</h1>', request_id: `${name}-${Date.now()}` } });
+  expect([200, 409].includes(created.status()), await created.text()).toBeTruthy();
+
+  await page.goto(`https://${name}-part.pf.test/`);
+  await page.getByRole('button', { name: 'Share', exact: true }).click();
+  // Share → Move to Family: the click budget for "Share with the family".
+  await page.getByRole('button', { name: 'Move to Family', exact: true }).click();
+  await expect(page.locator('#pf-status')).toContainText('Moved to Family');
+  await expect(page.locator('.pf-family')).toContainText('In Family');
+  await page.screenshot({ path: info.outputPath('move-to-family.png'), fullPage: true });
+
+  expect((await member.page.goto(`https://${name}-part.pf.test/`))?.status()).toBeLessThan(400);
+  await expect(member.page.frameLocator('#pf-frame').getByRole('heading', { name: 'For everyone at home' })).toBeVisible();
+  expect((await outsider.page.goto(`https://parts.pf.test/grant?part=${name}`))?.status()).toBe(403);
+
+  await page.getByRole('button', { name: 'Move back to my space', exact: true }).click();
+  await expect(page.locator('#pf-status')).toHaveText('Moved to your space.');
+  expect((await member.page.goto(`https://parts.pf.test/grant?part=${name}`))?.status()).toBe(403);
+  expect((await waitForLog({ event: 'part.move' })).filter(l => l.outcome === 'ok').length).toBeGreaterThanOrEqual(2);
+  await member.context.close();
+  await outsider.context.close();
 });

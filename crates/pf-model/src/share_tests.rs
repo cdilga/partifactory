@@ -64,7 +64,7 @@ fn owners_share_inward_with_roles_and_removal_ends_access() {
             .unwrap();
         assert_eq!(out["grants"][0]["subject"], "user:sam");
         assert_eq!(out["grants"][0]["role"], "comment");
-        assert_eq!(out["sentence"], "alice and 1 other can open this part.");
+        assert_eq!(out["sentence"], "alice and sam can open this part.");
         assert_eq!(role(&sam), Some(1));
         // Sam sees who has access but can't change it.
         let seen = k
@@ -183,6 +183,113 @@ fn candidates_match_people_and_groups_for_managers_only() {
                 .unwrap_err()
                 .code,
             "not_found"
+        );
+    });
+}
+
+#[test]
+fn move_to_family_opens_the_part_to_the_household_and_back() {
+    let k = kit_with(Arc::new(GrantPolicy), ServiceConfig::default());
+    let (alice, sam, bob) = (k.person("alice"), k.person("sam"), k.person("bob"));
+    let (a, s) = (
+        alice.principal.user_id.clone(),
+        sam.principal.user_id.clone(),
+    );
+    k.tdb
+        .write_blocking(move |tx| {
+            tx.execute(
+                "INSERT INTO groups(name,source,synced_at) VALUES('household','claim',0)",
+                [],
+            )?;
+            for u in [&a, &s] {
+                tx.execute(
+                    "INSERT INTO group_members(group_name,user_id) VALUES('household',?1)",
+                    [u],
+                )?;
+            }
+            crate::spaces::ensure_family(tx, "household", &a, 0)
+                .map_err(|e| pf_db::DbError::Io(std::io::Error::other(e.to_string())))?;
+            // Idempotent: a second sign-in changes nothing.
+            crate::spaces::ensure_family(tx, "household", &a, 1)
+                .map_err(|e| pf_db::DbError::Io(std::io::Error::other(e.to_string())))?;
+            Ok::<_, pf_db::DbError>(())
+        })
+        .unwrap();
+    assert_eq!(
+        k.count("SELECT COUNT(*) FROM spaces WHERE slug='family'"),
+        1
+    );
+    rt().block_on(async {
+        let made = k
+            .svc
+            .create(
+                &alice,
+                CreateRequest {
+                    title: Some("Notes".into()),
+                    name: Some("notes".into()),
+                    request_id: Some("c".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let part = made["id"].as_str().unwrap().to_owned();
+        let role = |who: &Caller| {
+            let (p, part) = (who.principal.clone(), part.clone());
+            k.svc
+                .db
+                .read_blocking(move |c| {
+                    crate::spaces::effective_role(c, &part, &p.user_id, i64::MAX / 2)
+                        .map_err(pf_db::DbError::from)
+                })
+                .unwrap()
+        };
+        let state = k
+            .svc
+            .share(
+                &alice,
+                ShareRequest {
+                    name: "notes".into(),
+                    ..Default::default()
+                },
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(state["family"]["available"], true);
+        let mv = |space: &str| crate::edit::EditRequest {
+            name: "notes".into(),
+            request_id: Some(format!("mv-{}", space.trim_start_matches('~'))),
+            meta: Some(crate::edit::Meta {
+                space: Some(space.into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        // Bob isn't in the household, so he can't move parts into Family.
+        assert!(k.svc.edit(&bob, mv("family")).await.is_err());
+        k.svc.edit(&alice, mv("family")).await.unwrap();
+        assert_eq!(role(&sam), Some(crate::spaces::EDIT));
+        assert_eq!(role(&bob), None);
+        let state = k
+            .svc
+            .share(
+                &alice,
+                ShareRequest {
+                    name: "notes".into(),
+                    ..Default::default()
+                },
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(state["family"]["in_family"], true);
+        assert_eq!(state["sentence"], "alice and household can open this part.");
+        k.svc.edit(&alice, mv("~alice")).await.unwrap();
+        assert_eq!(role(&sam), None);
+        assert_eq!(
+            k.count("SELECT COUNT(*) FROM audit WHERE action='part.move'"),
+            2
         );
     });
 }

@@ -114,6 +114,7 @@ pub struct Idp {
     pub client_id: String,
     pub groups_claim: String,
     pub audience_group: String,
+    pub household_group: String,
     pub provisioner: IdpProvisioner,
 }
 
@@ -124,6 +125,7 @@ impl Default for Idp {
             client_id: String::new(),
             groups_claim: "groups".into(),
             audience_group: String::new(),
+            household_group: String::new(),
             provisioner: IdpProvisioner::default(),
         }
     }

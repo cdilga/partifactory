@@ -90,6 +90,7 @@ issuer = "https://dex.$PF_APEX/dex"
 client_id = "partifactory"
 groups_claim = "groups"
 audience_group = "household"
+household_group = "household"
 
 [admin]
 subject = "oidc:https://dex.$PF_APEX/dex#$admin_sub"

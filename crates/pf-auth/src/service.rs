@@ -393,6 +393,7 @@ impl AuthService {
             })
             .transpose()?;
         let audience = self.0.idp.audience_group.clone();
+        let household = self.0.idp.household_group.clone();
         let (user_id, bumped)=self.0.db.write(move |tx| {
             let mut st = tx.prepare("SELECT gm.group_name FROM group_members gm JOIN users u ON u.id=gm.user_id JOIN groups g ON g.name=gm.group_name WHERE u.idp_issuer=?1 AND u.idp_sub=?2 AND g.source='claim'")?;
             let previous = st.query_map(params![uid_id.issuer,uid_id.sub],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
@@ -403,6 +404,7 @@ impl AuthService {
             if status!="active" { return Err(forbidden()); }
             let in_audience=audience.is_empty() || uid_id.groups.contains(&audience);
             tx.execute("UPDATE users SET in_audience=?2 WHERE id=?1",params![uid,in_audience])?;
+            pf_model::spaces::ensure_family(tx,&household,&uid,now)?;
             tx.execute("INSERT INTO sessions(id_hash,user_id,created_at,last_used_at,expires_at,idp_refresh_enc,idp_checked_at) VALUES(?1,?2,?3,?3,?4,?5,?3)",params![hash,uid,now,expires_at,enc])?;
             let mut bumped = pf_policy::groups::bump_for_groups(tx,&removed)?;
             if was_audience && !in_audience { bumped.extend(pf_policy::groups::bump_for_audience(tx)?); }

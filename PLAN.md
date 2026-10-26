@@ -110,7 +110,7 @@ Adding anything to it takes a decision from the admin. Work that straddled the l
 | Area | What ships |
 | --- | --- |
 | Inward sharing | the share sheet's **People you add** rung: pick people and groups from the directory, give each View, Comment, Edit or Manage, Done; remove with undo; the live "who can see this" sentence; `everyone-signed-in` for the admin with its live count; `part_share` for agents with `share:household`, labelled and undoable; audit for every change |
-| The household space | the `family` space (created on first start from `[spaces] household_group`, the minimal part of `provision`), its `group:<household> → edit` grant, **Move to Family** in the sheet and as `part_edit {move}` |
+| The household space | the `family` space (created on the first sign-in after `idp.household_group` is set, the minimal part of `provision`), its `group:<household> → edit` grant, **Move to Family** in the sheet and as `part_edit {move}` |
 | Ask for access | `403 · NOT SHARED WITH YOU` with **Ask for access** (never the title), the access-asks list in the sheet with Add and Dismiss |
 | Comments | the comments rail in the wrapper for `comment` and above, threads, replies, resolve, live via `/_rt/events`, anchored to text quotes; `part_comments` for agents with `comments:write` |
 | Editing text | the source editor for `text`, `markdown` and `html` parts (drafts, preview, save as a version, conflict notice), then the formatted view for Markdown and `text` that saves block edits (decision 54) |

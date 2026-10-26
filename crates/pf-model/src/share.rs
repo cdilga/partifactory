@@ -137,7 +137,7 @@ impl PartService {
                         tracing::info!(event = "grant.remove", part_id = %row.id, surface = via, outcome = if removed > 0 { "ok" } else { "noop" });
                     }
                 }
-                let out = describe(tx, &row, seen.unwrap_or(0), can_share, outward)?;
+                let out = describe(tx, &row, &p.user_id, now, seen.unwrap_or(0), can_share, outward)?;
                 Ok::<_, PfError>((out, bumped))
             })
             .await?;
@@ -245,9 +245,12 @@ fn resolve_subject(c: &Connection, given: &str) -> Result<String, PfError> {
 }
 
 /// Who can open the part now, in the order the share sheet shows it.
+#[allow(clippy::too_many_arguments)]
 fn describe(
     c: &Connection,
     row: &crate::read::PartRow,
+    user_id: &str,
+    now: i64,
     role: u8,
     can_share: bool,
     outward: bool,
@@ -306,19 +309,45 @@ fn describe(
         let (name, handle) = label(&subject)?;
         inherited.push(json!({"subject":handle,"label":name,"role":ROLES[role as usize]}));
     }
-    let people = grants.len() + inherited.len();
-    let sentence = if people == 0 {
-        "Only the owner can open this part.".to_owned()
-    } else {
-        format!(
-            "{} and {} {} can open this part.",
-            owner.0,
-            people,
-            if people == 1 { "other" } else { "others" }
-        )
+    // Name who can open it, so the sentence is never vague: "Alex, Sam and household can open it."
+    let mut names: Vec<String> = vec![owner.0.clone()];
+    for g in inherited.iter().chain(grants.iter()) {
+        names.push(g["label"].as_str().unwrap_or("someone").to_owned());
+    }
+    let sentence = match names.len() {
+        1 => "Only the owner can open this part.".to_owned(),
+        n if n <= 4 => format!(
+            "{} and {} can open this part.",
+            names[..n - 1].join(", "),
+            names[n - 1]
+        ),
+        n => format!(
+            "{}, {} and {} others can open this part.",
+            names[0],
+            names[1],
+            n - 2
+        ),
     };
+    // Move to Family: offered to someone who can share the part and edit in Family.
+    let family = crate::spaces::by_slug(c, "family")?;
+    let can_family = match &family {
+        Some(f) => {
+            can_share
+                && crate::spaces::space_role(c, &f.id, user_id, now)?
+                    .is_some_and(|r| r >= crate::spaces::EDIT)
+        }
+        None => false,
+    };
+    let home: Option<String> = c
+        .query_row(
+            "SELECT slug FROM spaces WHERE owner_user_id=?1 AND kind='personal'",
+            [user_id],
+            |r| r.get(0),
+        )
+        .optional()?;
     Ok(json!({
         "name": row.name,
+        "family": {"available": can_family, "in_family": row.space_slug == "family", "home": home},
         "owner": {"label": owner.0, "subject": format!("user:{}", owner.1)},
         "space": row.space_slug,
         "grants": grants,

@@ -182,6 +182,10 @@ pub const DOCS: &[(&str, &str)] = &[
         "Optional: only members of this group may sign in.",
     ),
     (
+        "idp.household_group",
+        "Optional: the household's group. Its members can edit the `family` space, created on the next sign-in.",
+    ),
+    (
         "idp.provisioner.kind",
         "`none` or `authentik` (the provisioner adapter, after Slice 1).",
     ),

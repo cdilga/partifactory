@@ -42,6 +42,9 @@ pub struct Meta {
     pub description: Option<String>,
     pub tags: Option<Vec<String>>,
     pub shared_data_writers: Option<String>,
+    /// Move the part to this space (slug or id), e.g. `family`. Needs Manage on the part and
+    /// Edit in the destination; people who only had access through the old space lose it.
+    pub space: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
@@ -262,6 +265,16 @@ impl PartService {
                     tx.execute("UPDATE parts SET title=?2 WHERE id=?1", params![row.id, title])?;
                 }
                 if let Some(desc) = meta.description { tx.execute("UPDATE parts SET description=?2 WHERE id=?1", params![row.id, desc])?; }
+                if let Some(space) = meta.space {
+                    let dest = spaces::writable_space(tx, &p.user_id, &space, now)
+                        .map_err(|e| if e.code == "invalid_input" { PfError::invalid("meta.space", format!("no space {space:?}")) } else { e })?;
+                    if dest.id != row.space_id {
+                        let key = pf_caps::part_key(&row.id);
+                        epochs.push((key, spaces::move_part(tx, &row.id, &dest.id, now)?));
+                        tx.execute("INSERT INTO audit(at,user_id,actor,action,target_kind,target_id,before,after,request_id) VALUES(?1,?2,?3,'part.move','part',?4,?5,?6,?7)",params![now,p.user_id,pkey,row.id,json!({"space":row.space_slug}).to_string(),json!({"space":dest.slug}).to_string(),rid])?;
+                        tracing::info!(event = "part.move", part_id = %row.id, to = %dest.slug, outcome = "ok");
+                    }
+                }
                 if let Some(tags) = meta.tags {
                     tx.execute("DELETE FROM part_tags WHERE part_id=?1", [&row.id])?;
                     for tag in tags { if tag.is_empty() || tag.len() > 64 { return Err(PfError::invalid("meta.tags", "each tag is 1–64 bytes")); }

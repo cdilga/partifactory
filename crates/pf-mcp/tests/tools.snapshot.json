@@ -311,6 +311,14 @@
                 "null"
               ]
             },
+            "space": {
+              "default": null,
+              "description": "Move the part to this space (slug or id), e.g. `family`. Needs Manage on the part and\nEdit in the destination; people who only had access through the old space lose it.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "tags": {
               "default": null,
               "items": {

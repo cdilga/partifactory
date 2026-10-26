@@ -100,8 +100,66 @@ pub fn default_space(tx: &Connection, user_id: &str, now: i64) -> Result<Space, 
     ensure_personal(tx, user_id, now)
 }
 
-/// The space named by `slug` for a write by `user_id`. Slice 1: only your own personal space
-/// (shared spaces and their write grants arrive with the policy engine).
+/// The household's shared space (§3a "Spaces"): `family`, with the household group as editors.
+/// Created on the first sign-in after `idp.household_group` is set; `by` is that person.
+pub fn ensure_family(tx: &Connection, group: &str, by: &str, now: i64) -> Result<(), PfError> {
+    if group.is_empty() {
+        return Ok(());
+    }
+    let id = match by_slug(tx, "family")? {
+        Some(s) => s.id,
+        None => {
+            let id = ids::new_id("sp");
+            tx.execute(
+                "INSERT INTO spaces (id, slug, kind, title, created_at) VALUES (?1, 'family', 'shared', 'Family', ?2)",
+                params![id, now],
+            )?;
+            tracing::info!(event = "space.create", slug = "family", outcome = "ok");
+            id
+        }
+    };
+    tx.execute(
+        "INSERT INTO grants (target_kind, target_id, subject, role, created_by, created_at) VALUES ('space', ?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT (target_kind, target_id, subject) DO NOTHING",
+        params![id, format!("group:{group}"), EDIT, by, now],
+    )?;
+    Ok(())
+}
+
+/// The person's role on a space itself: its owner manages it; otherwise its grants.
+pub fn space_role(
+    conn: &Connection,
+    space_id: &str,
+    user_id: &str,
+    now: i64,
+) -> pf_db::rusqlite::Result<Option<u8>> {
+    let owner: Option<Option<String>> = conn
+        .query_row(
+            "SELECT owner_user_id FROM spaces WHERE id = ?1",
+            [space_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(owner) = owner else { return Ok(None) };
+    if owner.as_deref() == Some(user_id) {
+        return Ok(Some(MANAGE));
+    }
+    let role: Option<i64> = conn.query_row(
+        "SELECT MAX(g.role) FROM grants g
+         WHERE g.target_kind = 'space' AND g.target_id = ?1
+           AND (g.expires_at IS NULL OR g.expires_at > ?3)
+           AND (g.subject = 'user:' || ?2
+                OR g.subject IN (SELECT 'group:' || group_name FROM group_members WHERE user_id = ?2)
+                OR (g.subject = 'everyone-signed-in'
+                    AND EXISTS (SELECT 1 FROM users WHERE id = ?2 AND in_audience = 1 AND status = 'active')))",
+        params![space_id, user_id, now],
+        |r| r.get(0),
+    )?;
+    Ok(role.map(|r| r as u8))
+}
+
+/// The space named by `slug` for a write by `user_id`: your own personal space, or a shared
+/// space where you hold Edit or more (Family, through the household group).
 pub fn writable_space(
     tx: &Connection,
     user_id: &str,
@@ -114,6 +172,7 @@ pub fn writable_space(
     }
     match by_slug(tx, slug)? {
         Some(s) if s.owner_user_id.as_deref() == Some(user_id) => Ok(s),
+        Some(s) if space_role(tx, &s.id, user_id, now)?.is_some_and(|r| r >= EDIT) => Ok(s),
         Some(_) => Err(
             PfError::new("forbidden", format!("you may not write to space {slug}"))
                 .with("space", slug),

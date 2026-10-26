@@ -65,6 +65,7 @@ Run `partifactory config check` to load the config exactly as `serve` would. It 
 | `idp.audience_group` | `PF_IDP_AUDIENCE_GROUP` | string | (unset) | Optional: only members of this group may sign in. |
 | `idp.client_id` | `PF_IDP_CLIENT_ID` | string | (unset) | The OIDC client id. |
 | `idp.groups_claim` | `PF_IDP_GROUPS_CLAIM` | string | `"groups"` | The ID-token claim that carries group names. |
+| `idp.household_group` | `PF_IDP_HOUSEHOLD_GROUP` | string | (unset) | Optional: the household's group. Its members can edit the `family` space, created on the next sign-in. |
 | `idp.issuer` | `PF_IDP_ISSUER` | string | (unset) | The OIDC issuer URL. Setting it turns on sign-in and requires `PF_IDP_CLIENT_SECRET`. |
 | `idp.provisioner.base_url` | `PF_IDP_PROVISIONER_BASE_URL` | string | (unset) | Provisioner adapter: the IdP's base URL. |
 | `idp.provisioner.flows` | `PF_IDP_PROVISIONER_FLOWS` | table (PF_<TABLE>_<NAME> in env) | `{}` | Provisioner adapter: flow names by purpose (free-form table). |
