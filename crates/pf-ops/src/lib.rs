@@ -136,6 +136,11 @@ impl Registry {
             "part_edit" => self.parts.edit(&ctx.caller, parse(input)?).await,
             "part_get" => self.parts.get(&ctx.caller.principal, parse(input)?).await,
             "part_data" => self.parts.data(&ctx.caller.principal, parse(input)?).await,
+            // Only the admin's own session carries share:outward; no token can be granted it.
+            "part_share" => {
+                let outward = ctx.scopes.contains("share:outward");
+                self.parts.share(&ctx.caller, parse(input)?, outward).await
+            }
             "part_link_for" => {
                 let req: LinkRequest = parse(input)?;
                 if !["public_link", "contribute"].contains(&req.action.as_str()) {
@@ -442,7 +447,8 @@ operations! {
     Get,"part_get","parts:read",pf_model::GetRequest,"Read source, history, builds and runtime errors.","Use file and range for large parts.",json!({"name":"packing"});
     Data,"part_data","data:read",pf_model::data::PartDataRequest,"Read or change shared or personal documents and snapshots.","Use if_rev for compare-and-set; mutations need request_id.",json!({"name":"packing","action":"list"});
     Check,"part_check","parts:read",CheckRequest,"Render a part and report browser errors.","Use the mobile viewport unless checking a desktop layout.",json!({"name":"packing"});
-    LinkFor,"part_link_for","parts:read",LinkRequest,"Return a person-facing link for an administrative action.","Only the admin can complete public-link actions.",json!({"name":"packing","action":"public_link"})
+    LinkFor,"part_link_for","parts:read",LinkRequest,"Return a person-facing link for an administrative action.","Only the admin can complete public-link actions.",json!({"name":"packing","action":"public_link"});
+    Share,"part_share","share:household",pf_model::ShareRequest,"List, add or remove the people and groups who can open a part.","Share inward only, up to edit; public links and inviting new people are the admin's, via part_link_for.",json!({"name":"packing","action":"set","subject":"user:alex","role":"comment"})
 }
 
 #[cfg(test)]
@@ -468,6 +474,9 @@ mod tests {
                     }
                     "part_check" => {
                         parse::<CheckRequest>(v).unwrap();
+                    }
+                    "part_share" => {
+                        parse::<pf_model::ShareRequest>(v).unwrap();
                     }
                     _ => {
                         parse::<LinkRequest>(v).unwrap();

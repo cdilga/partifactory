@@ -8,7 +8,7 @@ test('MCP real OAuth and device connections discover check image and isolate scr
   test.skip(info.project.name !== 'chromium-desktop', 'The renderer owns its browser; one protocol lane is sufficient.');
   test.setTimeout(180000);
   await signIn(page, 'member-a');
-  const scopes = ['parts:read', 'parts:write', 'parts:delete', 'data:read', 'data:write'];
+  const scopes = ['parts:read', 'parts:write', 'parts:delete', 'data:read', 'data:write', 'share:household'];
   const deviceToken = (await deviceToken_(page, request, 'MCP conformance', scopes)).access_token;
   const oauth = (await oauthToken(page, request, 'MCP conformance', scopes)).access_token;
   const tokens = { oauth, device: deviceToken };

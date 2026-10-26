@@ -1,0 +1,188 @@
+use crate::create::Caller;
+use crate::testkit::*;
+use crate::{CreateRequest, GrantPolicy, Principal, ServiceConfig, ShareRequest};
+use std::sync::Arc;
+
+fn rt() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+}
+fn req(action: &str, subject: &str, role: Option<&str>) -> ShareRequest {
+    ShareRequest {
+        name: "notes".into(),
+        action: Some(action.into()),
+        subject: Some(subject.into()),
+        role: role.map(Into::into),
+    }
+}
+
+#[test]
+fn owners_share_inward_with_roles_and_removal_ends_access() {
+    let k = kit_with(Arc::new(GrantPolicy), ServiceConfig::default());
+    let (alice, sam) = (k.person("alice"), k.person("sam"));
+    rt().block_on(async {
+        let made = k
+            .svc
+            .create(
+                &alice,
+                CreateRequest {
+                    title: Some("Notes".into()),
+                    name: Some("notes".into()),
+                    request_id: Some("c".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let part = made["id"].as_str().unwrap().to_owned();
+        let role = |who: &Caller| {
+            let (p, part) = (who.principal.clone(), part.clone());
+            k.svc
+                .db
+                .read_blocking(move |c| {
+                    crate::spaces::effective_role(c, &part, &p.user_id, i64::MAX / 2)
+                        .map_err(pf_db::DbError::from)
+                })
+                .unwrap()
+        };
+        assert_eq!(role(&sam), None);
+        // Sam can't see it, so can't list or share it.
+        assert_eq!(
+            k.svc
+                .share(&sam, req("list", "user:sam", None), false)
+                .await
+                .unwrap_err()
+                .code,
+            "not_found"
+        );
+        let out = k
+            .svc
+            .share(&alice, req("set", "user:sam", Some("comment")), false)
+            .await
+            .unwrap();
+        assert_eq!(out["grants"][0]["subject"], "user:sam");
+        assert_eq!(out["grants"][0]["role"], "comment");
+        assert_eq!(out["sentence"], "alice and 1 other can open this part.");
+        assert_eq!(role(&sam), Some(1));
+        // Sam sees who has access but can't change it.
+        let seen = k
+            .svc
+            .share(
+                &sam,
+                ShareRequest {
+                    name: "notes".into(),
+                    ..Default::default()
+                },
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(seen["you"]["can_share"], false);
+        assert_eq!(
+            k.svc
+                .share(&sam, req("set", "user:alice", Some("view")), false)
+                .await
+                .unwrap_err()
+                .code,
+            "forbidden"
+        );
+        // Everyone signed in is outward: only with the admin's confirmed session.
+        assert_eq!(
+            k.svc
+                .share(
+                    &alice,
+                    req("set", "everyone-signed-in", Some("view")),
+                    false
+                )
+                .await
+                .unwrap_err()
+                .code,
+            "forbidden"
+        );
+        // An agent shares up to edit, labelled; Manage is a person's choice.
+        let agent = Caller::api(Principal::agent(alice.principal.user_id.clone(), "c_agent"));
+        assert_eq!(
+            k.svc
+                .share(&agent, req("set", "user:sam", Some("manage")), false)
+                .await
+                .unwrap_err()
+                .code,
+            "forbidden"
+        );
+        assert!(
+            k.svc
+                .share(&alice, req("set", "user:nobody", Some("view")), false)
+                .await
+                .is_err()
+        );
+        assert!(
+            k.svc
+                .share(&alice, req("set", "user:alice", Some("view")), false)
+                .await
+                .is_err(),
+            "the owner always has access"
+        );
+        let removed = k
+            .svc
+            .share(&alice, req("remove", "user:sam", None), false)
+            .await
+            .unwrap();
+        assert_eq!(removed["grants"].as_array().unwrap().len(), 0);
+        assert_eq!(role(&sam), None);
+        assert_eq!(
+            k.count("SELECT COUNT(*) FROM audit WHERE action IN ('grant.set','grant.remove')"),
+            2
+        );
+        assert!(
+            k.count(&format!("SELECT epoch FROM epochs WHERE key='part:{part}'")) >= 1,
+            "removal reaches open tabs"
+        );
+    });
+}
+
+#[test]
+fn candidates_match_people_and_groups_for_managers_only() {
+    let k = kit_with(Arc::new(GrantPolicy), ServiceConfig::default());
+    let (alice, sam) = (k.person("alice"), k.person("sam"));
+    k.person("samira");
+    rt().block_on(async {
+        k.svc
+            .create(
+                &alice,
+                CreateRequest {
+                    title: Some("Notes".into()),
+                    name: Some("notes".into()),
+                    request_id: Some("c".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let found = k
+            .svc
+            .share_candidates(&alice, "notes", "SAM")
+            .await
+            .unwrap();
+        let subjects: Vec<_> = found.iter().map(|c| c.subject.as_str()).collect();
+        assert_eq!(subjects, ["user:sam", "user:samira"]);
+        assert!(
+            k.svc
+                .share_candidates(&alice, "notes", "%")
+                .await
+                .unwrap()
+                .len()
+                >= 2,
+            "wildcards are literal"
+        );
+        assert_eq!(
+            k.svc
+                .share_candidates(&sam, "notes", "a")
+                .await
+                .unwrap_err()
+                .code,
+            "not_found"
+        );
+    });
+}

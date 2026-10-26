@@ -3,7 +3,7 @@ window.pfShareChrome = function (part, WS) {
   var links = [], isAdmin = false, sheet, status, list, mode, expiry, audience;
   var unsandboxed=document.documentElement.hasAttribute('data-pf-unsandboxed');
   if(unsandboxed){var bar=document.createElement('nav');bar.id='pf-bar';var back=document.createElement('a');back.href=WS+'/';back.textContent='‹ Parts';bar.appendChild(back);var shareLink=document.createElement('a');shareLink.href=WS+'/p/'+encodeURIComponent(part)+'/share';shareLink.textContent='Share';bar.appendChild(shareLink);document.body.appendChild(bar);return;}
-  var writers='viewers',guestEdits=0, summary=null;
+  var writers='viewers',guestEdits=0, summary=null, shareState=null;
   function el(tag, text, parent) { var e = document.createElement(tag); if (text) e.textContent = text; if (parent) parent.appendChild(e); return e; }
   function button(text, parent, action) { var b = el('button', text, parent); b.type = 'button'; b.onclick = action; return b; }
   function api(path, body) {
@@ -33,19 +33,82 @@ window.pfShareChrome = function (part, WS) {
   }
   function report(e) { status.textContent = e.message || String(e); }
   function refresh() {
-    return api('/links').then(function (j) { isAdmin = true; links = j.links; writers=j.shared_data_writers;guestEdits=j.guest_edits_today;render(); }, function () { isAdmin = false; links = []; render(); });
+    var shared = api('/share').then(function (j) { shareState = j; }, function () { shareState = null; });
+    var admin = api('/links').then(function (j) { isAdmin = true; links = j.links; writers=j.shared_data_writers;guestEdits=j.guest_edits_today; }, function () { isAdmin = false; links = []; });
+    return Promise.all([shared, admin]).then(render);
+  }
+  var ROLE_NAMES = [['view', 'Can view'], ['comment', 'Can comment'], ['edit', 'Can edit'], ['manage', 'Can manage']];
+  function roleSelect(parent, value, label, onchange) {
+    var sel = el('select', null, parent); sel.setAttribute('aria-label', label);
+    ROLE_NAMES.forEach(function (r) { var o = el('option', r[1], sel); o.value = r[0]; });
+    sel.value = value; sel.onchange = function () { onchange(sel.value); }; return sel;
+  }
+  function shareChange(body) { return mutation('/share', body).then(function (j) { shareState = j; render(); return j; }); }
+  // Who can open it now, with each person's role; owners and Manage members can change it.
+  function renderPeople() {
+    peopleBox.replaceChildren();
+    var st = shareState; if (!st) return;
+    el('p', st.sentence, peopleBox).className = 'pf-sentence';
+    var rows = el('ul', null, peopleBox); rows.className = 'pf-people';
+    var owner = el('li', null, rows); el('span', st.owner.label, owner); el('small', 'Owner', owner);
+    st.inherited.forEach(function (g) { var li = el('li', null, rows); el('span', g.label, li); el('small', ROLE_NAMES.find(function (r) { return r[0] === g.role; })[1] + ' · from ' + st.space, li); });
+    st.grants.forEach(function (g) {
+      var li = el('li', null, rows); var who = el('span', g.label, li);
+      if (g.by_agent) el('small', g.by_agent + ' shared this', who);
+      if (!st.you.can_share) { el('small', ROLE_NAMES.find(function (r) { return r[0] === g.role; })[1], li); return; }
+      roleSelect(li, g.role, 'Role for ' + g.label, function (role) { shareChange({ action: 'set', subject: g.subject, role: role }).catch(report); });
+      button('Remove', li, function () {
+        shareChange({ action: 'remove', subject: g.subject }).then(function () {
+          status.replaceChildren(); el('span', g.label + ' removed. ', status);
+          var undo = button('Undo', status, function () { shareChange({ action: 'set', subject: g.subject, role: g.role }).then(function () { status.textContent = 'Restored.'; }).catch(report); });
+          setTimeout(function () { undo.remove(); }, 10000);
+        }).catch(report);
+      }).className = 'pf-danger';
+    });
+    if (!st.you.can_share) { el('p', 'Only the owner can change who has access.', peopleBox).className = 'pf-muted'; return; }
+    var add = el('form', null, peopleBox); add.className = 'pf-add';
+    var fl = el('label', 'Add people or groups', add); var q = el('input', null, fl); q.type = 'search'; q.autocomplete = 'off'; q.placeholder = 'Name or group';
+    var picks = el('div', null, add); picks.className = 'pf-picks'; picks.setAttribute('role', 'listbox'); picks.setAttribute('aria-label', 'Matching people and groups');
+    var chosen = null; var role = roleSelect(add, 'comment', 'Role for new people', function () {});
+    var addButton = button('Add', add, function () {}); addButton.type = 'submit'; addButton.disabled = true;
+    var timer;
+    q.oninput = function () {
+      chosen = null; addButton.disabled = true; clearTimeout(timer);
+      timer = setTimeout(function () {
+        api('/people?q=' + encodeURIComponent(q.value)).then(function (j) {
+          picks.replaceChildren();
+          j.people.forEach(function (c) {
+            var b = button(c.label, picks, function () { chosen = c; q.value = c.label; picks.replaceChildren(); addButton.disabled = false; addButton.focus(); });
+            b.setAttribute('role', 'option'); el('small', ' ' + c.detail, b);
+          });
+          if (!j.people.length) el('p', 'No one matches. Only people who have signed in can be added.', picks).className = 'pf-muted';
+        }).catch(report);
+      }, 150);
+    };
+    add.onsubmit = function (e) {
+      e.preventDefault(); if (!chosen) return;
+      shareChange({ action: 'set', subject: chosen.subject, role: role.value }).then(function () { status.textContent = chosen.label + ' added.'; }).catch(report);
+    };
+    button('Done', peopleBox, function () { sheet.close(); }).className = 'pf-primary';
   }
   function render() {
     list.replaceChildren();
     var pub=links.length || summary && summary.audience==='public';
-    audience.textContent = pub ? '◉ Public link' : summary && summary.audience==='shared' ? 'Shared with you' : 'Only me';
+    var sharedWith = shareState && (shareState.grants.length + shareState.inherited.length) > 0;
+    audience.textContent = pub ? '◉ Public link' : summary && summary.audience==='shared' ? 'Shared with you' : sharedWith ? 'Shared' : 'Only me';
+    people.disabled = !(shareState && shareState.you.can_share) && !sharedWith;
+    peopleHint.textContent = shareState && !shareState.you.can_share ? 'Only the owner can change this' : '';
+    renderPeople();
     audience.className = pub ? 'pf-audience pf-public' : 'pf-audience';
     rung.parentNode.hidden = !isAdmin;
     // The checked option is always the part's current audience; choosing one shows what changes.
-    if (pub) rung.checked = true; else if (!rung.checked) onlyMe.checked = true;
+    if (pub) rung.checked = true;
+    else if (sharedWith && !rung.checked) people.checked = true;
+    else if (!rung.checked && !people.checked) onlyMe.checked = true;
     options.hidden = !(isAdmin && rung.checked);
-    onlyMe.disabled = !!pub;
-    if (!isAdmin) { options.hidden = true; el('p', 'Only the admin can make a public link.', list); return; }
+    peopleBox.hidden = !people.checked;
+    onlyMe.disabled = !!pub || !!sharedWith;
+    if (!isAdmin) { options.hidden = true; return; }
     if (links.length) el('h3', 'Active links', list);
     links.forEach(function (l) {
       var row = el('section', null, list); row.className = 'pf-link-row';
@@ -107,10 +170,12 @@ window.pfShareChrome = function (part, WS) {
     el('span', text, l); if (hint) el('small', hint, l); return r;
   }
   var onlyMe = choice('me', 'Only me');
-  var people = choice('people', 'People you add', 'Coming soon'); people.disabled = true;
+  var people = choice('people', 'People you add'); var peopleHint = el('small', '', people.parentNode);
   var rung = choice('public', 'Anyone with the link'); rung.id = 'pf-public-rung'; rung.parentNode.hidden = true;
-  onlyMe.onchange = function () { options.hidden = true; };
-  rung.onchange = function () { options.hidden = false; };
+  onlyMe.onchange = function () { options.hidden = true; peopleBox.hidden = true; };
+  people.onchange = function () { options.hidden = true; peopleBox.hidden = false; };
+  rung.onchange = function () { options.hidden = false; peopleBox.hidden = true; };
+  var peopleBox = el('div', null, sheet); peopleBox.id = 'pf-people-options'; peopleBox.hidden = true;
   var options = el('div', null, sheet); options.id = 'pf-public-options'; options.hidden = true;
   el('p', 'Anyone with the link can use it. Only you and people you add can change it.', options);
   var ml = el('label', 'Link access', options); mode = el('select', null, ml); mode.setAttribute('aria-label', 'Link access');

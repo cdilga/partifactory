@@ -79,6 +79,13 @@
       }
     },
     {
+      "id": "share-list",
+      "op": "part_share",
+      "input": {
+        "name": "$name"
+      }
+    },
+    {
       "id": "data-set",
       "op": "part_data",
       "input": {

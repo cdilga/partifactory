@@ -117,8 +117,10 @@ impl Kit {
                 .unwrap(),
         );
         let actor = tokens.auth.require_session(&headers).await.unwrap();
-        let scopes =
-            pf_oauth::scopes("parts:read parts:write parts:delete data:read data:write").unwrap();
+        let scopes = pf_oauth::scopes(
+            "parts:read parts:write parts:delete data:read data:write share:household",
+        )
+        .unwrap();
         let spaces = [format!("~{}", actor.username)]
             .into_iter()
             .collect::<std::collections::BTreeSet<_>>();
@@ -152,7 +154,9 @@ impl Kit {
                     ),
                     code_challenge_method: "S256".into(),
                     resource: None,
-                    scope: "parts:read parts:write parts:delete data:read data:write".into(),
+                    scope:
+                        "parts:read parts:write parts:delete data:read data:write share:household"
+                            .into(),
                     state: None,
                 },
             )
@@ -193,7 +197,7 @@ impl Kit {
                 "part-cli",
                 "MCP device",
                 None,
-                "parts:read parts:write parts:delete data:read data:write",
+                "parts:read parts:write parts:delete data:read data:write share:household",
                 None,
             )
             .await

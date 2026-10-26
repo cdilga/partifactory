@@ -44,7 +44,8 @@ Every surface takes the same token as `Authorization: Bearer <token>`. A token b
 | `parts:write` | `part_create`, `part_edit` (except delete and undelete), and `part_data` `snapshot_list`, `snapshot_restore` and `reset` |
 | `parts:delete` | `part_edit {delete: true}` and `{undelete: true}` |
 | `data:read`, `data:write` | `part_data` `get`/`list` and `set`/`delete`; with `data:read`, `part_check` renders against the real shared data |
-| `comments:write`, `share:household`, `backends:deploy` | nothing yet: they can be granted, but the features that use them come after Slice 1 |
+| `share:household` | `part_share`: list, add or remove people and groups who already have accounts, up to `edit` |
+| `comments:write`, `backends:deploy` | nothing yet: they can be granted, but the features that use them come later |
 
 A scope never gives you more than your person has: writing a part needs their `edit` role on it, and writing its shared data needs their right to (see "Who can write shared data"). Any connection with `parts:read` may call `part_link_for`, whoever its person is; the links it returns are for the admin (`who: "admin"`).
 
@@ -259,6 +260,24 @@ Errors: `invalid_input`, `unknown_field`, `unauthenticated`, `forbidden`, `not_f
 ```json
 {"name":"pixel","action":"contribute"}
 → {"action":"contribute","url":"https://pixel-part.<domain>/#share=contribute","who":"admin"}
+```
+
+<!-- pf:op part_share -->
+### `part_share`
+See or change who can open a part, inside the household: people and groups who already have accounts. Your person must own the part or have Manage on it. You can grant View, Comment or Edit; Manage, public links, inviting someone new and sharing with everyone signed in are a person's choices in the share sheet (for the last three, the admin's; use `part_link_for`).
+
+| Field | Type | Req | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `action` | string | no | — | `list` (the default), `set` (add or change a role) or `remove`. |
+| `name` | string | yes | — |  |
+| `role` | string | no | — | `view`, `comment`, `edit` or `manage`. Agents may grant up to `edit`. |
+| `subject` | string | no | — | `user:<username>`, `group:<name>`, or `everyone-signed-in` (the admin only, in the UI). |
+
+Output: `{name, owner, space, grants, inherited, sentence, you}`. `grants` are the part's own `{subject, label, role, by_agent}`; `inherited` come from its space; `sentence` says who can open it now. A grant you make is labelled with your agent name and the person can undo it. Removing someone takes effect on their next request.
+Errors: `invalid_input`, `unknown_field`, `unauthenticated`, `forbidden`, `not_found`, `rate_limited`, `internal`.
+```json
+{"name":"packing","action":"set","subject":"user:alex","role":"comment"}
+→ {"name":"packing","owner":{"label":"The admin","subject":"user:admin"},"space":"~admin","grants":[{"subject":"user:alex","label":"Alex","role":"comment","by_agent":"Hermes"}],"inherited":[],"sentence":"The admin and 1 other can open this part.","you":{"role":"manage","can_share":true,"can_share_everyone":false}}
 ```
 
 ## Kinds

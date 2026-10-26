@@ -858,5 +858,55 @@
       "idempotentHint": true,
       "openWorldHint": false
     }
+  },
+  {
+    "name": "part_share",
+    "description": "List, add or remove the people and groups who can open a part. Share inward only, up to edit; public links and inviting new people are the admin's, via part_link_for.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "The `part_share` arguments.",
+      "properties": {
+        "action": {
+          "description": "`list` (the default), `set` (add or change a role) or `remove`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "role": {
+          "description": "`view`, `comment`, `edit` or `manage`. Agents may grant up to `edit`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subject": {
+          "description": "`user:<username>`, `group:<name>`, or `everyone-signed-in` (the admin only, in the UI).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ShareRequest",
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   }
 ]

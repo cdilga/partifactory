@@ -282,6 +282,84 @@ async fn summary(
     }
 }
 #[derive(Deserialize)]
+struct ShareChange {
+    action: String,
+    subject: String,
+    role: Option<String>,
+}
+/// The share sheet's view of `part_share`, as the signed-in person. Only the admin's session with
+/// a fresh confirmation carries `share:outward` (everyone signed in).
+async fn share_run(s: &AppState, headers: &HeaderMap, input: Value) -> Result<Value, PfError> {
+    let a = auth(s)?;
+    let mut actor = a.require_session(headers).await?;
+    if input["subject"] == "everyone-signed-in" && input["action"] != "list" {
+        actor = a.require_admin_session(headers, true).await?;
+    }
+    let mut scopes: std::collections::BTreeSet<String> =
+        ["parts:read", "share:household"].map(String::from).into();
+    if actor.admin && actor.fresh_stepup(pf_db::ids::now_ms()) {
+        scopes.insert("share:outward".into());
+    }
+    let ctx = pf_ops::Ctx {
+        caller: pf_model::create::Caller {
+            principal: actor.principal(),
+            via: "chrome",
+        },
+        scopes,
+        spaces: None,
+    };
+    pf_ops::Registry::new(parts(s)?.clone())
+        .run(&ctx, "part_share", input)
+        .await
+}
+async fn share_list(
+    State(s): State<AppState>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    match share_run(&s, &headers, json!({"name":name})).await {
+        Ok(j) => Json(j).into_response(),
+        Err(e) => fail(e),
+    }
+}
+async fn share_change(
+    State(s): State<AppState>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<ShareChange>,
+) -> Response {
+    let input = json!({"name":name,"action":body.action,"subject":body.subject,"role":body.role});
+    match share_run(&s, &headers, input).await {
+        Ok(j) => Json(j).into_response(),
+        Err(e) => fail(e),
+    }
+}
+#[derive(Deserialize)]
+struct People {
+    #[serde(default)]
+    q: String,
+}
+async fn share_people(
+    State(s): State<AppState>,
+    Path(name): Path<String>,
+    Query(q): Query<People>,
+    headers: HeaderMap,
+) -> Response {
+    let result = async {
+        let actor = auth(&s)?.require_session(&headers).await?;
+        let caller = pf_model::create::Caller {
+            principal: actor.principal(),
+            via: "chrome",
+        };
+        parts(&s)?.share_candidates(&caller, &name, &q.q).await
+    }
+    .await;
+    match result {
+        Ok(v) => Json(json!({"people":v})).into_response(),
+        Err(e) => fail(e),
+    }
+}
+#[derive(Deserialize)]
 struct Thumb {
     v: Option<i64>,
 }
@@ -503,6 +581,16 @@ pub fn install(b: &mut ServerBuilder) {
             .route(
                 "/api/chrome/v1/{name}/summary",
                 get(summary).options(|| async { StatusCode::NO_CONTENT }),
+            )
+            .route(
+                "/api/chrome/v1/{name}/share",
+                get(share_list)
+                    .post(share_change)
+                    .options(|| async { StatusCode::NO_CONTENT }),
+            )
+            .route(
+                "/api/chrome/v1/{name}/people",
+                get(share_people).options(|| async { StatusCode::NO_CONTENT }),
             )
             .layer(middleware::from_fn(chrome_cors)),
     );

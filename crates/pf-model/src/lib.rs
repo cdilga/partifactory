@@ -19,12 +19,14 @@ pub mod names;
 pub mod quotas;
 pub mod read;
 pub mod rebase;
+pub mod share;
 pub mod spaces;
 pub mod version;
 
 pub use create::{CreateRequest, FileInput, FileMap, PutRequest};
 pub use error::PfError;
 pub use read::GetRequest;
+pub use share::ShareRequest;
 
 use pf_blobs::BlobStore;
 use pf_caps::EpochStore;

@@ -4,6 +4,12 @@ import * as crypto from 'node:crypto';
 // Agents connect only through short-lived OAuth credentials. These helpers drive the real
 // flows a signed-in person sees; the page must already be signed in.
 
+// The sheet leaves sharing and backends unticked unless the person opts in; tests opt in.
+async function allowEverything(page: Page) {
+  await page.locator('#scopes input[type=checkbox]').first().waitFor();
+  for (const box of await page.locator('#scopes input[type=checkbox]').all()) await box.check();
+}
+
 const b64url = (b: Buffer) => b.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 /** A standards MCP client: dynamic registration, browser consent, PKCE code exchange. */
@@ -18,6 +24,7 @@ export async function oauthToken(page: Page, request: APIRequestContext, clientN
   await page.route(`${redirect}**`, route => route.fulfill({ status: 200, contentType: 'text/plain', body: 'You can return to your agent.' }));
   const callback = page.waitForRequest(r => r.url().startsWith(redirect));
   await page.goto(authorize.toString());
+  await allowEverything(page);
   await page.getByRole('button', { name: 'Allow', exact: true }).click();
   const code = new URL((await callback).url()).searchParams.get('code')!;
   await page.unroute(`${redirect}**`);
@@ -31,6 +38,7 @@ export async function deviceToken(page: Page, request: APIRequestContext, agentN
   const device = await (await request.post('/oauth/device_authorization', { form: { client_id: 'part-cli', agent_name: agentName, scope: scopes.join(' ') } })).json();
   await page.goto(device.verification_uri_complete);
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await allowEverything(page);
   await page.getByRole('button', { name: 'Allow', exact: true }).click();
   await expect(page.getByRole('status')).toHaveText('Agent connected. You can return to your terminal.');
   const grant = await request.post('/oauth/token', { form: { client_id: 'part-cli', grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: device.device_code } });
