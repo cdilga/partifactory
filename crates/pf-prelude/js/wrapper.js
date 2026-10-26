@@ -188,6 +188,8 @@ window.pfShareChrome = function (part, WS) {
     if (!window.EventSource) { setInterval(loadComments, 5000); return; }
     var es = new EventSource(WS + '/api/chrome/v1/' + encodeURIComponent(part) + '/comments/events', { withCredentials: true });
     es.addEventListener('comments', function () { loadComments(); });
+    // Events aren't replayed, so catch up on anything posted while connecting or reconnecting.
+    es.addEventListener('open', function () { loadComments(); });
   }
   function commentChange(body) { return commentsApi(body).then(function (j) { commentsState = j; renderComments(); loadComments(); }); }
   function commentView(c, parent) {

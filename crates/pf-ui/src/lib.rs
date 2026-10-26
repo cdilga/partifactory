@@ -445,7 +445,8 @@ fn editor_ctx(actor: &pf_auth::SessionActor, write: bool) -> pf_ops::Ctx {
     pf_ops::Ctx {
         caller: pf_model::create::Caller {
             principal: actor.principal(),
-            via: "chrome",
+            // Versions record browser edits as `editor` (versions.via).
+            via: "editor",
         },
         scopes,
         spaces: None,
