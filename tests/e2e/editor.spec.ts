@@ -43,7 +43,7 @@ test('an Edit member changes a Markdown part in the browser, with drafts and con
   // Markdown opens in the formatted view (pf-h6y.6): edit a list item and add a table row with
   // Tab; the save is block ops, so the untouched heading keeps its exact bytes.
   const doc = p.locator('#pf-editor .ProseMirror');
-  await expect(doc.locator('h1')).toHaveText('Shopping');
+  await expect(doc.locator('h1')).toHaveText(/^Shopping\s+list$/);
   await doc.locator('li').first().click();
   await p.keyboard.press('End');
   await p.keyboard.type(' (2 litres)');

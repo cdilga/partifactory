@@ -72,30 +72,10 @@ window.pfShareChrome = function (part, WS) {
     });
   }
   function moveTo(space, done) { mutation('/move', { space: space }).then(function (j) { shareState = j; status.textContent = done; render(); }).catch(report); }
-  function renderPeople() {
-    peopleBox.replaceChildren();
-    renderFamily();
-    renderAsks();
-    var st = shareState; if (!st) return;
-    el('p', st.sentence, peopleBox).className = 'pf-sentence';
-    var rows = el('ul', null, peopleBox); rows.className = 'pf-people';
-    var owner = el('li', null, rows); el('span', st.owner.label, owner); el('small', 'Owner', owner);
-    st.inherited.forEach(function (g) { var li = el('li', null, rows); el('span', g.label, li); el('small', ROLE_NAMES.find(function (r) { return r[0] === g.role; })[1] + ' · from ' + st.space, li); });
-    st.grants.forEach(function (g) {
-      var li = el('li', null, rows); var who = el('span', g.label, li);
-      if (g.by_agent) el('small', g.by_agent + ' shared this', who);
-      if (!st.you.can_share) { el('small', ROLE_NAMES.find(function (r) { return r[0] === g.role; })[1], li); return; }
-      roleSelect(li, g.role, 'Role for ' + g.label, function (role) { shareChange({ action: 'set', subject: g.subject, role: role }).catch(report); });
-      button('Remove', li, function () {
-        shareChange({ action: 'remove', subject: g.subject }).then(function () {
-          status.replaceChildren(); el('span', g.label + ' removed. ', status);
-          var undo = button('Undo', status, function () { shareChange({ action: 'set', subject: g.subject, role: g.role }).then(function () { status.textContent = 'Restored.'; }).catch(report); });
-          setTimeout(function () { undo.remove(); }, 10000);
-        }).catch(report);
-      }).className = 'pf-danger';
-    });
-    if (!st.you.can_share) { el('p', 'Only the owner can change who has access.', peopleBox).className = 'pf-muted'; return; }
-    var add = el('form', null, peopleBox); add.className = 'pf-add';
+  // The add-people form is built once and kept, so a refresh never wipes what someone is typing.
+  var peopleList = null, addForm = null, doneButton = null, ownerNote = null;
+  function buildAddForm() {
+    var add = el('form', null, null); add.className = 'pf-add';
     var fl = el('label', 'Add people or groups', add); var q = el('input', null, fl); q.type = 'search'; q.autocomplete = 'off'; q.placeholder = 'Name or group';
     var picks = el('div', null, add); picks.className = 'pf-picks'; picks.setAttribute('role', 'listbox'); picks.setAttribute('aria-label', 'Matching people and groups');
     var chosen = null; var role = roleSelect(add, 'comment', 'Role for new people', function () {});
@@ -116,9 +96,39 @@ window.pfShareChrome = function (part, WS) {
     };
     add.onsubmit = function (e) {
       e.preventDefault(); if (!chosen) return;
-      shareChange({ action: 'set', subject: chosen.subject, role: role.value }).then(function () { status.textContent = chosen.label + ' added.'; }).catch(report);
+      var who = chosen;
+      shareChange({ action: 'set', subject: who.subject, role: role.value }).then(function () { status.textContent = who.label + ' added.'; q.value = ''; chosen = null; addButton.disabled = true; }).catch(report);
     };
-    button('Done', peopleBox, function () { sheet.close(); }).className = 'pf-primary';
+    return add;
+  }
+  function renderPeople() {
+    renderFamily();
+    renderAsks();
+    var st = shareState; if (!st) return;
+    if (!peopleList) {
+      peopleList = el('div', null, peopleBox); addForm = buildAddForm(); peopleBox.appendChild(addForm);
+      ownerNote = el('p', 'Only the owner can change who has access.', peopleBox); ownerNote.className = 'pf-muted';
+      doneButton = button('Done', peopleBox, function () { sheet.close(); }); doneButton.className = 'pf-primary';
+    }
+    peopleList.replaceChildren();
+    el('p', st.sentence, peopleList).className = 'pf-sentence';
+    var rows = el('ul', null, peopleList); rows.className = 'pf-people';
+    var owner = el('li', null, rows); el('span', st.owner.label, owner); el('small', 'Owner', owner);
+    st.inherited.forEach(function (g) { var li = el('li', null, rows); el('span', g.label, li); el('small', ROLE_NAMES.find(function (r) { return r[0] === g.role; })[1] + ' · from ' + st.space, li); });
+    st.grants.forEach(function (g) {
+      var li = el('li', null, rows); var who = el('span', g.label, li);
+      if (g.by_agent) el('small', g.by_agent + ' shared this', who);
+      if (!st.you.can_share) { el('small', ROLE_NAMES.find(function (r) { return r[0] === g.role; })[1], li); return; }
+      roleSelect(li, g.role, 'Role for ' + g.label, function (role) { shareChange({ action: 'set', subject: g.subject, role: role }).catch(report); });
+      button('Remove', li, function () {
+        shareChange({ action: 'remove', subject: g.subject }).then(function () {
+          status.replaceChildren(); el('span', g.label + ' removed. ', status);
+          var undo = button('Undo', status, function () { shareChange({ action: 'set', subject: g.subject, role: g.role }).then(function () { status.textContent = 'Restored.'; }).catch(report); });
+          setTimeout(function () { undo.remove(); }, 10000);
+        }).catch(report);
+      }).className = 'pf-danger';
+    });
+    addForm.hidden = !st.you.can_share; ownerNote.hidden = st.you.can_share; doneButton.hidden = !st.you.can_share;
   }
   function render() {
     list.replaceChildren();
