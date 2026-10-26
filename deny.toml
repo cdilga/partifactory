@@ -7,6 +7,11 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+    # Unmaintained only, no vulnerability: syntect's embedded syntax and theme dumps
+    # need bincode 1.3.3, which its authors declared complete. Revisit with syntect 6.
+    { id = "RUSTSEC-2025-0141", reason = "bincode 1.3.3 is complete; syntect dump-load needs it" },
+]
 
 [licenses]
 version = 2
