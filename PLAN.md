@@ -69,7 +69,7 @@ Adding anything to it takes a decision from the admin. Work that straddled the l
 - **Gallery thumbnails in Slice 1 are the latest render** (decision 53): a gallery card shows the screenshot of the newest passing `part_check` (or `after_check` gate) of the live version, kept as a part blob, and the "being made…" frame when there's none. Agent thumbnails, SVG thumbs and clips come right after Slice 1.
 - **No search.** Agents address parts by name (the name is in the link they posted). FTS5 search and `part_find` come after Slice 1.
 - **Ingress through the contract only.** The example deployment's Cloudflare tunnel runs as a plain proxy that meets the ingress contract (§3), configured by hand, and its two DNS records are made by hand. The Cloudflare adapter and `provision` come after.
-- **`window.storage` is the part's data API.** `claude.use("db")` and the `/_rt` `db.*` ops come in P3, with the rest of `claude.use`.
+- **`window.storage` is the part's data API**, and it stays the only one: `claude.use(...)`, the `db.*` ops and data leases were dropped (decision 58).
 - **Telegram in-app browser (the admin, 2026-10-23).** A 5-minute real-phone test of passkey sign-in in Telegram's in-app browser is in the human checks, done whenever, blocking nothing (decision 52). If it fails, the fixes are: (1) set Telegram to open links in the normal browser, and (2) Hermes' messages hint "open in browser". The person-bound-link fallback is rejected (`docs/plan-history.md`).
 - **Final round (2026-10-23), provisional, pending the admin** (§8 decisions 39–42):
   - **`tsx` is right after Slice 1.** The oxc + rolldown kind moves off the Slice 1 path and runs right after it; the compiler spike stays in P0 and in the slice, so a rolldown or oxc problem still shows up first. In Slice 1 agents send `html`; React through the mirrored UMD build (a cdnjs or jsDelivr `<script>` tag) works.
@@ -80,17 +80,18 @@ Adding anything to it takes a decision from the admin. Work that straddled the l
 
 **After Slice 1** (all of it stays in the plan, in its phase):
 - **Backends** (P2a, all of it) and the backend pixel test.
-- **Insights beyond Health**: the Insights store, traces, the log pipeline, the no-content fuzz test, the Insights and debugging UIs, the OTLP adapter.
-- **Identity extras**: native invites and local passkey accounts, the Authentik spike, directory adapter and provisioner, cleanup lists, `provision`, the Cloudflare adapter, `doctor`, the portability lane.
+- **Insights beyond Health**: the Insights store, traces, the log pipeline, the no-content fuzz test, the Insights and debugging UIs.
+- **Identity extras**: SCIM from the IdP, invites by link, QR or email (native or IdP accounts, decision 61), local passkey accounts, the Authentik spike and provisioner, cleanup lists, `provision`, the Cloudflare adapter, `doctor`, the portability lane.
 - **Agent extras**: OAuth authorization code, comments, inward sharing by agents, leases, block ids, notes, `render: "text"` and `part_find`, `part_watch` and event SSE, the other `part_link_for` actions, Jig and `design_system`, the Hermes skill.
 - **Workspace extras**: the versions rail and the bin view, search, diff, preview of old versions, comments rail, agent activity, inward sharing rungs, Move to Family, Ask for access, install as app; the source editor and the formatted view for Markdown and `text` parts; live reload; renames.
 - **Notifications**: the ops-alert webhook and signed event webhooks for agents.
 - **Previews** (right after Slice 1, pulled forward from P4 by decision 53): the card pipeline and the titled public card; automatic screenshot posters, and optional agent-chosen `og:video` clips, for public links (on by default) and the gallery; the `preview` fields and `part_check {record}`.
-- **More kinds**: `tsx` (first after the slice), `svg` and `code`, `slides` and Mermaid.
+- **More kinds**: `tsx` (first after the slice), `svg` and `code`; Mermaid-syntax diagrams (rendered with Pele) and KaTeX in Markdown.
 - **Shipping extras**: nginx and Traefik example configs, arm64, SBOM, `cosign`, example CI workflows.
-- **Updates and advisories** (§3h): advisory matching against the OSV data, the chrome badge and the counts, `part_edit {update}` and the Update libraries button, auto-update; backend SBOMs come with P2a.
-- **Claude-compatibility extras** (P3): `claude.use` (`db`, `user`, `comments`, `artifact`), Tailwind and shadcn, viewer uploads, the agent inbox.
-- **family-hub embedding and service identities**, family onboarding, phone editing (P4), and everything in P5.
+- **Backend image scanning** (§3h, with P2a): SBOMs, nightly OSV matching, rebuild on a patched image. Frontend advisories were dropped (decision 60).
+- **Chat apps** (P3, decision 59): ChatGPT and Claude as first-class clients, other people's apps under their own permissions, anonymous read-only MCP for public links, optional Tailwind and shadcn helpers.
+- **Backup targets** (rest of P1, decision 62): folder, S3-compatible, rclone and restic side by side.
+- **P4**: a first-run tour, family-hub embedding, Pele and KaTeX, part-owned uploads, phone editing and point-and-comment.
 - **The bench** and the nginx/HAProxy comparison.
 
 **Definition of done.** Slice 1 is done when all of these hold:
@@ -129,8 +130,8 @@ I read the repo (Go server ~21k lines, plain JS UI, docs). The parts worth keepi
 | Agents connect over **MCP**. `edits` use `{old_str,new_str}` with a `base_version` compare-and-set | Same shape as Claude's artifact tools, so agents already know how to use it |
 | **Immutable numbered versions**, restore = append | You never lose work, and you can say "what changed?" |
 | **Back up the data folder**: one folder holds everything | Backup is whatever the host already does. No second system to run (§5c) |
-| **Claude-artifact compatibility**: `window.storage`, `claude.use("db"/"user"/"comments"/"artifact")`, React/TSX + common libs | Anything Claude writes runs here unchanged, including state that persists and pages that save themselves |
-| **Comments addressed to the agent** (`to_claude`) + `watch` | Lets you comment from your phone and have the agent fix it. partifactory adds live reload (P2) and an agent inbox (P3) |
+| **Claude-artifact compatibility**: `window.storage`, React/TSX + common libs | Pages Claude (and ChatGPT) write run here unchanged, including state that persists. partifactory keeps `window.storage` and drops `claude.use(...)` (decision 58), and adds optional Tailwind and shadcn helpers (decision 59) |
+| **Comments addressed to the agent** (`to_claude`) + `watch` | Lets you comment from your phone and have the agent fix it. partifactory adds live reload (P2); there's no separate agent inbox (decision 58) |
 | **Separate share surface** that only answers to tokens | A misconfigured edge can't expose the workspace |
 | **Per-agent revocable tokens**, removed before anything reaches app code | Each agent can be cut off on its own |
 | **Runtime errors reported back to the agent** (`runtime_errors`) | The agent finds out its page is broken without needing a browser. partifactory adds `part_check` screenshots (§4c) |
@@ -205,7 +206,7 @@ Detected from the entry file. `kind` overrides. **Every kind is built**, so `liv
 | `html` | `index.html` | mirror CDN refs, sandbox rewrites (root-relative → relative, `crossorigin` on `<img>`), brotli for every file but the entry | the HTML, with the prelude tag, import map and `pf-boot` inserted at serve time |
 | `tsx` (right after Slice 1) | `App.tsx`/`.jsx` (default export) | oxc transform, rolldown bundle against the shared library set, a generated HTML shell (`#root`, Tailwind per §6 P3) | generated shell, with the prelude inserted at serve time |
 | `markdown` | `*.md` | comrak render into the built-in shell (`pf-shell.css`, a shared blob); Jig styles and block ids (P2), Mermaid/KaTeX (P4) | rendered HTML shell |
-| `slides` | `*.md` with `---` separators | as markdown + the slide runtime (block = slide) | slide shell |
+| `slides` | dropped (decision 58); the kind value stays in the schema, unused | — | — |
 | `svg` | `*.svg` | none beyond brotli (it's sandboxed like everything else) | the SVG as a sandboxed document |
 | `text` | `*.txt` (or `kind: text`) | none beyond brotli, so it's instant | the text as is, in the built-in shell (`pf-shell.css`; Jig typography from P2) with a monospace toggle and line numbers for line-anchored comments and edits |
 | `code` | any other text file | syntect highlight | read-only viewer shell |
@@ -294,7 +295,7 @@ That's a CORS-simple request, so there's **no preflight round trip through the p
 So a prelude fix ships with a deploy and needs no rebuild: `toolchain` in the build cache key excludes the prelude. Every other HTML file a part serves gets the same prelude tag the same way.
 
 **The prelude** is a shared blob, first in `<head>` of every served HTML document. It:
-- installs `window.storage`, `claude.use(...)` and `window.partifactory`: `ready()` (call it when the page has finished its first render; `part_check` stops waiting then), `basePath`, and `on("data.changed", fn)`, which calls `fn({key, op: "set" | "delete", by: {kind: "person" | "agent" | "guest", name}})` once per changed key whenever another tab or person writes the part's shared data;
+- installs `window.storage` and `window.partifactory`: `ready()` (call it when the page has finished its first render; `part_check` stops waiting then), `basePath`, and `on("data.changed", fn)`, which calls `fn({key, op: "set" | "delete", by: {kind: "person" | "agent" | "guest", name}})` once per changed key whenever another tab or person writes the part's shared data;
 - redefines `localStorage` as a synchronous in-memory `Storage` seeded from the bootstrap snapshot (≤ 256 KiB of the person's state for this part, in `<script type="application/json" id="pf-boot">`), written behind to personal state on `/_rt` (debounced, plus a `pagehide` flush via `sendBeacon`);
   `sessionStorage` is memory only; `document.cookie` is an inert in-memory string; `indexedDB` and `caches` are `undefined`, so feature detection falls back. Public-link viewers (no person) get memory-only storage;
 - wraps `fetch`, `XMLHttpRequest.open` and `EventSource` to add the `/c/<cap>/` prefix to same-host root-relative URLs, wraps `Worker`/`SharedWorker` to fetch the script and start it from a `blob:` URL, and sets `crossOrigin = "anonymous"` on script-created `Image`s;
@@ -372,7 +373,7 @@ The wrapper has its own strict CSP (no `sandbox`): scripts and styles only from 
 
 ```
                 Ingress: any TLS-terminating reverse proxy (Caddy, nginx, Traefik) with a
-                wildcard cert, OR the Cloudflare Tunnel adapter, OR (P5) the binary's own ACME
+                wildcard cert, OR the Cloudflare Tunnel adapter
    ┌──────────────────────────────────────────────────────────────┐
    │ parts.<domain>          workspace UI, /p/<name> (redirect),   │
    │                         /api (+ /api/chrome), /mcp, /oauth/*, │
@@ -528,7 +529,7 @@ Making a Can-contribute link is the only way guests write. Switching a link to C
 A public link has two modes, chosen in the share sheet: **Can view** (the default) and **Can contribute**. Someone using a part through a Can-contribute link is a **guest**, like a passer-by drawing on a shared whiteboard. Guests are **web consumers only**.
 - **What a guest can do**: write the part's **shared data** through the `/_rt` data ops (`storage.*` shared, `db.*`), and call the part's backend, which sees them as `role: guest` (§3f).
 - **What a guest can never do**: change code, files or versions; create, edit or delete parts; see history or source; share; comment as a person. Guests have no tokens, so MCP, the API and the CLI are closed to them.
-  A guest cap calling any non-data `/_rt` op, or any `/api` or `/mcp` route, gets `403`. From P3 (when `claude.use` lands), the prelude answers `claude.use("user")` for a guest locally ("Guest 4f2a"). It doesn't send runtime errors from guest tabs.
+  A guest cap calling any non-data `/_rt` op, or any `/api` or `/mcp` route, gets `403`. The one exception (P3, decision 59) is a public link's own read-only MCP URL, which needs no token and reaches only that part's read tools. The prelude doesn't send runtime errors from guest tabs.
 - **Guest identity**: `POST /l/<token>/go` mints a cap with subject `link:<id>`, the `dw` claim and a random guest id `g`, shown as "Guest 4f2a". It lives where the cap lives (the wrapper's `sessionStorage`, the prelude's memory), so it's per tab, signed, and needs no cookie.
 - **Limits, on by default**: per-guest and per-IP rate limits on `/_rt` writes (60 a minute per guest, 300 per IP), and a shared-data cap per part (5 MiB) that returns `quota_exceeded` past it.
 - **Shared-data limits for everyone** (`window.storage`, §3c): a key is 1–512 bytes of UTF-8 with no control characters; a value is a string ≤ 256 KiB (the `data_docs` row cap); shared data ≤ 5 MiB per part; personal data ≤ 256 KiB per person per part (it's inlined as the `localStorage` seed). Writes: 60 a minute per guest and 300 per IP, 600 a minute per signed-in person per part. Reads: 600 requests a minute per viewer per part, where a `getMany` or a `list` page counts as one.
@@ -545,25 +546,39 @@ The page never reveals the title. Public-link holders never see it: a revoked li
 
 ### Invitations, all minted in partifactory (admin only)
 
-The link handed out is always **partifactory's own** `parts.<domain>/i/<id>`. Opening it records `opened_at` and counts the use. What happens next depends on whether an IdP provisioner is configured. Grants and use counts always live in partifactory's own tables.
-- *Why grants in partifactory:* per-part access never depends on IdP group plumbing (Authentik invitations, for one, can't set groups). IdP groups are only needed for groups people manage elsewhere.
+The link handed out is always **partifactory's own** `parts.<domain>/i/<id>`. Opening it records `opened_at` and counts the use. Grants and use counts always live in partifactory's own tables.
+- *Why grants in partifactory:* per-part access never depends on IdP group plumbing. IdP groups are only needed for groups people manage elsewhere.
 
-**Default: native invites with local passkey accounts (no provisioner). In scope for v1, P2b.**
-1. **Passkey-only invite link** (share anywhere): `/i/<id>` → one field ("What should we call you?", username generated) → **passkey creation, required**, which partifactory registers itself (`webauthn-rs`) → a local account is created → land on the part with the invite's grants applied.
-   - There's no email and no password. 7-day default expiry. The dialog offers **"for one person"** (single use) or **"for a group chat: up to N people"**, counted by partifactory.
+**One invite, three ways to hand it over** (the admin, 2026-10-26, decision 61). The invite sheet offers **Copy link**, **QR code** (rendered in the sheet, for someone standing next to you) and **Email**, and the invite picks the account it makes:
+- **partifactory only**: a local passkey account (below). Link and QR enrol through the native flow; Email is sent by partifactory's optional `EmailSender` adapter (`[email]`, SMTP, credentials from `_FILE`).
+- **IdP account** (needs a provisioner): link and QR open the IdP's enrolment flow, which creates an **external** user in the IdP's `partifactory` group; Email has partifactory create that user by API and the IdP send its own set-up email (or, if the IdP can't by API, `[email]` sends the IdP's recovery link).
+- Either way the person lands on the part with the invite's grants applied. With neither a provider that sends email nor `[email]`, Email is hidden and the sheet says why.
+
+**Native invites with local passkey accounts (no provisioner needed). In scope for v1, P2b.**
+1. **Passkey-only invite**: `/i/<id>` → one field ("What should we call you?", username generated) → **passkey creation, required**, which partifactory registers itself (`webauthn-rs`) → a local account is created → land on the part with the invite's grants applied.
+   - There's no password. 7-day default expiry. The dialog offers **"for one person"** (single use) or **"for a group chat: up to N people"**, counted by partifactory.
      *Why multi-use:* single-use links pasted into family chats lose a race and confuse everyone else.
    - **Lost passkey** → the admin clicks "Send a new passkey link" on that *existing* person: a single-use `/i/<id>` of kind `recovery` bound to that account, which registers a new passkey and revokes the old ones. History and grants stay put, and no zombie account is created.
-   - A local account can later be **linked to an IdP identity** (sign in with OIDC once while signed in locally), so a household that adopts an IdP keeps everyone's history.
-   - *Why in scope:* without it, a deployment with plain OIDC and no provisioner couldn't invite anyone, and invites would quietly depend on Authentik. `webauthn-rs` is already in the binary for step-up, so the added surface is registration, passkey sign-in and recovery for local accounts.
-2. **Add by email**: needs a provisioner (the IdP sends the email). Without one, the share sheet offers the invite link instead. partifactory doesn't send email.
-3. **Existing user**: pick and grant (an inward share, the admin isn't needed if it's the owner's own part). It shows up in their "Shared with me" and activity feed.
-4. **New group**: "Make a group for this" creates a local `pf-<name>` group in partifactory's tables.
+   - A local account can later be **linked to an IdP identity** (sign in with OIDC once while signed in locally), so a household that adopts an IdP keeps everyone's history. It's never merged automatically by email (takeover risk).
+   - *Why in scope:* without it, a deployment with plain OIDC and no provisioner couldn't invite anyone. `webauthn-rs` is already in the binary for step-up.
+   - Native email recovery and email sign-in may come later, on the same `EmailSender`.
+2. **Existing user**: pick and grant (an inward share, the admin isn't needed if it's the owner's own part). It shows up in their "Shared with me" and activity feed.
+3. **New group**: "Make a group for this" creates a local `pf-<name>` group in partifactory's tables.
 
-**Adapter: the Authentik provisioner (the example deployment).** Authentik facts it's built on (checked 2026-10-23): invitations **can't set groups** (custom attributes become user attributes, groups come from the User Write stage), and there's **no use count**, only single-use or unlimited-until-expiry.
-- `/i/<id>` 302s to an Authentik invitation bound to a dedicated **`partifactory-invite`** flow: invitation → one field → **passkey enrolment, required** → user write (into one holding group) → login → land on the part.
-  After the first login, partifactory matches the new `sub` to the invite (carried in the login `state`), applies the invite's grants, and adds any `pf-*` memberships by API. The Authentik invitation is unlimited-until-expiry, and partifactory deletes it at the Nth enrolment.
-- **Lost passkey** uses an IdP recovery link (`POST /api/v3/core/users/{id}/recovery/`) bound to the same user. **Add by email** creates the IdP user + `pf-*` groups, then triggers the IdP's "set up your account" email. **New groups** are IdP groups named `pf-<name>`, manageable from either side.
-- Unverified Authentik items (object-level permission names, `is_superuser` protection, blueprint-over-API, recovery-link permission) are gates in the Authentik spike and the provisioner gate, not assumptions.
+**People already in the IdP arrive by SCIM, with nothing to do** (decision 61). partifactory serves a standard SCIM 2.0 endpoint (`/scim/v2/Users`, `/Groups`; off unless `[scim]` is set; bearer token from `_FILE`; every write audited as `via = scim`).
+- The IdP pushes the members of its `partifactory` group; `[scim] spaces` maps IdP groups to spaces (the household group → `family`), so a part shared with Family is waiting for someone the first time they sign in.
+- Every lifecycle case is handled and tested: the first backfill, someone added later, a person who signed in by OIDC before SCIM (merged by `sub`), profile changes, removal or deactivation (a revoke within a minute), re-adding, deletion, group changes, and no automatic merge of a native account by email.
+- Any IdP that pushes SCIM works with no partifactory code (Authentik, Okta, Entra ID, JumpCloud, Keycloak with a plugin). Without SCIM, people appear on their first OIDC sign-in, and Family still works by live space inheritance.
+
+**Access in the IdP is allow-list, default deny.** In Authentik an application with no binding is open to every user, and a SCIM backchannel syncs only the users who can access its application (all users when nothing is bound). So:
+- the partifactory application is bound to the `partifactory` group (who can sign in, and who SCIM pushes); at deployment every existing user is added to it;
+- every other application is bound to an allow group, never left unbound; invitees are only in `partifactory`, so they reach partifactory and nothing else;
+- the provisioner gate audits every application for a binding, `provision` proposes missing ones for the admin to apply, and `doctor` and Health go red if an unbound application appears.
+
+**Adapter: the provisioner** (`[idp.provisioner] kind = "authentik" | "none"`), with capability flags `create_user_in_group`, `send_setup_email`, `deactivate_owned` and `audit_app_bindings`; each missing capability hides its UI and falls back to native. Authentik is the first implementation, with a public contract test suite for others.
+- partifactory records which IdP users it created. Removing one also deactivates them in the IdP; partifactory never writes to IdP users it didn't create. Resend set-up email and "new sign-in link" (IdP recovery, `POST /api/v3/core/users/{id}/recovery/`) work for those.
+- Authentik facts (docs read 2026-10-26, confirmed in the spike on the installed version, with the answers kept in site config): unbound applications are open to all; SCIM syncs only users who can access its application; the User Write stage sets user type (external) and one group; a recovery link can be made by API, and whether a recovery *email* can be triggered by API is unconfirmed.
+- The chosen group names, the application list and binding audit, the gate report and the IdP's flow names are deployment facts and live in `partifactory-site`, never here.
 
 Either way: pending invites show their status (sent, opened, enrolled, expired) and have one-click revoke, and invitees who never enrolled, and people inactive for 180 days, are listed for one-click cleanup.
 
@@ -581,7 +596,7 @@ and the simulated device matrix (decision 52: Chromium, WebKit and Firefox in Pl
 | Make a public link | the admin | Share → "Anyone with the link" → **Copy** (+ 1 biometric if the 10-minute step-up window has lapsed. Step-up is in-page WebAuthn, not a redirect) |
 | Mint a passkey invite link | the admin | Share → "Invite someone" → **Copy link** (+ step-up) |
 | Accept a passkey invite | new person | open → type a name → **passkey tap** → on the part |
-| Add someone by email (provisioner only) | the admin | Share → "Invite someone" → email → **Send** (+ step-up) |
+| Invite someone by email | the admin | Share → "Invite someone" → Email → address → **Send** (+ step-up); Copy link and QR code are the other two choices on the same sheet |
 | Connect a new agent (OAuth) | anyone | agent opens browser → passkey tap (if signed out) → **Allow** + passkey on the consent sheet |
 | Pair yourself with a chat agent (Hermes in the example deployment) | household member | "connect me" in chat → open link → **Allow** + passkey |
 | Make a public link guests can contribute to | the admin | Share → "Anyone with the link" → **Can contribute** → **Copy** (+ step-up if lapsed) |
@@ -606,14 +621,11 @@ the access-asks list (Add/Dismiss), agent-made grants labelled ("Hermes shared t
   WebAuthn `rp.id` is `[domain] apex`, so one passkey serves the workspace and every part-host wrapper; assertions are accepted from the workspace origin and from every active, sandboxed part-host origin (the same set the chrome CORS admits). The share sheet verifies via `POST /api/chrome/v1/<part>/stepup`, which sets `sessions.stepup_at`.
   **Admin actions need a passkey assertion within 10 minutes**: public links (and switching one to Can contribute), `everyone-signed-in`, invites, add-by-email, groups, users, LAN allowlist entries for backends, agent consent into spaces the consenting person doesn't own, `unsandboxed`, renames.
   Household sharing never needs step-up. *Why one 10-minute window:* short enough that a stolen session can't administer, long enough for a batch of admin changes. (Round 1 said 30 in one table and 10 in another. It's 10.)
-- **Authentik adapter only: the IdP credential is least-privilege, and that's verified, not assumed** (the provisioner gate, P2b). With no provisioner, partifactory holds no IdP write credential at all. The intent: a service account `partifactory-provisioner` that can read users/groups,
-  create invitations, send recovery links, and change membership of `pf-*` groups **only** (Authentik object-level permissions on each `pf-*` group).
-  The gate tests, against the real IdP, that this account **cannot**: add anyone to a non-`pf-*` group, create a group with `is_superuser`, edit flows or stages,
-  create users with elevated attributes, or read another application's provider secret. It also checks that `pf-*` groups have no privileged parent, because Authentik roles inherit down the group hierarchy.
-  The core's own `pf-*` check is defence in depth only, because a compromised process would skip it.
-  **If the IdP can't scope it that finely**: `pf-*` groups are created by `provision` (bootstrap token, run by the admin), never at runtime. The runtime account drops to
-  invitations + recovery links + membership of pre-created groups. If even membership can't be object-scoped, add-by-email and new groups are done by the admin through `provision`, not at runtime.
-  The result sets `[idp.provisioner] tier = "A" | "B" | "C"` in site config, which the runtime reads at start to hide the UI for anything that tier must do through `provision`.
+- **Provisioner adapters only: the IdP credential is least-privilege, and that's verified, not assumed** (the provisioner gate, P2b, decision 61). With no provisioner, partifactory holds no IdP write credential at all.
+  The runtime service account may **only**: create external users into the IdP's `partifactory` group, trigger recovery for users partifactory created, and deactivate users partifactory created.
+  The gate tries, against the real IdP, everything else and expects it refused: adding anyone to another group, creating groups or superusers, editing flows, stages, applications or bindings, and reading another application's provider secret. It also fails if the partifactory application is unbound (SCIM would then push every user) and lists every other application without a binding.
+  Bindings are proposed by `provision` and applied by the admin (bootstrap token, run by hand), never by the runtime account. The core's own checks are defence in depth only, because a compromised process would skip them.
+  The gate report lives in site config; the runtime reads the provider's capability flags at start and hides the UI for anything it can't do.
 - **Break-glass**: `partifactory admin break-glass`, run on the host console, prints a one-time admin login valid for 5 minutes. It needs local shell access, works when the IdP is down,
   and is logged and shown on the Health page and in the audit log. The admin subject pin lives in site config, which has an offline copy (§5c).
 
@@ -735,16 +747,13 @@ The common case is "change that thing from last week", so finding a part and mak
   `part_check` (§4c) lets the agent see its own render, screenshot included, before anyone opens it.
 - **Live reload** (P2): when a new live version lands, open viewers get `pf:version` from the wrapper (or from the prelude's `EventSource` when standalone).
   A page with no unsaved personal state reloads in place; otherwise a toast says "Updated by Hermes · Reload". You watch the page change after asking.
-- **Agent inbox** (P3): each part has a **steward** (the creating connection and its person, changeable in the share sheet). A `to_agent` comment goes to the steward.
-  Push agents (Hermes) get a signed webhook. Pull agents get it via `part_inbox`, and the shared guide tells them to check it at session start. States: `open → claimed ("Hermes is on it") → answered → resolved`.
-  A claimed request with no new version after 15 minutes shows "stalled".
+- **No separate agent inbox** (decision 58): a comment marked "For the agent" reaches agents through `part_comments` and `part_watch`.
 - **In place, like Claude's artifacts**:
   - The workspace has a source editor (CodeMirror 6) with live preview from the draft, where saving creates a version. Drafts live server-side per (person, part), so they survive reloads and device switches.
-  - **Persistent state**: `window.storage` (personal + shared) and `claude.use("db")` documents live in SQLite. `window.storage` has the same API as in Claude's artifacts: `get(key, shared?)` resolves to `{key, value, shared}` or `null`, `set(key, value, shared?)` takes a string value, `delete(key, shared?)`, `list(prefix?, shared?)` resolves to `{keys, prefix, shared}`; `shared` defaults to `false` (personal).
+  - **Persistent state**: `window.storage` (personal + shared) documents live in SQLite. `window.storage` has the same API as in Claude's artifacts: `get(key, shared?)` resolves to `{key, value, shared}` or `null`, `set(key, value, shared?)` takes a string value, `delete(key, shared?)`, `list(prefix?, shared?)` resolves to `{keys, prefix, shared}`; `shared` defaults to `false` (personal).
     partifactory adds paging and bulk reads: `list(prefix, shared?, {cursor?, limit? ≤ 1000 (default 1000), values?})` (the options object may also stand in for `shared`, as `{shared, cursor, limit, values}`) resolves to `{keys, prefix, shared, next_cursor, values?}`, where `values: true` adds `{key: value}` for the page and `next_cursor` is `null` at the end; `getMany(keys ≤ 500, shared?)` resolves to an array, in order, of `{key, value, shared}` or `null`.
     Failures reject with a `PfError {code, message, retryable, retry_after?}` whose `code` is from the error catalogue (§4b): `rate_limited`, `forbidden_view_only`, `quota_exceeded`, `too_large`, `storage_full`, `invalid_input`, `forbidden`. Limits are in §3a. Its documents are `part_data` collection `__storage`, with the key as `doc_id`. They're the part's state across versions and devices, agents read and write them (`part_data`), and they're in every copy of `/data` and every full export.
-  - **Self-editing parts**: `claude.use("artifact").publish(...)` lets a part save a new version of itself, using compare-and-set against the version it's running, which must also be head. Viewers with `edit` can do it. Public-link viewers never can.
-  - **Assets** (P3): viewers with `comment` or higher can add files from the page (`POST /_rt/v1 {op: "assets.put"}`, 25 MiB each, counted against the space quota). They're part blobs served at `/_a/<id>` behind the cap, listed and deletable by agents via `part_data {collection: "_assets"}`.
+  - **Part-owned uploads** (P4, decision 63): a part builds whatever upload UI it likes on `partifactory.assets.put(file)` / `get` / `list` / `delete` (`POST /_rt/v1 {op: "assets.put"}`, 25 MiB each, counted against the space quota; guests only when the owner turns it on). partifactory ships no upload UI of its own. They're part blobs served at `/_a/<id>` behind the cap, listed and deletable by agents via `part_data {collection: "_assets"}`.
   - **Phone editing** (P4): "Edit text" mode lets you tap any text in the preview and change it. It's saved as an anchor edit (`old_str` = the original text), so it works whenever the text occurs exactly once in the source. Markdown and `text` parts use the formatted view instead (decision 54).
     Otherwise it offers "Ask the agent" with the text pre-filled. Long-press any element to comment with an anchor `{version, block_id | selector, text_quote, rect}`. Both run over the wrapper ↔ part `postMessage` channel, so the trusted UI stays outside the part.
 - **Prompt-injection hygiene**: every comment, data document and asset carries `provenance: person | agent | link_viewer` in the JSON, and results carry `contains_untrusted: true` when any is from someone other than the connection's person.
@@ -807,10 +816,10 @@ The common case is "change that thing from last week", so finding a part and mak
   `claimed {by: "Hermes", until: "14:32"}`, and a person can always override. Leases auto-release on commit or expiry, and the UI shows them ("Hermes is editing *app.tsx*").
 - **People and agents together**: the workspace editor keeps a server-side draft. When a new version lands mid-edit, the draft is merged with a 3-way `diff3` at line granularity (base, draft, head).
   Non-overlapping changes merge silently. Overlaps show a side-by-side resolve. Nobody's work is silently discarded, and "force" exists only for the person, never for agents.
-- **Data** (`window.storage`/`db`) has per-document compare-and-set (`rev`) plus leases, exactly like Claude's `db`, and is separate from source versioning.
+- **Data** (`window.storage`/`db`) has per-document compare-and-set (`rev`), with no data leases (decision 58), and is separate from source versioning.
 
 **Long documents** (a research write-up, a spec, a report).
-- **Block** = a top-level comrak node: a heading, paragraph, list (the whole list), block quote, fenced code, table, HTML block or thematic break. In `slides`, block = slide.
+- **Block** = a top-level comrak node: a heading, paragraph, list (the whole list), block quote, fenced code, table, HTML block or thematic break.
   **Section** = a heading plus everything up to the next heading of the same or a higher level.
 - **Sidecar**: the file `.pf/blocks.json` *inside the manifest*, so it's versioned atomically with the text: `{v: 1, file: "index.md", blocks: [{id, kind, start_byte, end_byte, hash}]}`.
   Ids are 8-character Crockford base32, random, unique within the part, and never reused.
@@ -834,7 +843,7 @@ If live co-typing is wanted, `yrs` runs *inside one formatted-view session* (pre
 - **Filters**: `space:`, `kind:`, `by:` (an agent or a person, e.g. `by:hermes`, `by:me`), `updated:` (today/week/month or a date range), `has:data`, `has:comments`, `tag:`.
 - **Ranking**: `bm25` with column weights (title 10, tags 5, description 4, notes 3, text 1, comments 2) multiplied by a recency factor `1 / (1 + age_days / 30)` on the last live change. No query means "recent, by me or this agent".
 - **Workspace**: an instant search box (`/` to focus, results as you type, debounced 80 ms) with matches marked and "where it matched" (title, text, comment, agent notes).
-- **Later, additive**: embeddings for semantic search alongside FTS5 (P5). Nothing in v1 depends on them.
+- **Later, if ever wanted**: search by meaning, with frankensearch the noted option. Not planned (decision 58); FTS5 with bm25 is enough at household scale.
 
 **Versions and rollback, per part.**
 - Every version is immutable and labelled with who and when ("Hermes for the admin · 14:02", "The admin · yesterday"), plus the agent's edit message or an auto summary ("app.tsx +14 −3").
@@ -848,7 +857,7 @@ If live co-typing is wanted, `yrs` runs *inside one formatted-view session* (pre
 
 **A part is a page plus, optionally, any containers it wants.** The page is served exactly as in §2. The containers run behind the part's own host and are reached only through partifactory, which checks the cap first. Backends land in P2a, right after agents work end to end.
 - *Why in v1:* the admin wants small apps with real state and real services ("Docker, whatever") without a separate hosting story for each. The per-part `db` still covers most micro-apps. A backend is for the ones it doesn't: a leaderboard on Postgres, a scraper on a schedule, a websocket game.
-- *Why containers, not WASM first:* every language and every database already ships as an OCI image, and agents already know how to write a Dockerfile. WASM components stay an optional later alternative (P5).
+- *Why containers, not WASM first:* every language and every database already ships as an OCI image, and agents already know how to write a Dockerfile. WASM backends are a non-goal (decision 58).
 
 **Sources** (one per service):
 
@@ -939,6 +948,8 @@ Backend build logs are attached to the build record (the last 20 builds per part
 
 ## 3h. Updates and advisories
 
+> **Re-scoped (decision 60).** Only backends get advisory matching, with P2a. Frontend parts keep recording `build_deps` (decision 48) but get no matching, badges, `osv-api`, severity-in-context, frontend `update` or auto-update: they run sandboxed, cookie-free and under a strict CSP, so a vulnerable library can at worst affect that one part's own data. The text below is kept for the backend layer; where it describes frontends it's superseded.
+
 Parts are built once and then left alone, so something has to notice when a library or a base image a part carries gets a known vulnerability. partifactory notices, says so where people and agents already look, and makes the fix one call or one tap. It never changes a live part by itself.
 
 **Three layers, kept apart.**
@@ -1012,7 +1023,7 @@ The janitor covers all three.
 
 ## 4. Operations: what agents and people can do
 
-Every operation is defined once in the operation registry (§4b) and appears identically on MCP, the HTTPS API and the CLI. There are eleven tools around one write op, plus `part_inbox` in P3.
+Every operation is defined once in the operation registry (§4b) and appears identically on MCP, the HTTPS API and the CLI. There are eleven tools around one write op.
 The table below is the full v1 surface; the Slice 1 subset and its exact fields follow it.
 
 | Op | Does |
@@ -1025,10 +1036,9 @@ The table below is the full v1 surface; the Slice 1 subset and its exact fields 
 | `part_link_for` | `{name?, action}` → a deep link that opens the sheet for a **people-only** action, pre-filled: `public_link` (`https://<name>-part.<domain>/#share=public`), `contribute`, `invite`, `group`, `everyone`, `lan` (`https://parts.<domain>/admin/backends/<part>#lan`), `admin`. Read-only; the link grants nothing by itself. Slice 1 has `public_link` and `contribute`; `group`, `everyone` and `admin` come after it, `invite` with native invites (P2b) and `lan` with backends (P2a) |
 | `part_check` | render a version (`head`, `live` or `n`) in the sandboxed renderer against a read-only view of the real shared data, optionally run up to 20 `actions` (click, type, wait, read back state), and return a screenshot (an image block in MCP) + `blank` + errors, console and failed loads; `record: true` also returns the preview clip it would make (§4c) |
 | `part_comments` | list/add/resolve; `to_agent` threads; anchors; `provenance` per comment |
-| `part_data` | the part's `db`/`storage` documents and `_assets` (Claude ArtifactData-shaped), with `rev` compare-and-set (`if_rev`) and leases (P3); data snapshots: `snapshot_list`, `snapshot_restore`, `reset` (with `parts:write`) |
+| `part_data` | the part's `db`/`storage` documents and `_assets` (Claude ArtifactData-shaped), with `rev` compare-and-set (`if_rev`); data snapshots: `snapshot_list`, `snapshot_restore`, `reset` (with `parts:write`) |
 | `part_watch` | long-poll the event log since a cursor, `wait` default 25 s, max 50 s (§4, Events) |
 | `design_system` | Jig's rules and starter files, read from the Jig part (§4a.8) |
-| `part_inbox` (P3) | work addressed to this connection across parts: `to_agent` comments and runtime-error spikes; claim/answer |
 
 *Why so few:* agents choose tools by name and description, and near-duplicates (`part_put` vs `part_create`, `part_recent` vs `part_find`, preview vs share request) cause wrong picks and wasted turns. Every tool also costs context.
 Every op carries hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint: false`), so clients can auto-approve reads.
@@ -1115,7 +1125,7 @@ The published mockup is at **https://claude.ai/artifact/7EMCHXHWt1gZxvTgbcSTQr**
 
 shartifacts is **warm editorial**: a magazine more than a tool. A greige paper canvas (`#f9f8f6`), cream surfaces, warm near-black ink, one terracotta primary (`#b5523b`);
 **Cormorant Garamond** display serif, **Inter** body, **JetBrains Mono** for code; a 284 px left sidebar library; uppercase tracked eyebrows, pill badges, an eight-armed asterisk mark, soft radii.
-Its design system is handed to agents (`get_design_system`) and used to render Markdown, slides and code.
+Its design system is handed to agents (`get_design_system`) and used to render Markdown and code.
 
 Keep in spirit: calm paper surfaces, one confident accent, typography doing the work, a design system offered to agents. Change: the editorial serif, the pills, the sidebar-first layout and the cream monoculture, which would make partifactory read as a palette swap.
 
@@ -1351,7 +1361,7 @@ The wrapper is a small standalone bundle of the same Stockroom components (a sha
 The sheet opens at a rung from a deep link (`#share=public`, `#share=contribute`, `#share=invite`, `#share=group`), with nothing saved until the person confirms. Step-up is in-sheet: "Confirm it's you" with a passkey button inline, then the action completes after the biometric, with no navigation.
 
 **Invites** (the admin). Share → "Invite someone" (or Admin → Invites): two choices, `Invite link` (passkey-only: "For one person" / "For a group chat: up to [5] people", expiry 7 days, what they'll get, **Copy link** once, with a QR code) and `By email`.
-The invitee's side (`/i/<id>`, then the partifactory-invite flow with partifactory branding): one centred card, "*You're invited to* Photo finder", "What should we call you?", **Create passkey**, then straight to the part.
+The invitee's side (`/i/<id>`, then for an IdP account the IdP's enrolment flow with partifactory branding): one centred card, "*You're invited to* Photo finder", "What should we call you?", **Create passkey**, then straight to the part.
 A used or expired link says "This invite has been used. Ask whoever sent it for a new one." The invite list shows status chips, sent/opened times, "Send a new passkey link" and "Clean up".
 
 **Version history, diff and restore.** The history rail opens from the `REV` chip: a vertical **revision ledger**, each row `REV 12` · "Hermes for the admin" · relative time · one-line summary, with a green `LIVE` tag on the live version and a danger `DIDN'T BUILD` tag on failed ones.
@@ -1361,7 +1371,7 @@ Clicking a row previews it in the frame. **Compare** picks any two rows (default
 **In-place editor (CodeMirror 6).** `Edit` adds **Preview · Split · Source**. Split = file tree + CodeMirror + live preview rendered from the **draft** (a cap with a `d` claim, never the live version).
 Syntax in four hues (keyword: signal; string: agent blue; number/const: public-text amber; comment: `ink-3` italic), Plex Mono 13.5/20. Drafts autosave to the server.
 When an agent lands a version mid-edit: "Hermes saved REV 13 while you were editing. Your changes were merged." Overlaps open **Resolve** (Keep mine / Keep theirs / Edit per hunk).
-A lease shows a blue dot and "Hermes is editing this file until 14:32"; saving asks once. Markdown and slides get block-aware editing with pending placeholders. Phone: Source, plus the formatted view for Markdown and `text` parts (below), and tap-to-edit text for other kinds in P4 (§3c).
+A lease shows a blue dot and "Hermes is editing this file until 14:32"; saving asks once. Markdown gets block-aware editing with pending placeholders. Phone: Source, plus the formatted view for Markdown and `text` parts (below), and tap-to-edit text for other kinds in P4 (§3c).
 
 **Formatted view (Markdown and `text` parts, P2, decision 54).** `Edit` on a Markdown or `text` part adds **Formatted**, its default mode: you edit the page as it reads, like Claude Docs, in Jig typography.
 A small toolbar (heading level, bold, italic, inline code, link, bulleted, numbered and task lists, quote, code block, table, divider), Markdown shortcuts as you type (`## `, `- `, `**…**`, `` ` ``), and pasted rich text converted to Markdown.
@@ -1455,7 +1465,7 @@ These extend §3a's identity budgets, counted the same way. The e2e suite assert
 
 **Jig** (a jig is the guide you use to make parts consistently) is an **optional** design system that agents opt into, returned by `design_system` with rules and a starter.
 It's deliberately **distinct from the workspace chrome**: neutral white paper, system fonts by default, a blueprint-blue accent, softer radii. Parts should look like *their* content, not like partifactory.
-We also use Jig to render the kinds we render ourselves (Markdown, slides, Mermaid, code). **Jig is itself a part** in the `system` space, so the admin edits it like anything else and parts record `meta.jig_version`.
+We also use Jig to render the kinds we render ourselves (Markdown, Pele diagrams, code). **Jig is itself a part** in the `system` space, so the admin edits it like anything else and parts record `meta.jig_version`.
 
 **Delivery.** `jig.css` (≈ 8 KB brotli) is a shared blob at `https://blobs-part.example.com/b/<hash>/jig.css`, allowed by the part CSP. Opt in with one `<link>` and `data-jig` on `<html>`. The import map exposes `@partifactory/jig` for TSX parts (CSS import + a tiny `useJigTheme()` hook).
 
@@ -1557,7 +1567,7 @@ impl Op for PartEdit {
 **The shared guide is `docs/agent-contract.md`**, the canonical agent-facing doc: one page that defines how any AI publishes to partifactory, written to be usable by an agent that has read nothing else (discovery, connecting per surface, every op with its fields, outputs, errors and an example, kinds, shared data, the rules, the error shape, a worked session).
 It replaces the `USAGE.md` of earlier rounds. It's the MCP `instructions`, the body of `/skill.md`, the top of `/llms-full.txt`, and the OpenAPI `info.description`, so "make me a packing checklist in partifactory" is enough on any surface.
 - **`/skill.md` is generated from the same registry and must match it.** The prose is hand-written. An op section runs from its `<!-- pf:op <name> -->` marker to the next marker or `## ` heading; the generator owns its field table and its `Errors:` line, and the description sentence, the `Output:` paragraph and the example are hand prose. A test rewrites the owned lines from the registry and fails on any diff in `docs/agent-contract.md` or the served `/skill.md`, and parses each example against the op's input schema; the contract's examples also run in the conformance suite.
-- It documents only the ops that exist. When an op lands after Slice 1 (`part_find`, `part_comments`, `part_share`, `part_watch`, `design_system`, `part_inbox`), its section is added in the same change.
+- It documents only the ops that exist. When an op lands after Slice 1 (`part_find`, `part_comments`, `part_share`, `part_watch`, `design_system`), its section is added in the same change.
 GPT Actions constraints are checked by a CI lint: every op has an `operationId`, descriptions are ≤ 300 chars (`x-pf-description` carries the rest), and there are ≤ 30 operations.
 
 ### Discovery: an agent told only "parts.example.com" can find everything
@@ -1582,6 +1592,8 @@ GPT Actions constraints are checked by a CI lint: every op has an `operationId`,
 | --- | --- | --- |
 | MCP clients (Claude Code, Codex: CIMD; Cursor, Gemini CLI: DCR) | auth code + PKCE | opaque access token + rotating refresh token |
 | Headless (Hermes, the `part` CLI, CI, cron) | device grant (RFC 8628) | the same |
+| Chat apps (ChatGPT, claude.ai; decision 59): anyone with an account adds partifactory to their own app | auth code + PKCE, registration per the chat-apps spike | the same, under that person's permissions |
+| Anyone holding a public link, in any chat app | none: the link's own read-only MCP URL (`/mcp/l/<link-id>`) | no token; read tools for that one part only, guest rate limits, dead when the link is revoked |
 | GPT Actions and other pre-registered-only clients | auth code with a manual client | the same |
 
 All of them resolve to the same `(person, connection, scopes, spaces)` principal, so the policy engine, audit and revocation are identical everywhere.
@@ -1737,7 +1749,7 @@ One Cargo workspace builds **one static binary** (`partifactory`, with `part` as
 | Export | `tar` + `zstd`, `age` (encrypt to a recipient public key) |
 | Workspace UI | Leptos 0.8 (SSR + hydration), or `askama`/`maud` templates + small vanilla-JS islands if the spike says so (below). CodeMirror 6 for the source editor (the one JS dependency, vendored as a shared blob) |
 | Backends | the runner sidecar: `bollard` (Docker Engine API client; Docker or Podman), rootless BuildKit (`buildkitd`) for image builds, nftables/iptables rules it applies itself, optional gVisor (`runsc`) |
-| Observability | `tracing` (JSON logs, spans into the trace store), `metrics` + Prometheus exporter, a separate `insights.db` (§5g), optional OTLP adapter |
+| Observability | `tracing` (JSON logs, spans into the trace store), `metrics` + Prometheus exporter, a separate `insights.db` (§5g) |
 | Tests | `cargo nextest`, golden tests (manifests, diffs, builds), property tests (cap for A never reads B), OAuth conformance, cross-surface conformance, browser e2e with virtual WebAuthn against `pf.test` (Dex + Caddy, internal-CA wildcard cert), a sandbox compat corpus (30 real Claude-written artifacts and 10 Vite builds rendered under the sandbox in CI with zero uncaught errors) |
 
 **Why Rust, not Go** (the reference is 21k lines of Go):
@@ -1842,7 +1854,7 @@ No external system is involved in any save, and **no save ever depends on a back
 | --- | --- | --- | --- |
 | **1. Host backups of `/data`** | ZFS snapshot tasks on TrueNAS; appdata backup, rsync, restic, whatever the host has | the host's | Instant local rollback. **Docker itself doesn't back up volumes**, and snapshots are same-machine: they don't move with the app to another host. An atomic snapshot (ZFS) of a live WAL database is crash-consistent. A non-atomic copy (rsync) must take `backup/partifactory-latest.sqlite`, never the live `.db` file. Blobs are write-once, so any copy of `blobs/` is safe |
 | **2. `partifactory export`** | one self-contained, host-portable file | partifactory's | The off-site and move-to-another-host path. A scheduled export to a folder lets any off-site tool pick it up |
-| **3. Optional upload** | the scheduled export also pushed to an S3-compatible bucket (R2 is one example) | partifactory's, behind config | Not needed for v1 (P5) |
+| **3. Backup targets** | several `[[backup.targets]]` side by side: `folder`, `s3` (any S3-compatible bucket), `rclone` (any remote) and `restic` (incremental, deduplicated, encrypted snapshots of a consistent `/data` view) | partifactory's, behind config | Rest of P1 (decision 62). Each target's state shows on Health and in `doctor`, and the drill restores from one |
 
 `partifactory doctor` and the Health page report which layers are active: layer 1 as **on / off / unknown** (from site config `backup.host_snapshots`, since partifactory can't see the host's tooling), the age of the newest export, and whether exports land on the same filesystem as `/data`.
 **An export on the same disk as `/data` shows amber, never green**: it's a convenience, not a backup. No export in 48 h is amber too.
@@ -2460,7 +2472,7 @@ CREATE TABLE comments (
   author_conn TEXT,
   author_link TEXT REFERENCES public_links(id),
   to_agent    INTEGER NOT NULL DEFAULT 0,
-  agent_state TEXT CHECK (agent_state IN ('open','claimed','answered')),  -- inbox (P3); resolved = resolved_at
+  agent_state TEXT CHECK (agent_state IN ('open','claimed','answered')),  -- unused since decision 58 (no inbox); resolved = resolved_at
   resolved_at INTEGER,
   resolved_by TEXT,
   created_at  INTEGER NOT NULL,
@@ -2483,7 +2495,7 @@ CREATE TABLE data_docs (                             -- window.storage + claude.
   PRIMARY KEY (part_id, scope, owner, collection, doc_id)
 ) STRICT, WITHOUT ROWID;
 
-CREATE TABLE data_leases (
+CREATE TABLE data_leases (                           -- unused since decision 58; the table shipped in 0001 and stays
   part_id    TEXT NOT NULL,
   collection TEXT NOT NULL,
   doc_id     TEXT NOT NULL,
@@ -2821,11 +2833,11 @@ The core never imports an adapter's types, adapters are chosen in `site.toml`, a
 | **DNS + provisioning** | `DnsProvider` and `IdpProvisioner` plugin traits in `provision`; needs `parts.<domain>` + `*.<domain>` | `manual`: prints the records, cert names and OIDC redirect URI, then verifies them | Cloudflare (first DNS plugin, also tunnel, cache rules, Worker); Authentik (IdP plugin) | You create two DNS records and one OIDC client by hand, once |
 | **People sign-in** | OIDC client from a discovery document; local passkey accounts (`webauthn-rs`) | Any OIDC provider; or none at all (local accounts only) | Authentik, configured by its plugin (cloned flows, implicit consent) | With no IdP: everyone is a local passkey account, and there's no SSO with other services |
 | **Directory + groups** | `Directory` trait; grants on provider-neutral subjects | `groups` claim + 15-minute refresh-token re-read; local `pf-*` groups | Authentik API with a 60 s poll | Removals in the IdP take up to 15 minutes (or 12 h without refresh tokens) instead of about 1 |
-| **Invites + accounts** | Invite tokens, use counts and grants in partifactory's tables (`/i/<id>`) | Native invite links; partifactory registers the passkey and creates a local account | Authentik provisioner: IdP invitations, recovery links, add-by-email, IdP-side `pf-*` groups | No add-by-email (partifactory sends no email); groups are partifactory-local |
+| **Invites + accounts** | Invite tokens, use counts and grants in partifactory's tables (`/i/<id>`) | Native invite links; partifactory registers the passkey and creates a local account | SCIM from any IdP; the Authentik provisioner (IdP accounts by link, QR or email, recovery, deactivation, binding audit); `[email]` SMTP for native invite email | Without a provisioner: native accounts only; without `[email]` too, no Email option; groups are partifactory-local |
 | **Build + deploy** | OCI image by digest + `deploy/compose.yaml` + the env contract (`docs/env.md`) | `docker compose pull && docker compose up -d`, by hand or from cron | Example workflows: Gitea Actions (the example deployment), GitHub Actions | Nothing |
 | **Secrets** | `PF_*` env vars, each also as `PF_*_FILE` | A mode-600 `.env` or compose secrets | Any CI or secret store that sets env or mounts files | Nothing |
 | **Host** | An OCI runtime with compose; one `/data` volume | Any Docker or Podman host | TrueNAS (the example deployment) | Nothing. partifactory calls no host API |
-| **Backups** | `/data` is everything; `export`/`import` to a folder | Scheduled exports to `backup.export_dir` | Host snapshots (ZFS on TrueNAS, restic, rsync); S3-compatible upload (P5) | Nothing |
+| **Backups** | `/data` is everything; `export`/`import` to a folder | Scheduled exports to `backup.export_dir` | Host snapshots (ZFS on TrueNAS, rsync); backup targets: S3-compatible, rclone, restic (decision 62) | Nothing |
 | **Events for agents** | The event log: long-poll, SSE, HMAC-signed webhooks (§4) | Webhooks to configured URLs | Hermes is a webhook consumer and an MCP client | Nothing |
 | **Ops alerts** | One optional webhook (`[alerts] webhook_url`), off by default; the Health page always shows the same conditions | None: look at Health | ntfy, Hermes or anything else that accepts a JSON POST | You find out from the Health page instead |
 | **Maintenance page + uptime** | Static page in `deploy/proxy/`; `/healthz` | The proxy serves the page; any external probe | Cloudflare Worker fallback and health checks | A raw proxy error during an outage |
@@ -2834,7 +2846,7 @@ The core never imports an adapter's types, adapters are chosen in `site.toml`, a
 | **Device-connect origin** | Optional country + network from proxy headers or a local GeoIP file | Omitted, shown as "origin unknown" | Cloudflare country header | The "different network" phishing banner can't fire; the request-age banner still does |
 | **Backends** | The runner's fixed API; containers from one template; the Docker Engine API (§3f) | Docker or Podman (its Docker-compatible API) on the same host | gVisor (`runsc`) as an optional runtime | With no runner, backend parts fail with `backends_unavailable`; frontends are unaffected |
 | **Advisory data** | `AdvisorySource` trait: OSV-format records for the ecosystems in use, matched against `build_deps` and stored SBOMs (§3h) | The OSV bulk dumps, downloaded daily, synced incrementally and matched locally | The OSV API (`querybatch`; sends package names and versions out) | With `source = "none"`: no advisories, and a warning on Health and in `doctor`. A stale DB turns Health amber; builds never block |
-| **Telemetry export** | `insights.db`, `/metrics`, JSON logs on stdout (§5g) | None needed: Insights in the UI, a Prometheus scrape, `docker logs` or any host collector | OTLP (traces, logs, metrics) to Tempo, Jaeger, Grafana or any collector; syslog; HTTP JSON log push | Nothing |
+| **Telemetry export** | `insights.db`, `/metrics`, JSON logs on stdout (§5g) | None needed: Insights in the UI, a Prometheus scrape, `docker logs` or any host collector | syslog; HTTP JSON log push (OTLP was dropped, decision 58) | Nothing |
 
 **Proving it: the portability lane.** A CI job runs the **full e2e suite** (the §4a.7 click budgets, the §7 checks that don't name an adapter, cross-surface conformance and an export/import round trip) with **no Cloudflare, no Authentik and no Gitea**:
 - **Dex** as the OIDC provider (static users and groups, refresh tokens on), with a second pass using no IdP at all (local passkey accounts only, admin via `partifactory admin bootstrap`);
@@ -2894,7 +2906,7 @@ It warns at 80 % of the budget, and at 95 % **refuses new writes** (versions, as
 | Backend logs (captured per part) | 50 MiB per part, 7 days | ring segments | Debug tab download; `logs export --part` |
 | Build logs | the last 20 builds per part, 30 days | prune job | attached to the build record; export |
 | Browser runtime errors | 1,000 per part, 30 days | prune job | export |
-| Traces and spans | 7 days, 2 GiB, tail-sampled | prune job | OTLP adapter; trace download (JSON) |
+| Traces and spans | 7 days, 2 GiB, tail-sampled | prune job | trace download (JSON) |
 | Insights raw events | 30 days | prune job | CSV/JSON export from Insights |
 | Insights daily rollups | indefinitely (tiny) | — | CSV/JSON export |
 | Audit log | 1 year (security-relevant) | yearly segments | export (JSONL) |
@@ -2912,7 +2924,7 @@ It warns at 80 % of the budget, and at 95 % **refuses new writes** (versions, as
 | SQLite WAL (both files) | a scheduled checkpoint + `wal_autocheckpoint`; `VACUUM` monthly when free pages > 20 % | — | — |
 
 **The janitor**: one task runs every prune, GC, rotation and checkpoint job on a schedule. It records what it freed (`janitor_runs`, Insights and metrics), and **never deletes anything a live or binned item references**.
-**Logs out**: JSON on stdout is always on, so any host log collector works; optional push adapters (OTLP logs, syslog, HTTP JSON); `partifactory logs export|tail` on the CLI; downloads in the UI. Content is never logged (the no-content fuzz test, §5g).
+**Logs out**: JSON on stdout is always on, so any host log collector works; optional push adapters (syslog, HTTP JSON); `partifactory logs export|tail` on the CLI; downloads in the UI. Content is never logged (the no-content fuzz test, §5g).
 **Health**: each store's size against its cap is on the Health page and in Insights, and the ops webhook (§4) alerts at 80 % of any cap.
 
 **Safe defaults, enforced** (the principle at the top of the plan): secure headers, rate limits, quotas, the container hardening template, the nightly export (to `/data/exports`, keep 7, with "same disk = amber"), the ingress contract's TLS assumptions, log redaction and these retention caps are all on in the default config.
@@ -2958,21 +2970,16 @@ and the named e2e test **`communal_pixel_editor`** passes in CI:
 scale to zero or always on, routing under the cap with the signed identity header (WebSocket and SSE), per-part volumes in exports, write-only secrets, the LAN allowlist (people only), `backends:deploy`, quotas, backend observability in Insights, runner retention, backend SBOMs and base-image digest checks (§3h), and the §7 Backends suite.
 *Done when:* the named e2e test **`communal_pixel_editor_backend`** passes on Docker and on Podman: the agent adds a leaderboard service on Postgres to the pixel board in one `part_edit`; the server builds it; each guest's pixel count shows on the leaderboard live; restoring the previous version rolls the backend back too; and the backend reaches the internet but not the LAN.
 
-**P2b Invites.** First the **default**: partifactory invite tokens (`/i/<id>`, counted uses), passkey invite links (single and "up to N") that create **local passkey accounts**, passkey sign-in for local accounts, "new passkey link" recovery, local `pf-*` groups, linking a local account to an IdP identity, pending-invite cleanup.
-Then the **Authentik provisioner**, starting with its permission gate (§3a), which decides how much of it ships: the `partifactory-invite` flow, add-by-email, IdP recovery links and IdP-side `pf-*` groups.
-*Done when:* The admin mints an invite link from the share sheet with no provisioner configured, a new person creates a passkey and lands on the part, and removing them locks them out at once;
-and, with the Authentik provisioner on, an invited email address enrols the same way and removing them in the IdP locks them out within a minute.
+**P2b People.** SCIM from the IdP, so the household arrives with nothing to do; invites by Copy link, QR code or Email, making either a native passkey account or an IdP account (an external user in the IdP's `partifactory` group); allow-list access in the IdP so invitees reach only partifactory; the provider-neutral provisioner with capability flags, degrading to native; the optional `[email]` adapter; "new passkey link" recovery, local `pf-*` groups, linking a local account to an IdP identity, cleanup lists (decision 61).
+*Done when:* every existing household member has an account through SCIM and sees a part shared with Family on first sign-in; an invite by link, QR or email lands a new person on the part, both as a native account and as an IdP account; an invitee is refused by a second IdP application; and removing someone (in partifactory or from the IdP group) locks them out within a minute.
 
-**P3 Claude compatibility.** `claude.use` (`db`, `user`, `comments`, `artifact` incl. self-publish; shared `window.storage` arrived in P2), Tailwind + shadcn (mechanism chosen on evidence: prebuilt utility CSS, the Tailwind v4 browser build mirrored as a shared blob, or build-time class extraction),
-viewer uploads (assets), and the agent inbox with stewards. The spec is shartifacts' compatibility matrix (credited).
-*Done when:* a page copied from a claude.ai artifact runs unchanged, including state persistence and self-editing, and a viewer's photo upload reaches the agent's inbox.
+**P3 Chat apps** (decision 59). ChatGPT and Claude as first-class clients: per-app connection and conformance, "Use in your chat app" with ChatGPT, Claude and Other harness tabs, other people's apps under their own permissions, a read-only MCP URL per public link with no account, the part shown in the chat where the app supports it, and optional helpers (the Tailwind browser build, shadcn in the TSX set). Parts may bring anything else (Rust/WASM, WebGPU, their own framework).
+*Done when:* from the admin's own ChatGPT and Claude accounts, each app creates, edits and reads parts on staging; a second person's app sees only what's shared with them; a public link added with no account reads and can't write; and a React page copied from each app runs unchanged.
 
-**P4 Family + hub + phone.** Family onboarding, embedding via `[embed] frame_ancestors` (the family hub, with its service identity), the Hermes `hub-family` profile, slides + Mermaid, the optional OTLP export adapter (screenshot thumbnails and preview cards moved right after Slice 1, decision 53),
-and tap-to-edit text and point-and-comment on phones. (Notifications for people were cut in round 2b, and approval queues in round 2c, §4.)
-*Done when:* a family member opens a hub-embedded part, fixes a typo by tapping it on the phone, long-presses to ask Hermes for a change, and Hermes, watching the event log, tells them in its own chat when the fix lands.
+**P4 Family, hub and phone.** A first-run tour, embedding via `[embed] frame_ancestors` (the family hub, with a person's session), Mermaid-syntax diagrams rendered with Pele plus KaTeX, part-owned uploads (`partifactory.assets`), and tap-to-edit text and point-and-comment on phones (decision 63).
+*Done when:* a family member opens a hub-embedded part, fixes a typo by tapping it on the phone, long-presses to comment for the agent, and a part they use stores a photo they picked.
 
-**P5 Later, only if needed.** WASM component backends as an optional alternative to containers, through the same grant model and routing; optional S3-compatible upload of scheduled exports; semantic search alongside FTS5; built-in ACME DNS-01 for hosts with no proxy.
-*Done when* (per item): WASM backends need an ADR naming a part that containers serve badly, and ship with the §7 Backends lines green; the S3 upload restores via `import --from s3://…` in the drill; semantic search beats FTS5 alone on a labelled query set; built-in ACME serves the portability lane with no proxy in front.
+Backend image scanning ships with P2a (decision 60) and backup targets with the rest of P1 (decision 62). P5 is gone (decision 58).
 
 ## 6a. Build order
 
@@ -2996,15 +3003,16 @@ This section is the order the pieces depend on each other, and why. Read each ar
 - **`tsx`** (oxc + rolldown, the library set). It needs the build worker, mirroring and the blob host, and it closes P0, so P0's "Done when" is met just after the slice ships (decision 39).
 - **The rest of P1:** the titled card pipeline → previews (posters and `og:video` for public links and the gallery; they need the render sidecar and the titled card); search → the workspace extras (versions rail, bin, diff, inward rungs, Move to Family, Ask for access); `provision` → the Cloudflare and Authentik adapters; `doctor` after the disk budget, because it checks that every store is capped; the Insights store → traces and the log pipeline → the no-content fuzz test; the ops-alert webhook after Health and the disk budget; the deliverable extras → the portability lane; the bench → the nginx/HAProxy comparison.
 - **The rest of P2:** OAuth authorization code; comments, leases, block ids, notes and `part_find`; `part_watch` and webhooks → the source editor → the formatted view; agent sharing → the Hermes skill; Jig; live reload; renames; the Insights pages → the debugging UI; the remaining deep links.
-- **Advisories** (§3h): the spike → matching and its surfaces → `update` and the Update libraries button → auto-update.
+- **Backup targets** (decision 62): after export and the drill; the spike (rustic vs restic) → targets → per-target Health → `import --from`.
 - Some pieces plug in later without anything waiting on them: `doctor` adds the provisioner probe once the Authentik gate has run, and the Insights store and the log pipeline register their janitor jobs and retention-test rows when they land.
 - Adapters land in the same phase as the generic default they sit beside, never before it.
 
 **Later phases.**
 - **P2a Backends:** the runner (after the deliverable) → backend builds → lifecycle → routing (after Can-contribute links and request ids) and data, secrets and permissions → the backend security suite and `communal_pixel_editor_backend`. Backend SBOMs and base-image checks come with the runner. The runner lane is shorter than the routing chain, so it can start as soon as the deliverable lands, beside the backend Insights pages.
-- **P2b Invites:** native invites and local accounts → the Authentik provisioner gate → Authentik invites → Authentik extras. Cleanup lists follow native invites.
-- **P3:** `claude.use` (after shared data, comments and `/grant`), Tailwind and shadcn (after `tsx`), viewer uploads, the agent inbox (after comments and the event log).
-- **P4:** family onboarding (after native invites), family-hub embedding and service identities, slides and Mermaid (after block ids), phone editing, OTLP. **P5:** each item on its own, after what it extends.
+- **P2b People:** SCIM inbound and its lifecycle flows → the deployment step (household provisioned) → native invites and local accounts → `[email]` → the Authentik spike and provisioner gate → IdP-account invites. Cleanup lists follow native invites.
+- **Backend image scanning:** with or right after P2a's runner (decision 60).
+- **P3 Chat apps:** the spike → signed-in connections and the share-sheet tabs (after OAuth) → other people's apps → the public-link MCP URL (after public links) → the in-chat view → helpers (after `tsx`).
+- **P4:** the first-run tour (after P2b), family-hub embedding, Pele and KaTeX, part-owned uploads (after shared data), phone editing (after block ids and comments).
 
 ## 7. Security checklist (run from outside the network, in CI against staging)
 
@@ -3173,13 +3181,28 @@ Every line runs against the example deployment's staging (Cloudflare + Authentik
     *Why:* the admin already signs in with a phishing-resistant method at the provider and prefers no second prompt for now; the passkey stays one click away.
 57. **Slice 2 is household sharing, comments and editing** (the admin, 2026-10-26). After Slice 1 shipped, the admin asked for the rest of the slices; the household loop (people you add, Family, ask for access, comments, the text editor) comes first because the example deployment can't show an internal, commentable page without it. See "Slice 2" at the top.
 
+**2026-10-26 (re-scoping the later phases, the admin).**
+
+58. **The later phases are cut to what the household will use.** Dropped: `claude.use(...)` and the `db.*` ops (`window.storage` already gives Claude-artifact persistence), data leases (`rev` compare-and-set already prevents lost updates; the agent edit leases of §3d stay as a light hint), the agent inbox and stewards (comments "For the agent" plus `part_watch` cover it), self-publishing parts, agent upload URLs, service identities and the `hub-family` profile, the `slides` kind, OTLP export, WASM backends, semantic search (frankensearch is the noted option if it's ever wanted), and built-in ACME (the proxy handles certificates). P5 is gone.
+    *Why:* each was built for a case the household doesn't have, and each would add surface to secure and test for years.
+59. **ChatGPT and Claude are first-class clients, for publishing and for reading.** Anyone with an account adds partifactory to their own chat app and works under their own permissions; the share sheet's "Use in your chat app" has ChatGPT, Claude and Other harness tabs (the last with the full agent instructions). A public link also gives a read-only MCP URL that needs no account. That's a narrow exception to "guests never reach `/mcp`": read tools only, that one part, guest rate limits, dead when the link is revoked. Tailwind and shadcn are optional helpers; a part may bring anything else (Rust/WASM, WebGPU, its own framework). Tests drive the admin's own ChatGPT and Claude accounts against staging.
+    *Why:* the people who'll use parts already live in those apps, and someone looking at a shared page should be able to ask their own assistant about it.
+60. **Advisories are for backends only**, with P2a: image SBOMs, nightly OSV matching, rebuild on a patched image. Frontend parts keep recording `build_deps` but get no matching or alerts. Supersedes decisions 46, 47 and 49 for frontends, and moves the epic after P2a instead of before it.
+    *Why:* a frontend runs sandboxed, cookie-free and under a strict CSP, so a vulnerable library reaches only that part's own data; backends are the exposed layer.
+61. **People: SCIM in, invites three ways, provider-neutral.** The IdP pushes its `partifactory` group over SCIM, mapped to spaces, so the household arrives with nothing to do. Every invite offers Copy link, QR code and Email, and makes either a native passkey account or an IdP account (an external user in the IdP's `partifactory` group). IdP access is allow-list: partifactory's application is bound to `partifactory`, every other application to an allow group, and an unbound application fails the gate. The provisioner has capability flags and degrades to native; an optional `[email]` SMTP adapter lets native invites go by email. Deployment facts (group names, applications, gate reports) stay in `partifactory-site`. Supersedes the Authentik invite-flow parts of decisions 23 and 34 and narrows "partifactory sends no email" to "only invite and recovery email, only through `[email]`".
+    *Why:* family shouldn't have to do anything, outsiders should reach only this app, and another deployment with a different IdP, or none, should get the same flows.
+62. **Backups go to several targets at once**, in the rest of P1: `folder`, `s3`, `rclone` and `restic`, each with its own schedule, retention and Health status, and restore from each in the drill. Replaces P5's single optional S3 upload.
+    *Why:* a real backup is off-site, versioned and checked, and one bucket isn't a strategy.
+63. **P4 keeps what the family will touch:** a first-run tour, hub embedding, Pele (Obsidian's renderer for Mermaid syntax) and KaTeX, part-owned uploads as a runtime primitive (`partifactory.assets`, no upload UI of ours), and phone editing and point-and-comment.
+    *Why:* if a part wants a photo upload, it should be able to build one; partifactory supplies the storage, the caps and nothing else.
+
 ## 9. Non-goals (v1)
 
 Multi-tenant SaaS. Multi-node. Offline mode. Listed or indexable public parts. Replacing the family hub's knowledge base.
 Public sign-up. A dedicated Telegram bot (Hermes is the bot). Notifications for people: web push, email, mention or reply alerts, per-person notification settings. Agents making public links or inviting people. An A2A agent card, or publishing to the public MCP registry.
 Device permissions (camera, mic, geolocation) and service workers in sandboxed parts, except through the admin-gated `unsandboxed` flag. Device-local part storage.
-A git or Gitea dependency for part content or backups. A hard dependency on any one vendor for ingress, DNS, identity, CI, hosting or notifications. Backing up the IdP (its operator's concern). Sending email. Version pruning. (Live co-typing moved from here to a deferred option, decision 54.)
-Approval queues or request inboxes of any kind. Reading a secret back. Unauthenticated routes into a backend. Privileged containers, host mounts or Engine API access for parts. Backend features outside the compose subset. Third-party analytics or telemetry services (the OTLP adapter sends only where the operator points it). WASM backends in v1.
+A git or Gitea dependency for part content or backups. A hard dependency on any one vendor for ingress, DNS, identity, CI, hosting or notifications. Backing up the IdP (its operator's concern). Sending email, except invite and recovery email through the optional `[email]` adapter (decision 61). Version pruning. (Live co-typing moved from here to a deferred option, decision 54.)
+Approval queues or request inboxes of any kind. Reading a secret back. Unauthenticated routes into a backend. Privileged containers, host mounts or Engine API access for parts. Backend features outside the compose subset. Third-party analytics or telemetry services. WASM backends. Semantic search. Built-in ACME. `claude.use(...)`, data leases and an agent inbox (decision 58).
 
 ## 10. Change logs
 
