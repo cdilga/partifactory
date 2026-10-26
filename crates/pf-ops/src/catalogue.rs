@@ -141,7 +141,9 @@ pub fn hint(code: &str) -> &'static str {
         "name_taken" => "Retry with a suggested name.",
         "if_match_failed" | "file_exists" => "Re-read the current file hash or document revision.",
         "request_id_reused" => "Use a fresh request_id for different arguments.",
-        "anchor_not_found" | "anchor_ambiguous" => "Copy a unique byte-exact anchor from part_get.",
+        "anchor_not_found" | "anchor_ambiguous" => {
+            "Copy a unique byte-exact anchor from part_get, or write the whole file with if_match set to its hash."
+        }
         "block_not_found" | "block_changed" => {
             "Read the current block ids and hashes from part_get."
         }

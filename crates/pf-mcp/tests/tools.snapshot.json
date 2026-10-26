@@ -1,7 +1,7 @@
 [
   {
     "name": "part_create",
-    "description": "Reserve a name and create a part. Use live: after_check for pages.",
+    "description": "Reserve a name and create a new part. To change a part that already exists, use part_edit instead. Create only when your person asks for something new; to change a part you made before, part_get it and part_edit it. Use live: after_check for pages.",
     "inputSchema": {
       "$defs": {
         "FileInput": {
@@ -178,7 +178,7 @@
   },
   {
     "name": "part_edit",
-    "description": "Apply ordered edits atomically, or one lifecycle mode. Read exact anchors and hashes with part_get; retry with the same request_id.",
+    "description": "Change an existing part: ordered edits applied atomically, or one lifecycle mode. Read the part with part_get first. For a small change, replace a short old_str copied byte-exact from content; for a large one, write the whole file with if_match set to files[path].hash. Retry with the same request_id.",
     "inputSchema": {
       "$defs": {
         "Edit": {
@@ -569,7 +569,7 @@
   },
   {
     "name": "part_get",
-    "description": "Read source, history, builds and runtime errors. Use file and range for large parts.",
+    "description": "Read source, history, builds and runtime errors. A part's name is the first label of its link: https://<name>-part.<domain>/. Use file and range for large parts.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
