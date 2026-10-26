@@ -99,7 +99,7 @@ pub struct AuthorizationRequest {
     pub state: Option<String>,
 }
 fn default_scope() -> String {
-    "parts:read parts:write data:read data:write".into()
+    "parts:read parts:write data:read data:write comments:write".into()
 }
 #[derive(Debug, Deserialize)]
 pub struct CodeConsent {

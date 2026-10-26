@@ -46,7 +46,7 @@ struct Device {
     resource: Option<String>,
 }
 fn default_scopes() -> String {
-    "parts:read parts:write data:read data:write".into()
+    "parts:read parts:write data:read data:write comments:write".into()
 }
 async fn device(
     State(state): State<AppState>,
