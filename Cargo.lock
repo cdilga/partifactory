@@ -3716,6 +3716,7 @@ dependencies = [
  "any_spawner",
  "axum",
  "brotli",
+ "futures-util",
  "http",
  "leptos",
  "leptos_axum",

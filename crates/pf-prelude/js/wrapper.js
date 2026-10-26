@@ -163,6 +163,75 @@ window.pfShareChrome = function (part, WS) {
     }).catch(report);
   }
   function share() { sheet.showModal(); refresh(); }
+  // Comments (Slice 2): threads beside the part, live. Bodies are only ever set as text.
+  var commentsState = null, commentsPanel = null, commentsBody = null;
+  function commentsApi(body) { return api('/comments', body); }
+  function loadComments() {
+    return commentsApi().then(function (j) {
+      commentsState = j;
+      commentsButton.textContent = j.open ? 'Comments · ' + j.open : 'Comments';
+      commentsButton.setAttribute('aria-label', 'Comments, ' + j.open + ' open');
+      if (commentsPanel && commentsPanel.open) renderComments();
+    }).catch(function () { commentsButton.hidden = true; });
+  }
+  function listenComments() {
+    if (!window.EventSource) { setInterval(loadComments, 5000); return; }
+    var es = new EventSource(WS + '/api/chrome/v1/' + encodeURIComponent(part) + '/comments/events', { withCredentials: true });
+    es.addEventListener('comments', function () { loadComments(); });
+  }
+  function commentChange(body) { return commentsApi(body).then(function (j) { commentsState = j; renderComments(); loadComments(); }); }
+  function commentView(c, parent) {
+    var item = el('article', null, parent); item.className = 'pf-comment';
+    var head = el('header', null, item); el('strong', c.author, head);
+    el('time', new Date(c.at).toLocaleString(), head).setAttribute('datetime', new Date(c.at).toISOString());
+    var body = el('p', null, item); body.className = 'body'; body.textContent = c.body;
+    if (c.mine) button('Delete', head, function () { commentChange({ action: 'delete', id: c.id }).catch(commentsReport); }).className = 'pf-link-button';
+    return item;
+  }
+  function commentsReport(e) { commentsStatus.textContent = e.message || String(e); }
+  var commentsStatus;
+  function renderComments() {
+    var st = commentsState; if (!st || !commentsBody) return;
+    commentsBody.replaceChildren();
+    var open = st.threads.filter(function (t) { return !t.resolved; }), done = st.threads.filter(function (t) { return t.resolved; });
+    if (!st.threads.length) el('p', 'No comments yet.', commentsBody).className = 'pf-muted';
+    function thread(t, parent) {
+      var box = el('section', null, parent); box.className = 'pf-thread' + (t.resolved ? ' resolved' : '');
+      if (t.quote) { var q = el('blockquote', null, box); q.textContent = t.quote; }
+      commentView(t.comment, box);
+      t.replies.forEach(function (r) { commentView(r, box).classList.add('reply'); });
+      if (st.you.can_comment) {
+        var row = el('div', null, box); row.className = 'pf-thread-actions';
+        if (!t.resolved) {
+          var reply = el('textarea', null, row); reply.rows = 1; reply.placeholder = 'Reply'; reply.setAttribute('aria-label', 'Reply to ' + t.comment.author);
+          button('Reply', row, function () { if (!reply.value.trim()) return; commentChange({ action: 'reply', id: t.id, body: reply.value }).catch(commentsReport); });
+        }
+        button(t.resolved ? 'Reopen' : 'Resolve', row, function () { commentChange({ action: t.resolved ? 'reopen' : 'resolve', id: t.id }).catch(commentsReport); });
+      }
+    }
+    open.forEach(function (t) { thread(t, commentsBody); });
+    if (done.length) { var d = el('details', null, commentsBody); el('summary', 'Resolved (' + done.length + ')', d); done.forEach(function (t) { thread(t, d); }); }
+  }
+  function openComments() {
+    if (!commentsPanel) {
+      commentsPanel = el('dialog', null, document.body); commentsPanel.id = 'pf-comments'; commentsPanel.setAttribute('aria-labelledby', 'pf-comments-title');
+      var head = el('header', null, commentsPanel); el('h2', 'Comments', head).id = 'pf-comments-title'; button('Close', head, function () { commentsPanel.close(); });
+      commentsBody = el('div', null, commentsPanel); commentsBody.className = 'pf-threads';
+      var form = el('form', null, commentsPanel); form.className = 'pf-compose';
+      var text = el('textarea', null, form); text.rows = 3; text.maxLength = 4000; text.setAttribute('aria-label', 'Add a comment'); text.placeholder = 'Add a comment';
+      var send = button('Comment', form, function () {}); send.type = 'submit'; send.className = 'pf-primary';
+      commentsStatus = el('p', null, commentsPanel); commentsStatus.setAttribute('role', 'status'); commentsStatus.className = 'pf-muted';
+      form.onsubmit = function (e) { e.preventDefault(); if (!text.value.trim()) return; commentChange({ action: 'add', body: text.value }).then(function () { text.value = ''; commentsStatus.textContent = ''; }).catch(commentsReport); };
+      commentsPanel.compose = form;
+    }
+    commentsPanel.showModal();
+    loadComments().then(function () {
+      var can = commentsState && commentsState.you.can_comment;
+      commentsPanel.compose.hidden = !can;
+      if (!can) commentsStatus.textContent = 'You can read comments. Ask the owner for Comment access to add yours.';
+      renderComments();
+    });
+  }
   var bar = el('nav', null, document.body); bar.id = 'pf-bar'; bar.setAttribute('aria-label', 'Part controls');
   var back=el('a','‹ Parts',bar);back.href=WS+'/';back.className='pf-back';
   var kind=el('span','',bar);kind.className='pf-kind';
@@ -170,6 +239,7 @@ window.pfShareChrome = function (part, WS) {
   var nameLabel=el('span',part,bar);nameLabel.className='pf-name';
   var revision=el('span','',bar);revision.className='pf-revision';
   audience = el('span', 'Only me', bar); audience.className = 'pf-audience';
+  var commentsButton=button('Comments',bar,openComments);commentsButton.hidden=true;commentsButton.className='pf-comments-button';
   var shareButton=button('Share',bar,share);shareButton.hidden=true;
   var more=el('details',null,bar);more.className='pf-more';var toggle=el('summary','⋯',more);toggle.setAttribute('aria-label','More part actions');
   var actions=el('div',null,more);actions.className='pf-actions';
@@ -181,7 +251,7 @@ window.pfShareChrome = function (part, WS) {
   function updateSummary(fromVersion) {
     return api('/summary').then(function(j){summary=j;title.textContent=j.title||part;draftTitle.textContent=j.title||part;document.title=(j.title||part)+' · partifactory';
       kind.textContent=String(j.kind||'').toUpperCase();revision.textContent=j.live===null?'DRAFT':'REV '+j.live;
-      var features=j.features||{};shareButton.hidden=!features.share;copy.hidden=!features.copy_link;standalone.hidden=!features.open_standalone;
+      var features=j.features||{};shareButton.hidden=!features.share;if(features.comments&&commentsButton.hidden){commentsButton.hidden=false;loadComments();listenComments();}copy.hidden=!features.copy_link;standalone.hidden=!features.open_standalone;
       shareButton.onclick=features.unsandboxed?function(){location.href=WS+'/p/'+encodeURIComponent(part)+'/share';}:share;
       var f=document.getElementById('pf-frame');if(f)standalone.href=f.src;
       var wasDraft=!drafting.hidden;drafting.hidden=j.live!==null;

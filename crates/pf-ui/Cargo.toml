@@ -28,6 +28,8 @@ serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.10"
 tracing.workspace = true
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+tokio = { version = "1", features = ["time", "sync"] }
 
 [build-dependencies]
 brotli = "8"

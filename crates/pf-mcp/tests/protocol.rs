@@ -118,7 +118,7 @@ impl Kit {
         );
         let actor = tokens.auth.require_session(&headers).await.unwrap();
         let scopes = pf_oauth::scopes(
-            "parts:read parts:write parts:delete data:read data:write share:household",
+            "parts:read parts:write parts:delete data:read data:write share:household comments:write",
         )
         .unwrap();
         let spaces = [format!("~{}", actor.username)]
@@ -155,7 +155,7 @@ impl Kit {
                     code_challenge_method: "S256".into(),
                     resource: None,
                     scope:
-                        "parts:read parts:write parts:delete data:read data:write share:household"
+                        "parts:read parts:write parts:delete data:read data:write share:household comments:write"
                             .into(),
                     state: None,
                 },
@@ -197,7 +197,7 @@ impl Kit {
                 "part-cli",
                 "MCP device",
                 None,
-                "parts:read parts:write parts:delete data:read data:write share:household",
+                "parts:read parts:write parts:delete data:read data:write share:household comments:write",
                 None,
             )
             .await

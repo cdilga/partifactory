@@ -45,6 +45,10 @@ fn normalise(mut value: Value, name: &str) -> Value {
                 if s.starts_with("conn:") || s.starts_with("user:") {
                     *s = "principal".into();
                 }
+                // "<agent> for <person>": each lane's connection has its own agent name.
+                if key == "author" && s.contains(" for ") {
+                    *s = "agent for person".into();
+                }
             }
             Value::Number(_) if key == "id" => *value = json!(0),
             _ => {}

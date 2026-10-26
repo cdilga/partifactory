@@ -868,6 +868,63 @@
     }
   },
   {
+    "name": "part_comments",
+    "description": "Read and write the comments beside a part: threads, replies, resolve. Comments are plain text for people; quote the exact text you mean.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "The `part_comments` arguments.",
+      "properties": {
+        "action": {
+          "description": "`list` (the default), `add` (a new thread), `reply`, `resolve`, `reopen` or `delete`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "body": {
+          "description": "The comment text, plain (for `add` and `reply`), up to 4000 characters.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "The thread (for `reply`, `resolve`, `reopen`) or comment (for `delete`) id.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "quote": {
+          "description": "For `add`: the exact text in the part the comment is about.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "CommentsRequest",
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
     "name": "part_share",
     "description": "List, add or remove the people and groups who can open a part. Share inward only, up to edit; public links and inviting new people are the admin's, via part_link_for.",
     "inputSchema": {

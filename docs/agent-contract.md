@@ -45,7 +45,8 @@ Every surface takes the same token as `Authorization: Bearer <token>`. A token b
 | `parts:delete` | `part_edit {delete: true}` and `{undelete: true}` |
 | `data:read`, `data:write` | `part_data` `get`/`list` and `set`/`delete`; with `data:read`, `part_check` renders against the real shared data |
 | `share:household` | `part_share`: list, add or remove people and groups who already have accounts, up to `edit` |
-| `comments:write`, `backends:deploy` | nothing yet: they can be granted, but the features that use them come later |
+| `comments:write` | `part_comments`: read the comments beside a part, add threads and replies, resolve and reopen them |
+| `backends:deploy` | nothing yet: it can be granted, but backends come later |
 
 A scope never gives you more than your person has: writing a part needs their `edit` role on it, and writing its shared data needs their right to (see "Who can write shared data"). Any connection with `parts:read` may call `part_link_for`, whoever its person is; the links it returns are for the admin (`who: "admin"`).
 
@@ -260,6 +261,25 @@ Errors: `invalid_input`, `unknown_field`, `unauthenticated`, `forbidden`, `not_f
 ```json
 {"name":"pixel","action":"contribute"}
 → {"action":"contribute","url":"https://pixel-part.<domain>/#share=contribute","who":"admin"}
+```
+
+<!-- pf:op part_comments -->
+### `part_comments`
+The comments beside a part, where people discuss it. Writing needs your person's Comment role or more; anyone who can open the part reads them. Your comments are labelled "<agent> for <person>". Bodies are plain text, shown as typed.
+
+| Field | Type | Req | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `action` | string | no | — | `list` (the default), `add` (a new thread), `reply`, `resolve`, `reopen` or `delete`. |
+| `body` | string | no | — | The comment text, plain (for `add` and `reply`), up to 4000 characters. |
+| `id` | string | no | — | The thread (for `reply`, `resolve`, `reopen`) or comment (for `delete`) id. |
+| `name` | string | yes | — |  |
+| `quote` | string | no | — | For `add`: the exact text in the part the comment is about. |
+
+Output: `{threads, open, you}`; each thread is `{id, comment, quote, resolved, replies}` and each comment `{id, author, body, at, mine, by_agent}`. People see a new comment within a second.
+Errors: `invalid_input`, `unknown_field`, `unauthenticated`, `forbidden`, `not_found`, `rate_limited`, `internal`.
+```json
+{"name":"packing","action":"add","body":"Should chargers go in the carry-on?","quote":"chargers"}
+→ {"threads":[{"id":"cm_01","comment":{"id":"cm_01","author":"Hermes for The admin","body":"Should chargers go in the carry-on?","at":1767225600000,"mine":true,"by_agent":true},"quote":"chargers","resolved":false,"replies":[]}],"open":1,"you":{"can_comment":true}}
 ```
 
 <!-- pf:op part_share -->

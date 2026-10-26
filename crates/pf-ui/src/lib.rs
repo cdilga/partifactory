@@ -273,7 +273,7 @@ async fn summary(
         let principal=actor.principal();let policy=svc.policy.clone();let now=pf_db::ids::now_ms();
         let (role,unsandboxed,audience)=svc.db.read(move|db| {let row=pf_model::read::find_part(db,&name)?.ok_or_else(||PfError::not_found("part"))?;let role=policy.role(db,&principal,&row.id,now)?.ok_or_else(||PfError::not_found("part"))?;let isolated:String=db.query_row("SELECT isolation FROM parts WHERE id=?1",[&row.id],|r|r.get(0))?;let public:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM public_links WHERE part_id=?1 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?2))",pf_db::rusqlite::params![row.id,now],|r|r.get(0))?;let audience=if public{"public"}else if row.owner_user_id==principal.user_id{"private"}else{"shared"};Ok::<_,PfError>((role,isolated=="unsandboxed",audience))}).await?;
         let mut out=serde_json::Map::new();for key in ["id","name","title","description","kind","head","live","url","space","build"] {if let Some(v)=data.get(key){out.insert(key.into(),v.clone());}}
-        out.insert("audience".into(),json!(audience));out.insert("role".into(),json!(role));out.insert("admin".into(),json!(actor.admin));out.insert("features".into(),json!({"share":true,"copy_link":true,"open_standalone":true,"comments":false,"public_links":actor.admin,"unsandboxed":unsandboxed}));
+        out.insert("audience".into(),json!(audience));out.insert("role".into(),json!(role));out.insert("admin".into(),json!(actor.admin));out.insert("features".into(),json!({"share":true,"copy_link":true,"open_standalone":true,"comments":true,"public_links":actor.admin,"unsandboxed":unsandboxed}));
         Ok::<_,PfError>(Value::Object(out))
     }.await;
     match result {
@@ -333,6 +333,106 @@ async fn share_change(
         Ok(j) => Json(j).into_response(),
         Err(e) => fail(e),
     }
+}
+/// The comments rail's view of `part_comments`, as the signed-in person.
+async fn comments_run(s: &AppState, headers: &HeaderMap, input: Value) -> Result<Value, PfError> {
+    let actor = auth(s)?.require_session(headers).await?;
+    let ctx = pf_ops::Ctx {
+        caller: pf_model::create::Caller {
+            principal: actor.principal(),
+            via: "chrome",
+        },
+        scopes: ["parts:read", "comments:write"].map(String::from).into(),
+        spaces: None,
+    };
+    pf_ops::Registry::new(parts(s)?.clone())
+        .run(&ctx, "part_comments", input)
+        .await
+}
+async fn comments_list(
+    State(s): State<AppState>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    match comments_run(&s, &headers, json!({"name":name})).await {
+        Ok(j) => Json(j).into_response(),
+        Err(e) => fail(e),
+    }
+}
+#[derive(Deserialize)]
+struct CommentChange {
+    action: String,
+    body: Option<String>,
+    id: Option<String>,
+}
+async fn comments_change(
+    State(s): State<AppState>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+    Json(b): Json<CommentChange>,
+) -> Response {
+    match comments_run(
+        &s,
+        &headers,
+        json!({"name":name,"action":b.action,"body":b.body,"id":b.id}),
+    )
+    .await
+    {
+        Ok(j) => Json(j).into_response(),
+        Err(e) => fail(e),
+    }
+}
+/// Live comments: a `comments` event whenever a thread changes. The stream ends after 10
+/// minutes, and the browser's reconnect rechecks the session and the person's access.
+async fn comments_events(
+    State(s): State<AppState>,
+    Path(name): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    use axum::response::sse::{Event, Sse};
+    let result = async {
+        let actor = auth(&s)?.require_session(&headers).await?;
+        let svc = parts(&s)?.clone();
+        let (principal, policy, now) =
+            (actor.principal(), svc.policy.clone(), pf_db::ids::now_ms());
+        let part = svc
+            .db
+            .read(move |db| {
+                let row = pf_model::read::find_part(db, &name)?
+                    .ok_or_else(|| PfError::not_found("part"))?;
+                policy
+                    .role(db, &principal, &row.id, now)?
+                    .ok_or_else(|| PfError::not_found("part"))?;
+                Ok::<_, PfError>(row.id)
+            })
+            .await?;
+        Ok::<_, PfError>((svc.events.subscribe(&part), part))
+    }
+    .await;
+    let (rx, part) = match result {
+        Ok(v) => v,
+        Err(e) => return fail(e),
+    };
+    let until = tokio::time::Instant::now() + std::time::Duration::from_secs(600);
+    let stream = futures_util::stream::unfold(rx, move |mut rx| {
+        let part = part.clone();
+        async move {
+            tokio::select! {
+                r = rx.recv() => match r {
+                    Ok(e) if e.ty == "comment.changed" => {
+                        tracing::info!(event = "sse.deliver", r#type = "comment.changed", part_id = %part);
+                        Some((Ok::<_, std::convert::Infallible>(Event::default().event("comments").data(e.payload.to_string())), rx))
+                    }
+                    Ok(_) => Some((Ok(Event::default().comment("keepalive")), rx)),
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => Some((Ok(Event::default().event("comments").data("{}")), rx)),
+                    Err(_) => None,
+                },
+                _ = tokio::time::sleep(std::time::Duration::from_secs(25)) => Some((Ok(Event::default().comment("keepalive")), rx)),
+                _ = tokio::time::sleep_until(until) => None,
+            }
+        }
+    });
+    Sse::new(stream).into_response()
 }
 #[derive(Deserialize)]
 struct MoveTo {
@@ -625,6 +725,16 @@ pub fn install(b: &mut ServerBuilder) {
                 get(share_list)
                     .post(share_change)
                     .options(|| async { StatusCode::NO_CONTENT }),
+            )
+            .route(
+                "/api/chrome/v1/{name}/comments",
+                get(comments_list)
+                    .post(comments_change)
+                    .options(|| async { StatusCode::NO_CONTENT }),
+            )
+            .route(
+                "/api/chrome/v1/{name}/comments/events",
+                get(comments_events).options(|| async { StatusCode::NO_CONTENT }),
             )
             .route(
                 "/api/chrome/v1/{name}/move",

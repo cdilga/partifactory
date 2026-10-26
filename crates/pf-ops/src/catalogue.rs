@@ -108,6 +108,15 @@ pub fn for_op(op: &str) -> &'static [&'static str] {
             "rate_limited",
             "internal",
         ],
+        "part_comments" => &[
+            "invalid_input",
+            "unknown_field",
+            "unauthenticated",
+            "forbidden",
+            "not_found",
+            "rate_limited",
+            "internal",
+        ],
         "part_share" => &[
             "invalid_input",
             "unknown_field",

@@ -6,6 +6,7 @@
 //! mutation shape), so the HTTP, MCP and CLI surfaces are thin.
 
 pub mod builds;
+pub mod comments;
 pub mod create;
 pub mod data;
 pub mod edit;
@@ -23,6 +24,7 @@ pub mod share;
 pub mod spaces;
 pub mod version;
 
+pub use comments::CommentsRequest;
 pub use create::{CreateRequest, FileInput, FileMap, PutRequest};
 pub use error::PfError;
 pub use read::GetRequest;

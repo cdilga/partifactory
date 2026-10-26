@@ -163,6 +163,7 @@ impl Registry {
             "part_get" => self.parts.get(&ctx.caller.principal, parse(input)?).await,
             "part_data" => self.parts.data(&ctx.caller.principal, parse(input)?).await,
             // Only the admin's own session carries share:outward; no token can be granted it.
+            "part_comments" => self.parts.comments(&ctx.caller, parse(input)?).await,
             "part_share" => {
                 let outward = ctx.scopes.contains("share:outward");
                 self.parts.share(&ctx.caller, parse(input)?, outward).await
@@ -474,6 +475,7 @@ operations! {
     Data,"part_data","data:read",pf_model::data::PartDataRequest,"Read or change shared or personal documents and snapshots.","Use if_rev for compare-and-set; mutations need request_id.",json!({"name":"packing","action":"list"});
     Check,"part_check","parts:read",CheckRequest,"Render a part and report browser errors.","Use the mobile viewport unless checking a desktop layout.",json!({"name":"packing"});
     LinkFor,"part_link_for","parts:read",LinkRequest,"Return a person-facing link for an administrative action.","Only the admin can complete public-link actions.",json!({"name":"packing","action":"public_link"});
+    Comments,"part_comments","comments:write",pf_model::CommentsRequest,"Read and write the comments beside a part: threads, replies, resolve.","Comments are plain text for people; quote the exact text you mean.",json!({"name":"packing","action":"add","body":"Should chargers go in the carry-on?","quote":"chargers"});
     Share,"part_share","share:household",pf_model::ShareRequest,"List, add or remove the people and groups who can open a part.","Share inward only, up to edit; public links and inviting new people are the admin's, via part_link_for.",json!({"name":"packing","action":"set","subject":"user:alex","role":"comment"})
 }
 
@@ -503,6 +505,9 @@ mod tests {
                     }
                     "part_share" => {
                         parse::<pf_model::ShareRequest>(v).unwrap();
+                    }
+                    "part_comments" => {
+                        parse::<pf_model::CommentsRequest>(v).unwrap();
                     }
                     _ => {
                         parse::<LinkRequest>(v).unwrap();

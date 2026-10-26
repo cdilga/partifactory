@@ -86,6 +86,16 @@
       }
     },
     {
+      "id": "comment-add",
+      "op": "part_comments",
+      "input": {
+        "name": "$name",
+        "action": "add",
+        "body": "Chargers too?",
+        "quote": "tickets"
+      }
+    },
+    {
       "id": "data-set",
       "op": "part_data",
       "input": {
