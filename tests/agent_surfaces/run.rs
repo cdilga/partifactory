@@ -69,11 +69,11 @@ fn deliberate_divergence_has_a_readable_diff() {
     let error = compare(
         &json!({"error":{"code":"anchor_not_found"}}),
         &json!({"error":{"code":"renamed_error"}}),
-        "mcp-pat",
+        "mcp-oauth",
     )
     .unwrap_err();
     assert!(
-        error.contains("mcp-pat")
+        error.contains("mcp-oauth")
             && error.contains("anchor_not_found")
             && error.contains("renamed_error")
     );
@@ -122,7 +122,7 @@ async fn cli(kit: &Kit, token: &str, op: &str, input: &Value) -> Value {
         .unwrap()
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn four_drivers_times_personal_and_device_tokens() {
+async fn four_drivers_times_oauth_and_device_tokens() {
     let scenario: Value = serde_json::from_str(include_str!("scenario.yaml")).unwrap();
     let steps = scenario["steps"].as_array().unwrap();
     let coverage = steps
@@ -136,9 +136,13 @@ async fn four_drivers_times_personal_and_device_tokens() {
     );
     let mut baseline = None;
     for driver in ["mcp", "openapi", "cli", "skill"] {
-        for auth in ["pat", "device"] {
+        for auth in ["oauth", "device"] {
             let kit = Kit::new().await;
-            let token = if auth == "pat" { &kit.pat } else { &kit.device };
+            let token = if auth == "oauth" {
+                &kit.oauth
+            } else {
+                &kit.device
+            };
             let name = format!("surface-{driver}-{auth}");
             let lane = format!("{driver}-{auth}");
             let document: Value = kit

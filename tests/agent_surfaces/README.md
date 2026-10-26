@@ -7,7 +7,7 @@ a render check, and restoring v1. Adding a registry operation without a scenario
 The native suite (`cargo test -p partifactory -p pf-mcp --features partifactory/dev`) runs the scenario through a real rmcp
 client, an HTTP client whose route table comes from the served OpenAPI document, the actual CLI
 entry point in a child process, and a client deriving its endpoint from the served skill. Each
-runs with a real personal token and a real device-grant access token. These native tests use a
+runs with a real OAuth authorization-code access token and a real device-grant access token. These native tests use a
 small screenshot source; the harness pass below uses the actual render sidecar.
 
 Against an already running native e2e harness:

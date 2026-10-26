@@ -57,7 +57,6 @@ async fn pair(service: &TokenService, actor: &SessionActor) -> TokenResponse {
                 code: device.user_code,
                 scopes: scopes("parts:read parts:write data:read data:write").unwrap(),
                 spaces: ownspace(actor),
-                lifetime_days: 90,
                 allow: true,
             },
         )
@@ -70,10 +69,10 @@ async fn pair(service: &TokenService, actor: &SessionActor) -> TokenResponse {
 }
 #[test]
 fn tokens_and_codes_have_required_entropy_format_and_scope_boundaries() {
-    let token = opaque("pf_pat_", 20);
-    assert_eq!(token.len(), 39);
+    let token = opaque("pf_at_", 20);
+    assert_eq!(token.len(), 38);
     assert!(
-        token[7..]
+        token[6..]
             .bytes()
             .all(|b| b.is_ascii_uppercase() || (b'2'..=b'7').contains(&b))
     );
@@ -204,7 +203,6 @@ async fn device_polling_rate_side_effects_commit_and_codes_are_single_use() {
                 code: device.user_code.clone(),
                 scopes: scopes("parts:read").unwrap(),
                 spaces: ownspace(&person),
-                lifetime_days: 30,
                 allow: true,
             },
         )
@@ -238,7 +236,6 @@ async fn device_polling_rate_side_effects_commit_and_codes_are_single_use() {
                     code: device.user_code,
                     scopes: scopes("parts:read").unwrap(),
                     spaces: ownspace(&person),
-                    lifetime_days: 30,
                     allow: true
                 }
             )
@@ -320,26 +317,18 @@ async fn import_suspends_reuse_cascade_for_twenty_four_hours() {
     assert!(service.resolve(&next.access_token).await.is_err());
 }
 #[tokio::test]
-async fn personal_tokens_resolve_scopes_and_revocation_is_immediate() {
+async fn access_tokens_resolve_scopes_and_revocation_is_immediate() {
     let (_db, service) = setup();
     let person = actor(&service, "member").await;
-    let value = service
-        .personal(
-            &person,
-            PersonalRequest {
-                agent_name: "My script".into(),
-                scopes: scopes("parts:read").unwrap(),
-                spaces: ownspace(&person),
-                lifetime_days: 30,
-            },
-        )
-        .await
-        .unwrap();
-    let token = value["token"].as_str().unwrap();
+    let pair = pair(&service, &person).await;
+    let token = pair.access_token.as_str();
     let principal = service.resolve(token).await.unwrap();
     assert_eq!(principal.principal.user_id, person.user_id);
-    assert_eq!(principal.kind, "pat");
-    assert_eq!(principal.scopes, scopes("parts:read").unwrap());
+    assert_eq!(principal.kind, "access");
+    assert_eq!(
+        principal.scopes,
+        scopes("parts:read parts:write data:read data:write").unwrap()
+    );
     let mut other_resource = service.clone();
     other_resource.origin = "https://elsewhere.example.com".into();
     assert!(other_resource.resolve(token).await.is_err());
@@ -388,7 +377,6 @@ async fn consent_cannot_widen_scopes_or_cross_personal_spaces() {
                     code: device.user_code.clone(),
                     scopes: scopes("parts:read parts:write").unwrap(),
                     spaces: ownspace(&first),
-                    lifetime_days: 90,
                     allow: true
                 }
             )
@@ -405,7 +393,6 @@ async fn consent_cannot_widen_scopes_or_cross_personal_spaces() {
                     code: device.user_code.clone(),
                     scopes: scopes("parts:read").unwrap(),
                     spaces: ownspace(&second),
-                    lifetime_days: 90,
                     allow: true
                 }
             )
@@ -414,20 +401,6 @@ async fn consent_cannot_widen_scopes_or_cross_personal_spaces() {
             .error,
         "access_denied"
     );
-    assert!(
-        service
-            .personal(
-                &first,
-                PersonalRequest {
-                    agent_name: "Script".into(),
-                    scopes: scopes("admin").unwrap_or_default(),
-                    spaces: ownspace(&first),
-                    lifetime_days: 30
-                }
-            )
-            .await
-            .is_err()
-    );
     service
         .approve(
             &second,
@@ -435,7 +408,6 @@ async fn consent_cannot_widen_scopes_or_cross_personal_spaces() {
                 code: device.user_code,
                 scopes: scopes("parts:read").unwrap(),
                 spaces: ownspace(&second),
-                lifetime_days: 90,
                 allow: true,
             },
         )
@@ -510,7 +482,6 @@ mod authorization_code {
                     request: pending,
                     scopes: scopes("parts:read parts:write").unwrap(),
                     spaces: ownspace(actor),
-                    lifetime_days: 30,
                     allow,
                 },
             )
@@ -669,4 +640,60 @@ mod authorization_code {
         assert_eq!(q["error"], "access_denied");
         assert!(!q.contains_key("code"));
     }
+}
+#[tokio::test]
+async fn retired_personal_tokens_never_resolve_and_are_revoked_at_start() {
+    let (_db, service) = setup();
+    let person = actor(&service, "member").await;
+    let token = opaque("pf_pat_", 20);
+    let (hash, uid, resource) = (
+        pf_auth::secret_hash(&token),
+        person.user_id.clone(),
+        service.resource(),
+    );
+    service.db.write(move |tx| {
+        tx.execute("INSERT INTO agent_connections(id,kind,user_id,agent_name,scopes,spaces,expires_at,created_at) VALUES('c_pat','pat',?1,'Old script','[\"parts:read\"]','[]',9999999999999,0)",[&uid])?;
+        tx.execute("INSERT INTO oauth_tokens(hash,kind,prefix,connection_id,resource,issued_at,expires_at) VALUES(?1,'pat','pf_pat_','c_pat',?2,0,9999999999999)",params![hash,resource])?;
+        Ok::<_, OAuthError>(())
+    }).await.unwrap();
+    assert!(service.resolve(&token).await.is_err());
+    service.seed().unwrap();
+    let revoked: i64 = service
+        .db
+        .read(|c| {
+            c.query_row("SELECT COUNT(*) FROM agent_connections WHERE id='c_pat' AND revoked_at IS NOT NULL", [], |r| r.get(0))
+                .map_err(OAuthError::from)
+        })
+        .await
+        .unwrap();
+    assert_eq!(revoked, 1);
+}
+#[tokio::test]
+async fn refresh_tokens_expire_when_idle_and_connections_at_ninety_days() {
+    let (_db, service) = setup();
+    let person = actor(&service, "member").await;
+    let start = ids::now_ms();
+    let first = pair(&service, &person).await;
+    assert_eq!(first.expires_in, 3600);
+    let refresh = first.refresh_token.unwrap();
+    let hash = pf_auth::secret_hash(&refresh);
+    let (refresh_expires, connection_expires): (i64, i64) = service
+        .db
+        .read(move |c| {
+            c.query_row("SELECT t.expires_at,c.expires_at FROM oauth_tokens t JOIN agent_connections c ON c.id=t.connection_id WHERE t.hash=?1", [hash], |r| Ok((r.get(0)?, r.get(1)?)))
+                .map_err(OAuthError::from)
+        })
+        .await
+        .unwrap();
+    assert!(
+        (refresh_expires - start - IDLE).abs() < 60_000,
+        "refresh lasts 30 days unused"
+    );
+    assert!(
+        (connection_expires - start - CONNECTION).abs() < 60_000,
+        "connection lasts 90 days"
+    );
+    // A refresh slides the idle window but never past the connection's end.
+    let next = service.refresh(&refresh, None).await.unwrap();
+    assert!(next.refresh_token.is_some());
 }

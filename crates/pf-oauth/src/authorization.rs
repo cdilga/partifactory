@@ -103,8 +103,6 @@ pub struct CodeConsent {
     pub request: String,
     pub scopes: BTreeSet<String>,
     pub spaces: BTreeSet<String>,
-    #[serde(default = "lifetime")]
-    pub lifetime_days: i64,
     pub allow: bool,
 }
 #[derive(Debug, Deserialize)]
@@ -285,11 +283,10 @@ impl TokenService {
             validate(tx,&req,&resource,now)?;
             let mut redirect=safe_redirect(&req.redirect_uri)?;
             if consent.allow {
-                if ![30,90,365].contains(&consent.lifetime_days){return Err(request_error("Choose a 30, 90 or 365 day lifetime."));}
                 if consent.scopes.is_empty() || !consent.scopes.is_subset(&requested_scopes(&req.scope)?) {return Err(OAuthError::new("invalid_scope","Consent may narrow requested scopes."));}
                 consent_checks(tx,&actor,&consent.spaces,now)?;
                 let code=opaque("",32);let code_hash=pf_auth::secret_hash(&code);
-                tx.execute("INSERT INTO oauth_codes(hash,client_id,user_id,redirect_uri,code_challenge,scopes,spaces,resource,lifetime_ms,expires_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",params![code_hash,req.client_id,actor.user_id,req.redirect_uri,req.code_challenge,json(&consent.scopes)?,json(&consent.spaces)?,resource,consent.lifetime_days*DAY,now+60_000])?;
+                tx.execute("INSERT INTO oauth_codes(hash,client_id,user_id,redirect_uri,code_challenge,scopes,spaces,resource,lifetime_ms,expires_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",params![code_hash,req.client_id,actor.user_id,req.redirect_uri,req.code_challenge,json(&consent.scopes)?,json(&consent.spaces)?,resource,crate::CONNECTION,now+60_000])?;
                 tx.execute("UPDATE oauth_clients SET consented_at=COALESCE(consented_at,?2) WHERE id=?1",params![req.client_id,now])?;
                 redirect.query_pairs_mut().append_pair("code",&code);
                 tracing::info!(event="oauth.authorize",outcome="allowed");

@@ -65,7 +65,7 @@ struct Kit {
     _db: pf_db::TempDb,
     _files: tempfile::TempDir,
     tokens: pf_oauth::TokenService,
-    pat: String,
+    oauth: String,
     device: String,
     origin: String,
     http: reqwest::Client,
@@ -122,21 +122,72 @@ impl Kit {
         let spaces = [format!("~{}", actor.username)]
             .into_iter()
             .collect::<std::collections::BTreeSet<_>>();
-        let pat = tokens
-            .personal(
+        // A standards MCP client: registered, browser consent, PKCE code exchange.
+        let redirect = "http://127.0.0.1:47123/callback";
+        let client_id = tokens
+            .register(pf_oauth::authorization::Registration {
+                client_name: "MCP test".into(),
+                redirect_uris: vec![redirect.into()],
+                application_type: None,
+                token_endpoint_auth_method: None,
+                grant_types: None,
+                response_types: None,
+            })
+            .await
+            .unwrap()["client_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let verifier = "v".repeat(43);
+        let pending = tokens
+            .begin_authorization(
                 &actor,
-                pf_oauth::PersonalRequest {
-                    agent_name: "MCP test".into(),
-                    scopes: scopes.clone(),
-                    spaces: spaces.clone(),
-                    lifetime_days: 30,
+                pf_oauth::authorization::AuthorizationRequest {
+                    response_type: "code".into(),
+                    client_id: client_id.clone(),
+                    redirect_uri: redirect.into(),
+                    code_challenge: base64::Engine::encode(
+                        &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+                        pf_auth::secret_hash(&verifier),
+                    ),
+                    code_challenge_method: "S256".into(),
+                    resource: None,
+                    scope: "parts:read parts:write parts:delete data:read data:write".into(),
+                    state: None,
                 },
             )
             .await
-            .unwrap()["token"]
-            .as_str()
+            .unwrap();
+        let redirected = tokens
+            .authorize_code(
+                &actor,
+                pf_oauth::authorization::CodeConsent {
+                    request: pending,
+                    scopes: scopes.clone(),
+                    spaces: spaces.clone(),
+                    allow: true,
+                },
+            )
+            .await
+            .unwrap();
+        let code = url::Url::parse(&redirected)
             .unwrap()
-            .to_string();
+            .query_pairs()
+            .find(|(k, _)| k == "code")
+            .unwrap()
+            .1
+            .into_owned();
+        let oauth = tokens
+            .exchange_code(pf_oauth::authorization::CodeExchange {
+                client_id,
+                code,
+                redirect_uri: redirect.into(),
+                code_verifier: verifier,
+                resource: None,
+            })
+            .await
+            .unwrap()
+            .access_token;
         let grant = tokens
             .device(
                 "part-cli",
@@ -154,7 +205,6 @@ impl Kit {
                     code: grant.user_code,
                     scopes,
                     spaces,
-                    lifetime_days: 30,
                     allow: true,
                 },
             )
@@ -202,7 +252,7 @@ impl Kit {
             _db: db,
             _files: files,
             tokens,
-            pat,
+            oauth,
             device,
             origin,
             http,
@@ -239,9 +289,9 @@ fn meta() -> Value {
 }
 
 #[tokio::test]
-async fn real_pat_and_device_clients_list_call_image_and_resource() {
+async fn real_oauth_and_device_clients_list_call_image_and_resource() {
     let kit = Kit::new().await;
-    for (i, token) in [&kit.pat, &kit.device].into_iter().enumerate() {
+    for (i, token) in [&kit.oauth, &kit.device].into_iter().enumerate() {
         let client = ClientConfig::default()
             .serve_with_lifecycle(
                 kit.transport(token),
@@ -315,9 +365,9 @@ async fn auth_is_http_401_and_revocation_is_immediate() {
         assert_eq!(body["error"]["code"], "unauthenticated");
         assert!(body.get("jsonrpc").is_none());
     }
-    kit.tokens.revoke_token(&kit.pat).await.unwrap();
+    kit.tokens.revoke_token(&kit.oauth).await.unwrap();
     assert_eq!(
-        kit.rpc(Some(&kit.pat), "tools/list", json!({"_meta":meta()}))
+        kit.rpc(Some(&kit.oauth), "tools/list", json!({"_meta":meta()}))
             .await
             .status(),
         401
@@ -327,7 +377,7 @@ async fn auth_is_http_401_and_revocation_is_immediate() {
 async fn discovery_instructions_and_legacy_initialize_are_stateless() {
     let kit = Kit::new().await;
     let discover = kit
-        .rpc(Some(&kit.pat), "server/discover", json!({"_meta":meta()}))
+        .rpc(Some(&kit.oauth), "server/discover", json!({"_meta":meta()}))
         .await;
     assert_eq!(discover.status(), 200);
     assert!(discover.headers().get("mcp-session-id").is_none());
@@ -383,7 +433,7 @@ async fn discovery_instructions_and_legacy_initialize_are_stateless() {
         .await
         .unwrap();
     assert!(html.text().await.unwrap().contains("<h1>workspace</h1>"));
-    let initialized=kit.http.post(format!("{}/mcp",kit.origin)).bearer_auth(&kit.pat).header("Accept","application/json, text/event-stream").json(&json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"legacy","version":"1"}}})).send().await.unwrap();
+    let initialized=kit.http.post(format!("{}/mcp",kit.origin)).bearer_auth(&kit.oauth).header("Accept","application/json, text/event-stream").json(&json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"legacy","version":"1"}}})).send().await.unwrap();
     assert_eq!(initialized.status(), 200);
     assert!(initialized.headers().get("mcp-session-id").is_none());
 }
@@ -409,7 +459,7 @@ async fn insufficient_scope_is_in_band_and_browser_origins_are_checked() {
         })
         .await
         .unwrap();
-    let result=kit.rpc(Some(&kit.pat),"tools/call",json!({"_meta":meta(),"name":"part_create","arguments":{"title":"Cannot write","request_id":"scope-test"}})).await;
+    let result=kit.rpc(Some(&kit.oauth),"tools/call",json!({"_meta":meta(),"name":"part_create","arguments":{"title":"Cannot write","request_id":"scope-test"}})).await;
     assert_eq!(result.status(), 200);
     let body: Value = result.json().await.unwrap();
     assert_eq!(body["result"]["isError"], true);
@@ -424,7 +474,7 @@ async fn insufficient_scope_is_in_band_and_browser_origins_are_checked() {
     let rejected = kit
         .http
         .post(format!("{}/mcp", kit.origin))
-        .bearer_auth(&kit.pat)
+        .bearer_auth(&kit.oauth)
         .header("Accept", "application/json, text/event-stream")
         .header("Origin", "https://attacker.example.com")
         .json(&json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":meta()}}))

@@ -1,5 +1,6 @@
 import { test, expect, waitForLog } from './harness/fixtures';
 import { signIn } from './lib/public-auth';
+import { oauthToken } from './lib/agent-tokens';
 import * as fs from 'node:fs';
 
 const golden = (p: string) => fs.readFileSync(`/repo/tests/golden/render/${p}`, 'utf8');
@@ -9,12 +10,7 @@ test('svg runs only in the opaque sandbox and code stays literal with working li
   test.skip(!['chromium-desktop', 'webkit-mobile'].includes(info.project.name), 'Desktop and mobile WebKit lanes');
   test.setTimeout(120000);
   await signIn(page, 'member-a');
-  const token = await page.evaluate(async () => {
-    const session = await (await fetch('/api/session')).json();
-    const response = await fetch('/api/agents/personal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agent_name: 'Kinds gate', scopes: ['parts:read', 'parts:write'], spaces: [`~${session.username}`], lifetime_days: 30 }) });
-    if (!response.ok) throw new Error(await response.text());
-    return (await response.json()).token as string;
-  });
+  const token = (await oauthToken(page, page.request, 'Kinds gate', ['parts:read', 'parts:write'])).access_token;
   const op = async (name: string, body: unknown) => {
     const response = await page.request.post(`/api/v1/${name}`, { headers: { Authorization: `Bearer ${token}` }, data: body });
     expect(response.status(), await response.text()).toBe(200);

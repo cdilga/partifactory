@@ -44,7 +44,7 @@ Adding anything to it takes a decision from the admin. Work that straddled the l
 | Sandboxed part host | path caps, the content listener with the canonical CSP and the serve-time entry document, the prelude and `/_rt`, the trusted wrapper with its chrome API, the content-free card (two static PNGs), gallery thumbnails from the latest render |
 | Shared data, live | `window.storage` (personal and shared) over `/_rt`, `data.changed` on `/_rt/events`, `shared_data_writers`, `part_data` for agents (incl. snapshot list, restore and reset) |
 | Sign-in | generic OIDC (Authentik is the example deployment's provider, used as plain OIDC) and the e2e harness (Dex, Caddy, a TLS test domain), the claims re-read directory, the policy engine and role × runtime matrix, `/grant`, the admin pin with passkey step-up |
-| Agent connections | the token service, device code, personal agent tokens, Connected agents |
+| Agent connections | the token service, device code, Connected agents (personal agent tokens shipped here and were retired on 2026-10-26: short-lived OAuth credentials only) |
 | Ops on every surface | the registry; MCP, the HTTPS API, the CLI; discovery and `/skill.md`; cross-surface conformance; `part_edit`; the `part_get` read path; `part_link_for` (`public_link`, `contribute`) |
 | `part_check` | the render sidecar, `actions`, the `live: "after_check"` gate |
 | Public links | admin-only links on the part host, Can view and Can contribute, guest caps and limits, rate limits, the share sheet's public rung |
@@ -58,8 +58,8 @@ Adding anything to it takes a decision from the admin. Work that straddled the l
 **The ops in Slice 1** are `part_create`, `part_edit`, `part_get`, `part_check`, `part_data` and `part_link_for`. Their exact fields, outputs and errors are in `docs/agent-contract.md` and the field table in §4.
 
 **Decided for the slice.**
-- **A person connects every agent once, by design.** There is no fully unattended bootstrap: the device code needs a person's Allow, and a personal token is made by a person in the UI. An unattended agent (cron, CI, a server) runs on a personal token its person made for it. MCP clients other than Claude Code use a personal token in Slice 1; Claude Code uses one too, or the `part` CLI, which refreshes its device-code token itself.
-- **Agents connect by device code or personal token. OAuth authorization code (with CIMD, DCR and manual clients) comes after Slice 1.** Every MCP client that matters for the slice accepts a static `Authorization` header: Claude Code (`--header`), Codex, Cursor and Gemini CLI. Hermes and the CLI use the device grant.
+- **A person connects every agent once, by design.** There is no fully unattended bootstrap: browser sign-in and the device code both need a person's Allow. An unattended agent (cron, CI, a server) is connected once by device code and refreshes on its own.
+- **Agents connect by device code or personal token. OAuth authorization code (with CIMD, DCR and manual clients) comes after Slice 1.** *Superseded (decision 55): authorization code shipped and personal tokens are retired.* Every MCP client that matters for the slice accepts a static `Authorization` header: Claude Code (`--header`), Codex, Cursor and Gemini CLI. Hermes and the CLI use the device grant.
   The pixel test drives MCP with a token, so nothing in it needs a browser OAuth flow. The authorization endpoint is the largest new attack surface in the plan (CIMD fetches behind the SSRF guard, DCR abuse limits, redirect-host display, consent for unknown clients), and none of it is exercised by the test.
   The clients that do need it are claude.ai and ChatGPT custom connectors, which accept only OAuth. They arrive with authorization code, which also brings "Claude Code connects with one passkey tap" (a line of P2's "Done when"). The cost in the slice is one pasted token for Claude Code.
   The slice's token service is built as the OAuth AS's token side, so authorization code adds an endpoint, not a redesign.
@@ -96,7 +96,7 @@ Adding anything to it takes a decision from the admin. Work that straddled the l
 **Definition of done.** Slice 1 is done when all of these hold:
 1. **`communal_pixel_editor` passes in CI on every PR** (on the e2e harness: Dex and Caddy with an internal-CA wildcard cert for `pf.test`. The admin's sign-in, step-up, share, roll back and freeze run on Chromium with the virtual authenticator, and the signed-out guest runs on a mobile WebKit profile): an agent connected by device code creates the board in one `part_create`, runs `part_check`, posts `https://pixel-part.<domain>/`; the admin does Share → Anyone with the link → Can contribute → Copy (4 interactions + 1 biometric); a signed-out browser paints and the admin's open tab shows it within 1 s; the admin rolls back one snapshot and freezes the link, and the guest's next write is refused.
 2. **The same flow passes on the device matrix** (decision 52): Playwright Chromium (mobile emulation), WebKit (mobile profile) and Firefox in CI, and Mobile Safari in the iOS Simulator, run locally on a Mac with its results attached as evidence.
-3. **Every acceptance test of the work in Slice 1 passes** (they live in its beads), including cross-surface conformance over MCP, HTTP, the CLI and `/skill.md` with device-code and personal tokens.
+3. **Every acceptance test of the work in Slice 1 passes** (they live in its beads), including cross-surface conformance over MCP, HTTP, the CLI and `/skill.md` with OAuth and device-code tokens.
 4. **The §7 lines for what exists pass from outside**, the guest, agent and render-sidecar lines included. No agent token, scope or op can make a public link.
 5. **Export and import round-trip**: the nightly export imported into a fresh container brings back every part, version, data document and snapshot, and every cap minted before it is dead.
 6. **Every store that exists is capped** and passes its fill-past-cap case; the Health page shows each one, the backup layers and the disk budget; no `[unsafe]` key is set.
@@ -620,7 +620,7 @@ The same token works on every surface: MCP, the HTTPS API and the CLI (§4b).
 ### How agents authenticate: OAuth 2.1, per the MCP authorization spec
 
 Target revision **2026-07-28**, compatible with **2025-11-25**. partifactory is both the **resource server** (`/mcp`, `/api`) and a small **authorization server** that *federates* login to the IdP.
-*Slice 1 ships the token side only* (the device grant, refresh, revocation, metadata, 401s). The authorization-code flow below, with CIMD, DCR and manual clients, comes after Slice 1; until then MCP clients send a personal token as a static `Authorization` header.
+Slice 1 shipped the token side (the device grant, refresh, revocation, metadata, 401s); the authorization-code flow below followed right after it. **There are no long-lived agent credentials** (the admin, 2026-10-26): personal tokens were retired, and every agent holds a one-hour access token and a rotating refresh token.
 
 ```
 claude mcp add --transport http partifactory https://parts.example.com/mcp
@@ -641,8 +641,8 @@ claude mcp add --transport http partifactory https://parts.example.com/mcp
 - **CIMD fetches** use the mirror egress guard (§2): https only, private/loopback/link-local addresses refused after DNS resolution, ≤ 5 KiB, 3 s, no redirects.
 - **DCR** stays for Cursor and Gemini CLI, which don't do CIMD. It requires `application_type`, is rate-limited, and a registered client is inert until someone consents. Unconsented registrations expire after 1 hour.
 - **Manual clients**: The admin can register a client by hand in the admin area (client id + secret + redirect URI) for clients that need a pre-registered one, such as GPT Actions.
-- **Tokens**: opaque random strings with prefixes (`pf_at_`, `pf_rt_`, `pf_pat_`), stored hashed, revocable instantly. Access tokens last 1 h. A refresh token is single use: each refresh returns a new access token and a new refresh token, and presenting a used one revokes the whole family.
-  The refresh family lives until the connection's consented lifetime ends (30 days, 90 days by default, or 1 year, picked on the approval sheet); after that a person connects the agent again. A personal token lasts its own expiry (default 30 days, max 1 year) and never refreshes.
+- **Tokens**: opaque random strings with prefixes (`pf_at_`, `pf_rt_`), stored hashed, revocable instantly. Access tokens last 1 h. A refresh token is single use: each refresh returns a new access token and a new refresh token, and presenting a used one revokes the whole family.
+  Lifetimes follow what other OAuth and MCP providers do, so there's no picker on the approval sheet: a refresh token expires after **30 days unused** (each refresh slides it, so an agent in use stays connected), and a connection ends **90 days** after consent however busy it is; then a person connects the agent again. Retired `pf_pat_` tokens never resolve, and any still stored are revoked at start.
   - *Why not JWTs:* no key distribution or clock skew, and revocation is a single row. The cost is a DB read per API call, which is fine because `/api` and `/mcp` aren't the hot path.
 - **Auth failures are HTTP 401 with `WWW-Authenticate`**, on every surface, never an MCP tool result: that 401 is what triggers a client's OAuth flow. The 401 body explains the ways to get a token (§4b).
 - **Swappable**: an `AuthorizationServer` trait. If the IdP gains CIMD + resource indicators, partifactory can switch to validating IdP-issued tokens as a pure resource server.
@@ -663,13 +663,8 @@ claude mcp add --transport http partifactory https://parts.example.com/mcp
   Typing a code by hand is limited to 5 attempts per minute per session. Codes are single use.
 - **Token responses**: `authorization_pending`, `slow_down`, `access_denied`, `expired_token`. Success returns the same token shape as the auth-code flow.
 
-### Personal agent tokens, for clients without OAuth
-
-Minted from Connected agents (New personal token) on the consent sheet, with a name, scopes, spaces and expiry (default 30 days, max 1 year), shown once, formatted `pf_pat_<base32, 160-bit>` so secret scanners and log redaction match it.
-Used as `Authorization: Bearer` on `/api` and `/mcp`, by convention via `PARTIFACTORY_URL` + `PARTIFACTORY_TOKEN` env vars (the CLI and the skill file both read them).
-They're equally supported for servers the admin controls, are marked "static" in the UI, and resolve to the same `(person, connection, scopes, spaces)` principal as OAuth tokens.
-
-**A person connects every agent once; there's no unattended bootstrap, by design.** An agent with no token can't get one alone: the device grant waits for a person's Allow, and a personal token is made by a person in the UI. An unattended agent (cron, CI, a server) runs on a personal token its person made for it. In Slice 1, MCP clients other than Claude Code use a personal token, since OAuth authorization code comes after Slice 1.
+**A person connects every agent once; there's no unattended bootstrap, by design.** An agent with no token can't get one alone: browser sign-in and the device grant both wait for a person's Allow. An unattended agent (cron, CI, a server) is connected once by device code and refreshes on its own.
+*Personal agent tokens are retired* (the admin, 2026-10-26): long-lived static tokens are exactly what leaks from env files and CI logs, and every client that matters now does OAuth or the device grant.
 
 ### Scopes
 
@@ -698,16 +693,16 @@ For those, `part_link_for {action}` returns a deep link that opens the right she
 
 ### Revocation cascades
 
-Revoking a connection kills its refresh family, its access tokens and its PATs, and bumps its minter epoch, so every cap minted through it dies on the next request.
+Revoking a connection kills its refresh family and its access tokens, and bumps its minter epoch, so every cap minted through it dies on the next request.
 Grants it made stay (they're the person's choices too), but the connection page lists them with "Undo all".
 
 | Agent | How it connects | Typical scopes |
 | --- | --- | --- |
-| Claude Code (Mac, other dev envs) | auth code + PKCE (CIMD, after Slice 1); in Slice 1 a personal token on MCP, or the `part` CLI with device code | `parts:*`, `data:*`, `comments:write` in `~admin` (+ `share:household` and `backends:deploy` if the admin ticks them) |
+| Claude Code (Mac, other dev envs) | auth code + PKCE (CIMD or DCR), or the `part` CLI with device code | `parts:*`, `data:*`, `comments:write` in `~admin` (+ `share:household` and `backends:deploy` if the admin ticks them) |
 | Hermes (VM, Telegram front door) | device code, **once per household member** | the same, in that person's space + `family`, with `share:household` |
 | Family hub (`hub-api`) | device code once at setup, **service identity** | `parts:read`, `parts:write` in `family` |
-| CI (provision/smoke tests), any CI system | a personal token in that CI's secret store (device code needs a person each time the family lapses) | `parts:read` + a test space |
-| A script or a function-calling app | personal agent token | as minted |
+| CI (provision/smoke tests), any CI system | device code once, refresh token in that CI's secret store (a person reconnects it every 90 days) | `parts:read` + a test space |
+| A script or a function-calling app | the `part` CLI or device code | as consented |
 
 ## 3c. Agents editing parts: discoverable, quick, in place
 
@@ -1371,9 +1366,9 @@ Comments from public-link viewers or other people carry a small "untrusted for a
 
 **Connecting an agent (`/device`).** Two ways in: a chat agent (Hermes) posts "Connect to partifactory: `parts.example.com/device?code=KMQT-4XRA`", or `part login` prints the URL and code. On a phone, single column, large type:
 the code in big mono with "Make sure this matches what the agent shows"; **who** ("This device says it is Hermes · hermes/1.4", unverified, plus coarse origin and age); **what it wants** in plain words, each removable
-("Read and edit parts", "Read and write part data", "Comment", "Share with people already in the household", "Deploy backends and set their secrets" — the last two off unless requested); **where** (spaces as toggles); **for how long** (`30 days · 90 days · 1 year`);
+("Read and edit parts", "Read and write part data", "Comment", "Share with people already in the household", "Deploy backends and set their secrets" — the last two off unless requested); **where** (spaces as toggles); the lifetime is fixed (30 days unused, 90 days at most) and stated on the sheet;
 **Allow** (filled, full width, triggers the passkey) and **Deny**. Success: "Hermes is connected for you." The same sheet serves the browser OAuth flow, plus the redirect host.
-**Connected agents** (avatar menu) lists each connection: "Hermes for you", scopes, spaces, last used, token type (`OAuth` / `device` / `personal token`), grants it made, with **Revoke** (undo toast; cascades per §3b).
+**Connected agents** (avatar menu) lists each connection: "Hermes for you", scopes, spaces, last used, token type (`OAuth` / `device`), grants it made, with **Revoke** (undo toast; cascades per §3b).
 
 **Admin (`/admin`, admin only).** **People · Groups · Invites · Agents · Public links · Backends · Audit · Health · Insights**. A persistent step-up chip: `Admin unlocked · 8 min` or `Locked` with a passkey button.
 *Public links*: every live link, its part, created, expiry (usually "never"), **open count and last opened**, revoke, and a red **Revoke all public links** kill switch (hold to confirm, 1 s).
@@ -1563,19 +1558,18 @@ GPT Actions constraints are checked by a CI lint: every op has an `operationId`,
 | `/.well-known/mcp/server.json` | the MCP registry `server.json` shape (name, description, version, `remotes: [{type: streamable-http, url}]`). **Served, not published** to the public registry: this is a private instance, and the registry doesn't support private servers. The public repo ships a template |
 
 - **No A2A agent card.** A2A describes agents that accept tasks. partifactory is a tool and resource server, not an agent. If Hermes ever speaks A2A, *Hermes* publishes the card and lists partifactory as a tool.
-- Every `401` from `/api` or `/mcp` carries `WWW-Authenticate: Bearer resource_metadata="…"` **and** a JSON body explaining the ways to get a token that are mounted (device code and personal token in Slice 1; OAuth once authorization code lands), with links. An agent that hits the endpoint blind learns how to authenticate from the error alone.
+- Every `401` from `/api` or `/mcp` carries `WWW-Authenticate: Bearer resource_metadata="…"` **and** a JSON body explaining the ways to get a token (OAuth and device code), with links. An agent that hits the endpoint blind learns how to authenticate from the error alone.
 - Discovery documents are unauthenticated and contain no site secrets or user data: they never list spaces, parts or people.
 
 ### Auth for each kind of client (one token model)
 
 | Client | Flow | Token |
 | --- | --- | --- |
-| MCP clients (Claude Code, Codex: CIMD; Cursor, Gemini CLI: DCR) | auth code + PKCE (after Slice 1; in Slice 1 a personal token as a static header) | opaque access token + rotating refresh token |
+| MCP clients (Claude Code, Codex: CIMD; Cursor, Gemini CLI: DCR) | auth code + PKCE | opaque access token + rotating refresh token |
 | Headless (Hermes, the `part` CLI, CI, cron) | device grant (RFC 8628) | the same |
 | GPT Actions and other pre-registered-only clients | auth code with a manual client | the same |
-| Scripts, function-calling apps, a pasted env var | personal agent token, `PARTIFACTORY_URL` + `PARTIFACTORY_TOKEN` | `pf_pat_…` as Bearer |
 
-All of them resolve to the same `(person, connection, scopes, spaces)` principal, so the policy engine, audit and revocation are identical everywhere. PATs are accepted on `/mcp` too, since some MCP clients only support a static header.
+All of them resolve to the same `(person, connection, scopes, spaces)` principal, so the policy engine, audit and revocation are identical everywhere.
 
 ### Errors written for an LLM to self-correct
 
@@ -1635,8 +1629,8 @@ share inward with a group → get a deep link for a public link (`part_link_for`
 3. The CLI via subprocess with `--json`.
 4. **The skill file itself**: the example commands in `/skill.md` and `/llms-full.txt` are extracted and executed.
 
-Normalised results (ids, timestamps) and audit rows must be identical across drivers and across the auth kinds that exist (device code and personal token in Slice 1; OAuth authorization code joins when it lands). The suite also validates `/openapi.json`, runs the GPT Actions lint and fetches every discovery URL.
-An optional nightly, not gating: a small model gets only `PARTIFACTORY_URL` + a PAT + "make a packing list page and give me the link", and must succeed via discovery.
+Normalised results (ids, timestamps) and audit rows must be identical across drivers and across the auth kinds (OAuth authorization code and device code). The suite also validates `/openapi.json`, runs the GPT Actions lint and fetches every discovery URL.
+An optional nightly, not gating: a small model gets only `PARTIFACTORY_URL` + a device-code connection + "make a packing list page and give me the link", and must succeed via discovery.
 
 ## 4c. Previews and render checks
 
@@ -1956,7 +1950,7 @@ SQLite (a single writer handles thousands of small writes/s) and one disk. The s
 - Cookies exist only on the workspace host (`sessions`). Part hosts never set or read a cookie.
 - Shared vs part blob class is a property of the reference (`shared_blobs`, `build_files`), not of the blob.
 - `versions.id` is the hash of a manifest that includes `part_id`, `parent` and `n`, so two parts never share a version id, even with identical files.
-- Agents are `agent_connections`, one per (agent, person) or per service, and every kind of token hangs off one: OAuth auth code, device grant, or personal agent token (`pat`). One revoke covers everything an agent holds.
+- Agents are `agent_connections`, one per (agent, person) or per service, and every kind of token hangs off one: OAuth auth code or device grant (`pat` rows are retired personal tokens and never resolve). One revoke covers everything an agent holds.
 - There are no preview tokens. The only bearer links are `public_links`, which only the admin creates.
 - There are no request or approval queues. The only pending state a person sees is `access_asks` (a signed-in person asking an owner for access).
 - Analytics and observability live in a second file, `/data/insights.db` (DDL after the main block), so their write load never contends with the main writer.
@@ -2932,7 +2926,7 @@ the **portability lane** (full e2e with Dex, Caddy and local exports, §5f), and
 The simulated device matrix (decision 52). The real-device pass, including the 5-minute Telegram in-app-browser passkey test (§2), is a human check that blocks nothing.
 *Done when:* The admin opens a part on their phone at its own host link via SSO; the portability lane is green; a public link opens from mobile data with no login and unfurls as a card; the security checklist (§7) passes from outside; and the drill restores everything on a second OCI host in < 15 min.
 
-**P2 Agents + the household loop.** OAuth AS (device grant first, then auth code + PKCE + CIMD/DCR + manual clients), personal agent tokens, one connection per (agent, person) and service identities,
+**P2 Agents + the household loop.** OAuth AS (device grant first, then auth code + PKCE + CIMD/DCR + manual clients), one connection per (agent, person) and service identities,
 MCP + discovery + the error contract + cross-surface conformance, `part_edit` with rebase, block ids, leases, notes, `part_get` full content and `render: "text"`, comments with provenance,
 the event log (long-poll, SSE, webhooks), live reload, inward agent sharing (`share:household`) and `part_link_for` deep links for people-only actions, **`part_check` + the render sidecar (the P2 headline)**, Jig, the source editor with drafts and the formatted view for Markdown and `text`, renames,
 shared data over `/_rt` with live `data.changed`, "Can contribute" public links for guests, the Insights pages and debugging UI, and the Hermes skill with per-person pairing.
@@ -2979,7 +2973,7 @@ This section is the order the pieces depend on each other, and why. Read each ar
 - **The janitor → the disk budget → the retention test.** As long as the pixel test's chain, and in the slice on purpose: it sets Slice 1's date (decision 41). Start the janitor as soon as snapshots land.
 - **The registry → `part_edit`, the read path and `part_check` → MCP → discovery and `/skill.md` → cross-surface conformance.** The third chain of the same length.
 - **Identity, in parallel once the schema lands:** generic OIDC with the e2e harness → the claims re-read directory → the policy engine → `/grant` → the part-host wrapper and its chrome API → the share sheet's public rung. The admin pin and step-up sit beside `/grant`.
-- **Agent connections:** the token service (after OIDC, the policy engine and the admin pin) → the device grant and personal tokens.
+- **Agent connections:** the token service (after OIDC, the policy engine and the admin pin) → the device grant (personal tokens shipped here and were retired by decision 55).
 - **Shipping:** logs and metrics → Health; backups → import and the drill; the ingress contract → the deliverable → the §7 suite and the simulated device matrix. The human checks on real phones hang off nothing and block nothing.
 - **`build_deps`** *(provisional, §3h)* rides on mirror-on-build and needs nothing else.
 
@@ -3036,7 +3030,7 @@ Every line runs against the example deployment's staging (Cloudflare + Authentik
 - No agent scope, token or op can make a public link, an invite, a group, an `everyone-signed-in` grant or a LAN allowlist entry, on any surface. `part_link_for` returns a link that grants nothing by itself: opened by someone without the right, it shows the normal 403. There is no request table for an agent to write to (schema test).
 - Unconsented OAuth clients can do nothing. Registration is rate-limited. A CIMD URL resolving to a private address is refused. The consent sheet shows the redirect host.
 - Device codes: single use, 10-minute expiry, `slow_down` enforced, manual entry limited to 5 per minute; the stale and different-network banners appear when they should.
-- A `pf_pat_` token is redacted in logs, scope- and space-limited like OAuth tokens, and revoked by the same cascade.
+- Agent access tokens are redacted in logs, scope- and space-limited, and revoked by the connection cascade; retired `pf_pat_` tokens never resolve.
 - Authentication failures are HTTP 401 with `WWW-Authenticate` on `/mcp` and `/api`, never a tool result.
 - Discovery documents are reachable unauthenticated and contain no site secrets or user data.
 
@@ -3091,7 +3085,7 @@ Every line runs against the example deployment's staging (Cloudflare + Authentik
 11. **Any AI, any surface.** One operation registry in Rust, rendered as MCP, an HTTPS JSON API with OpenAPI 3.1, the `part` CLI and a skill file. Discovery via `/llms.txt`, `/openapi.json`, `.well-known` metadata, Markdown on `GET /` and a served (not published) `server.json`. No A2A card.
 12. **One link to post** (round 2b: the part's own host, decision 25). No agent-minted preview links. Public links are admin-only, made once the part has a live version, with no expiry by default, open counts and revocation.
 13. **Agent sharing: inward yes, outward no.** `share:household` lets agents share with people who already have accounts. Public links, invites and groups are people-only (round 2c: no requests; the agent hands over a deep link, decision 34).
-14. **One connection per (agent, person)**, labelled "Hermes for <person>", plus service identities. Device grant is the default for headless agents; personal agent tokens for clients without OAuth.
+14. **One connection per (agent, person)**, labelled "Hermes for <person>", plus service identities. Device grant is the default for headless agents. (Personal agent tokens were retired by decision 55.)
 15. **Spaces are first-class**: a personal space per person + `family`. Space grants are inherited live. "Move to Family" is the household share.
 16. **Previews**: tier (a) branded cards in the binary, always, decided by audience; tier (b) an optional render sidecar whose headline is `part_check`, a P2 feature.
 17. **Backups = the `/data` folder** plus `partifactory export`/`import`. No git archive, no Litestream, no streaming sink on the write path. Per-part data snapshots are on by default since round 2b (decision 26).
@@ -3158,6 +3152,8 @@ Every line runs against the example deployment's staging (Cloudflare + Authentik
 54. **Markdown and `text` parts get a formatted-view editor in P2** (the admin, 2026-10-24). People edit the page as it reads, like Claude Docs, and every change saves as block edits, so untouched blocks stay byte-identical and agents' edits keep merging by block id. shartifacts and the earlier plan had source editing only.
     Live co-typing moves from the non-goals to a deferred option: `yrs` inside one formatted-view session, committing ordinary versions.
     *Why:* the people who read a write-up are the ones who'll fix a sentence in it, and they shouldn't need Markdown to do it.
+55. **Agents hold only short-lived OAuth credentials** (the admin, 2026-10-26). Personal agent tokens are retired: every agent connects by OAuth authorization code (MCP clients) or the device grant (the CLI, headless and unattended agents), with one-hour access tokens and single-use rotating refresh tokens. Lifetimes follow common provider practice instead of a picker: a refresh token expires after 30 days unused and a connection ends 90 days after consent. Supersedes the personal-token parts of decisions 14, 37 and 43.
+    *Why:* a long-lived static token is the credential that leaks from env files and CI logs, and once authorization code shipped nothing needed one.
 
 ## 9. Non-goals (v1)
 

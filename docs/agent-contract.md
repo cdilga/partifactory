@@ -30,14 +30,13 @@ Discovery documents never list parts, spaces or people.
 
 Every surface takes the same token as `Authorization: Bearer <token>`. A token belongs to one **connection**: you, acting for one person, in the spaces and with the scopes they allowed. Everything you write is labelled "<agent> for <person>".
 
-**A person connects you once. You can't get a token on your own, by design.** Browser sign-in and the device code both wait for a person to tap Allow, and a personal token is made by a person in the workspace. If you can't open a browser for them, send them the device-code link (below), or ask them to make a personal token for you.
+**A person connects you once. You can't get a token on your own, by design.** Browser sign-in and the device code both wait for a person to tap Allow. If you can't open a browser for them, send them the device-code link (below). There are no long-lived tokens: every connection uses one-hour access tokens and rotating refresh tokens.
 
 | You are | Connect with |
 | --- | --- |
 | Claude Code, Codex, or any MCP client that does OAuth | MCP with browser sign-in: add the server URL and nothing else |
-| an MCP client without OAuth | a personal token as a static header |
 | a chat agent, a CLI, anything with no browser of its own | the device code |
-| something unattended (cron, CI, a server) | a personal token its person made for it |
+| something unattended (cron, CI, a server) | the device code once, then refresh on your own |
 
 | Scope | Allows |
 | --- | --- |
@@ -53,7 +52,7 @@ A scope never gives you more than your person has: writing a part needs their `e
 ```
 claude mcp add --transport http partifactory https://parts.<domain>/mcp
 ```
-The first call gets the 401 above. A standard MCP client follows `resource_metadata` to the authorization server, registers itself (RFC 7591, public client, loopback or https redirect), opens the person's browser at `authorization_endpoint` with PKCE `S256`, and the person picks scopes, spaces and lifetime and taps Allow. The redirect carries `code`, `state` and `iss`; the client exchanges the code at `token_endpoint` (`grant_type=authorization_code`, `resource` optional) and refreshes from then on. Any loopback port matches a registered loopback redirect. A client without OAuth can send a personal token instead: `--header "Authorization: Bearer $PARTIFACTORY_TOKEN"`.
+The first call gets the 401 above. A standard MCP client follows `resource_metadata` to the authorization server, registers itself (RFC 7591, public client, loopback or https redirect), opens the person's browser at `authorization_endpoint` with PKCE `S256`, and the person picks scopes and spaces and taps Allow. The redirect carries `code`, `state` and `iss`; the client exchanges the code at `token_endpoint` (`grant_type=authorization_code`, `resource` optional) and refreshes from then on. Any loopback port matches a registered loopback redirect.
 Tools are the ops below, `arguments` is the op's input, and `structuredContent` is its output.
 
 **Device code** (RFC 8628). Use it when you have no browser: a chat agent, a CLI. `part login` does all of this for you. `client_id=part-cli` is the one client id for every device-code agent, whatever you are; you name yourself with `agent_name` (required, ≤ 40 characters) and `software`. Both `/oauth/*` endpoints take form-encoded bodies and answer JSON.
@@ -64,7 +63,7 @@ curl -s https://parts.<domain>/oauth/device_authorization -d client_id=part-cli 
 → {"device_code":"GmRhmhcxhwAzkoEqiMEg_DnyEysNkuNhszIySk9eS","user_code":"KMQT-BXRD","verification_uri":"https://parts.<domain>/device",
    "verification_uri_complete":"https://parts.<domain>/device?code=KMQT-BXRD","expires_in":600,"interval":5}
 ```
-Send the person `verification_uri_complete` and the `user_code`; they check the code, pick spaces, scopes and a lifetime, and tap Allow. Meanwhile poll every `interval` seconds:
+Send the person `verification_uri_complete` and the `user_code`; they check the code, pick spaces and scopes, and tap Allow. Meanwhile poll every `interval` seconds:
 ```
 curl -s https://parts.<domain>/oauth/token -d client_id=part-cli \
   -d grant_type=urn:ietf:params:oauth:grant-type:device_code -d device_code=GmRhmhcxhwAzkoEqiMEg_DnyEysNkuNhszIySk9eS
@@ -73,15 +72,10 @@ curl -s https://parts.<domain>/oauth/token -d client_id=part-cli \
 Success returns `{"access_token":"pf_at_…","token_type":"Bearer","expires_in":3600,"refresh_token":"pf_rt_…","scope":"parts:read parts:write data:read data:write"}`.
 
 **Token lifetimes, plainly.** The access token lasts 1 hour. Refresh before it ends, or on any `401`, with `grant_type=refresh_token&refresh_token=pf_rt_…&client_id=part-cli`. Each refresh token works once: the answer carries a new access token and a new refresh token, and you store both.
-Refreshing keeps working until the connection's lifetime ends: 30 days, 90 days (the default) or 1 year, as the person chose when they allowed it. After that a person must connect you again. Presenting a refresh token you already used revokes the whole family, and you must connect again too.
+A refresh token expires after 30 days unused, so an agent in regular use stays connected, and every connection ends 90 days after the person allowed it. After either, a person must connect you again. Presenting a refresh token you already used revokes the whole family, and you must connect again too.
 A shared agent holds **one connection per person** and uses the token of the person it is serving.
 
-**Personal tokens, for plain HTTP, the CLI and unattended agents.** The person makes one in the workspace (Connected agents, New personal token: name, scopes, spaces, expiry from 30 days by default up to 1 year) and gives you two values:
-```
-PARTIFACTORY_URL=https://parts.<domain>
-PARTIFACTORY_TOKEN=pf_pat_…
-```
-A personal token never refreshes; when it expires, ask for a new one. HTTP: `POST $PARTIFACTORY_URL/api/v1/<op>` with a JSON body (the op's input) returns the op's output as JSON. CLI: `part <op> --json @input.json` (or `--json -` for stdin) sends the input and prints JSON; aliases include `part get <name>`, `part check <name>`, `part edit <name> --replace 'old' 'new'` and `part put ./dist --name <name> --kind files`. Both read the two variables.
+**Plain HTTP and the CLI.** With `PARTIFACTORY_URL=https://parts.<domain>`, `POST $PARTIFACTORY_URL/api/v1/<op>` with `Authorization: Bearer pf_at_…` and a JSON body (the op's input) returns the op's output as JSON. CLI: `part login --url https://parts.<domain>` connects once by device code and refreshes on its own; then `part <op> --json @input.json` (or `--json -` for stdin) sends the input and prints JSON. Aliases include `part get <name>`, `part check <name>`, `part edit <name> --replace 'old' 'new'` and `part put ./dist --name <name> --kind files`.
 
 ## Calling ops
 

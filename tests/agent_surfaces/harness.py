@@ -45,7 +45,7 @@ def main():
     repo = Path(__file__).resolve().parents[2]
     run = args.run_dir.resolve()
     tokens = json.loads((run / "agent-surface-private/tokens.json").read_text())
-    assert set(tokens) == {"pat", "device"}
+    assert set(tokens) == {"oauth", "device"}
     scenario = json.loads((repo / "tests/agent_surfaces/scenario.yaml").read_text())
     # The external security observer runs after all eight live lanes and scans their actual
     # private inputs across origin logs, metrics and Insights. Never publish this file.

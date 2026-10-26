@@ -1,7 +1,8 @@
 import { test, expect, waitForLog } from './harness/fixtures';
 import { signIn } from './lib/public-auth';
+import { deviceToken } from './lib/agent-tokens';
 
-test('real sign-in consents device and personal agent tokens, refresh reuse and revoke fail closed', async ({ page, request }, info) => {
+test('real sign-in consents device agent tokens, refresh reuse and revoke fail closed', async ({ page, request }, info) => {
   test.skip(!['chromium-desktop', 'webkit-mobile'].includes(info.project.name), 'Device approval desktop and mobile WebKit lanes');
   await signIn(page, 'member-a');
   const deviceResponse = await request.post('/oauth/device_authorization', { form: {
@@ -37,23 +38,19 @@ test('real sign-in consents device and personal agent tokens, refresh reuse and 
   const fresh = await freshResponse.json(); expect((await get(fresh.access_token)).status()).toBe(200);
   expect((await rotate()).status()).toBe(400);
   expect((await get(fresh.access_token)).status()).toBe(401);
-  const personal = await page.evaluate(async () => {
-    const session = await (await fetch('/api/session')).json();
-    const response = await fetch('/api/agents/personal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-      agent_name: 'Static browser gate', scopes: ['parts:read'], spaces: [`~${session.username}`], lifetime_days: 30,
-    }) });
-    return { status: response.status, body: await response.json() };
-  });
-  expect(personal.status, JSON.stringify(personal.body)).toBe(200);
-  expect(personal.body.token).toMatch(/^pf_pat_[A-Z2-7]{32}$/);
-  expect((await get(personal.body.token)).status()).toBe(200);
+  // Revoking the connection from Connected agents ends a live access token at once.
+  const again = await deviceToken(page, request, 'Revoke gate agent', ['parts:read']);
+  expect((await get(again.access_token)).status()).toBe(200);
+  const connection = await page.evaluate(async () => (await (await fetch('/api/agents')).json()).find((a: any) => a.agent_name === 'Revoke gate agent' && !a.revoked_at).id);
   await page.evaluate(async (id) => {
     const response = await fetch(`/api/agents/${id}/revoke`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     if (!response.ok) throw new Error(await response.text());
-  }, personal.body.connection_id);
-  const revoked = await get(personal.body.token);
+  }, connection);
+  const revoked = await get(again.access_token);
   expect(revoked.status()).toBe(401);
   expect(revoked.headers()['www-authenticate']).toContain('resource_metadata=');
+  // Long-lived personal tokens are retired: the route no longer exists.
+  expect(await page.evaluate(async () => (await fetch('/api/agents/personal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status)).not.toBe(200);
   const metadata = await (await request.get('/.well-known/oauth-authorization-server')).json();
   expect(metadata.grant_types_supported).toEqual(['authorization_code', 'urn:ietf:params:oauth:grant-type:device_code', 'refresh_token']);
   expect(metadata.code_challenge_methods_supported).toEqual(['S256']);

@@ -24,6 +24,10 @@ pub const SCOPES: &[&str] = &[
 ];
 const DAY: i64 = 86_400_000;
 const ACCESS: i64 = 3_600_000;
+/// A refresh token expires after this long unused. Each refresh rotates it, so an agent in use stays connected.
+const IDLE: i64 = 30 * DAY;
+/// A connection ends this long after consent, however busy; the person then connects the agent again.
+pub(crate) const CONNECTION: i64 = 90 * DAY;
 #[derive(Debug, Clone, Serialize)]
 pub struct OAuthError {
     pub error: &'static str,
@@ -205,23 +209,7 @@ pub struct Consent {
     pub code: String,
     pub scopes: BTreeSet<String>,
     pub spaces: BTreeSet<String>,
-    #[serde(default = "lifetime")]
-    pub lifetime_days: i64,
     pub allow: bool,
-}
-fn lifetime() -> i64 {
-    90
-}
-#[derive(Deserialize)]
-pub struct PersonalRequest {
-    pub agent_name: String,
-    pub scopes: BTreeSet<String>,
-    pub spaces: BTreeSet<String>,
-    #[serde(default = "pat_lifetime")]
-    pub lifetime_days: i64,
-}
-fn pat_lifetime() -> i64 {
-    30
 }
 
 impl TokenService {
@@ -239,7 +227,11 @@ impl TokenService {
     }
     pub fn seed(&self) -> Result<()> {
         self.db.write_blocking(|tx|{
-            tx.execute("INSERT OR IGNORE INTO oauth_clients(id,kind,client_name,metadata,created_at,consented_at) VALUES('part-cli','builtin','part CLI','{}',?1,?1)",[ids::now_ms()])?;Ok(())
+            let now=ids::now_ms();
+            tx.execute("INSERT OR IGNORE INTO oauth_clients(id,kind,client_name,metadata,created_at,consented_at) VALUES('part-cli','builtin','part CLI','{}',?1,?1)",[now])?;
+            // Personal tokens were long-lived and never refreshed; they are retired, so end any still out there.
+            tx.execute("UPDATE oauth_tokens SET revoked_at=?1 WHERE kind='pat' AND revoked_at IS NULL",[now])?;
+            tx.execute("UPDATE agent_connections SET revoked_at=?1 WHERE kind='pat' AND revoked_at IS NULL",[now])?;Ok(())
         })
     }
     /// The audience is the workspace origin. Clients may name it with or without the
@@ -371,12 +363,6 @@ impl TokenService {
         let code = normalize_code(&consent.code)?;
         let now = ids::now_ms();
         let actor = actor.clone();
-        if consent.allow && ![30, 90, 365].contains(&consent.lifetime_days) {
-            return Err(OAuthError::new(
-                "invalid_request",
-                "Choose a 30, 90 or 365 day lifetime.",
-            ));
-        }
         let scopes_json = json(&consent.scopes)?;
         let spaces_json = json(&consent.spaces)?;
         self.db.write(move|tx|{
@@ -387,7 +373,7 @@ impl TokenService {
             if consent.scopes.is_empty() || !consent.scopes.is_subset(&requested){return Err(OAuthError::new("invalid_scope","Consent may narrow the requested scopes."));}
             consent_checks(tx,&actor,&consent.spaces,now)?;
             let id=ids::new_id("c");
-            tx.execute("INSERT INTO agent_connections(id,kind,client_id,user_id,agent_name,software,scopes,spaces,expires_at,created_at) VALUES(?1,'device','part-cli',?2,?3,?4,?5,?6,?7,?8)",params![id,actor.user_id,agent_name,software,scopes_json,spaces_json,now+consent.lifetime_days*DAY,now])?;
+            tx.execute("INSERT INTO agent_connections(id,kind,client_id,user_id,agent_name,software,scopes,spaces,expires_at,created_at) VALUES(?1,'device','part-cli',?2,?3,?4,?5,?6,?7,?8)",params![id,actor.user_id,agent_name,software,scopes_json,spaces_json,now+CONNECTION,now])?;
             tx.execute("UPDATE device_codes SET status='approved',connection_id=?2 WHERE user_code=?1",params![code,id])?;
             audit(tx,&actor.user_id,"device.approve",&id,now)?;
             tracing::info!(event="device.approve",connection_id=%id,outcome="ok");tracing::info!(event="connection.create",connection_id=%id,kind="device",outcome="ok");Ok(())
@@ -451,38 +437,6 @@ impl TokenService {
         response
     }
 
-    pub async fn personal(
-        &self,
-        actor: &SessionActor,
-        request: PersonalRequest,
-    ) -> Result<serde_json::Value> {
-        let agent = name(&request.agent_name)?;
-        let requested = scopes(&request.scopes.iter().cloned().collect::<Vec<_>>().join(" "))?;
-        if !(1..=365).contains(&request.lifetime_days) {
-            return Err(OAuthError::new(
-                "invalid_request",
-                "A personal token lasts 1–365 days.",
-            ));
-        }
-        let scopes_json = json(&requested)?;
-        let spaces_json = json(&request.spaces)?;
-        let actor = actor.clone();
-        let resource = self.resource();
-        let now = ids::now_ms();
-        let token = opaque("pf_pat_", 20);
-        let hash = pf_auth::secret_hash(&token);
-        let expires = now + request.lifetime_days * DAY;
-        let conn=self.db.write(move|tx|{
-            consent_checks(tx,&actor,&request.spaces,now)?;let conn=ids::new_id("c");
-            tx.execute("INSERT INTO agent_connections(id,kind,user_id,agent_name,scopes,spaces,expires_at,created_at) VALUES(?1,'pat',?2,?3,?4,?5,?6,?7)",params![conn,actor.user_id,agent,scopes_json,spaces_json,expires,now])?;
-            tx.execute("INSERT INTO oauth_tokens(hash,kind,prefix,connection_id,resource,issued_at,expires_at) VALUES(?1,'pat','pf_pat_',?2,?3,?4,?5)",params![hash,conn,resource,now,expires])?;
-            audit(tx,&actor.user_id,"token.personal.create",&conn,now)?;tracing::info!(event="connection.create",connection_id=%conn,kind="pat",outcome="ok");tracing::info!(event="token.issue",connection_id=%conn,kind="pat",outcome="ok");Ok::<_,OAuthError>(conn)
-        }).await?;
-        Ok(
-            serde_json::json!({"token":token,"connection_id":conn,"expires_at":expires,"resource":self.resource()}),
-        )
-    }
-
     pub async fn revoke_connection(
         &self,
         actor: &SessionActor,
@@ -541,9 +495,9 @@ impl AuthorizationServer for TokenService {
             let now = ids::now_ms();
             db.write(move|tx|{
             type Row=(String,String,String,String,String,String,i64,Option<i64>,i64,Option<i64>,String);
-            let row:Option<Row>=tx.query_row("SELECT c.id,c.user_id,c.scopes,c.spaces,c.agent_name,t.kind,t.expires_at,t.revoked_at,c.expires_at,c.revoked_at,u.status FROM oauth_tokens t JOIN agent_connections c ON c.id=t.connection_id JOIN users u ON u.id=c.user_id WHERE t.hash=?1 AND t.kind IN('access','pat') AND t.resource=?2",params![hash,resource],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?,r.get(9)?,r.get(10)?))).optional()?;
+            let row:Option<Row>=tx.query_row("SELECT c.id,c.user_id,c.scopes,c.spaces,c.agent_name,t.kind,t.expires_at,t.revoked_at,c.expires_at,c.revoked_at,u.status FROM oauth_tokens t JOIN agent_connections c ON c.id=t.connection_id JOIN users u ON u.id=c.user_id WHERE t.hash=?1 AND t.kind='access' AND t.resource=?2",params![hash,resource],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?,r.get(9)?,r.get(10)?))).optional()?;
             let reason=match &row{None=>Some("unknown"),Some(r) if r.7.is_some() || r.9.is_some()=>Some("revoked"),Some(r) if r.6<=now || r.8<=now=>Some("expired"),Some(r) if r.10!="active"=>Some("disabled"),_=>None};
-            if let Some(reason)=reason{tracing::warn!(event="auth.reject",reason,outcome="unauthenticated");return Err(PfError::new("unauthenticated","Connect an agent through device code or create a personal token."));}
+            if let Some(reason)=reason{tracing::warn!(event="auth.reject",reason,outcome="unauthenticated");return Err(PfError::new("unauthenticated","Connect this agent with OAuth sign-in or a device code."));}
             let Some((conn,uid,scopes,spaces,agent_name,kind,_,_,_,_,_))=row else{unreachable!()};
             let scopes=serde_json::from_str(&scopes).map_err(|_|PfError::internal("Invalid connection scopes."))?;let spaces=serde_json::from_str(&spaces).map_err(|_|PfError::internal("Invalid connection spaces."))?;
             tx.execute("UPDATE agent_connections SET last_used_at=?2 WHERE id=?1",params![conn,now])?;
@@ -620,7 +574,7 @@ fn issue_pair(
     let access_expires = (now + ACCESS).min(until);
     for (token, kind, prefix, expires) in [
         (&access, "access", "pf_at_", access_expires),
-        (&refresh, "refresh", "pf_rt_", until),
+        (&refresh, "refresh", "pf_rt_", (now + IDLE).min(until)),
     ] {
         tx.execute("INSERT INTO oauth_tokens(hash,kind,prefix,connection_id,family_id,resource,issued_at,expires_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![pf_auth::secret_hash(token),kind,prefix,conn,family,resource,now,expires])?;
     }

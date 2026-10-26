@@ -367,7 +367,7 @@
         {
           "kind": "native",
           "file": "tests/agent_surfaces/run.rs",
-          "test": "four_drivers_times_personal_and_device_tokens",
+          "test": "four_drivers_times_oauth_and_device_tokens",
           "proves": "All four agent surfaces with PAT/device cannot create outward-sharing state.",
           "junit_classname": "pf-mcp::protocol"
         },
@@ -512,7 +512,7 @@
         {
           "kind": "native",
           "file": "tests/agent_surfaces/run.rs",
-          "test": "four_drivers_times_personal_and_device_tokens",
+          "test": "four_drivers_times_oauth_and_device_tokens",
           "proves": "Four surfaces cannot write outward sharing; link_for yields navigation only.",
           "junit_classname": "pf-mcp::protocol"
         },
@@ -584,18 +584,18 @@
     },
     {
       "id": "SEC-026",
-      "requirement": "A `pf_pat_` token is redacted in logs, scope- and space-limited like OAuth tokens, and revoked by the same cascade.",
+      "requirement": "Agent access tokens are scope- and space-limited, revoked by the connection cascade, and redacted in logs; retired `pf_pat_` personal tokens never resolve.",
       "components": [
         {
           "kind": "native",
           "file": "crates/pf-oauth/src/tests.rs",
-          "test": "personal_tokens_resolve_scopes_and_revocation_is_immediate",
-          "proves": "PAT scopes/spaces/revoke cascade."
+          "test": "access_tokens_resolve_scopes_and_revocation_is_immediate",
+          "proves": "Access-token scopes/spaces/revoke cascade."
         },
         {
           "kind": "external",
           "probe": "redaction_canaries",
-          "proves": "PAT redacted in live logs."
+          "proves": "Token canaries redacted in live logs."
         },
         {
           "kind": "playwright",
