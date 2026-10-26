@@ -59,7 +59,7 @@ test('communal_pixel_editor: real device agents, exact admin budgets and signed-
   const budgets:any[]=[];
   const share=new ExactBudget(page,hardware,'Can contribute + Copy',4,1);
   await share.click(page.getByRole('button',{name:'Share',exact:true}),'Share');
-  await share.click(page.getByRole('button',{name:'Anyone with the link',exact:true}),'Anyone with the link');
+  await share.click(page.getByRole('radio',{name:'Anyone with the link',exact:true}),'Anyone with the link');
   await share.select(page.getByLabel('Link access'),'contribute','Can contribute');
   await share.click(page.getByRole('button',{name:'Copy link',exact:true}),'Copy link');
   const link=page.getByLabel('Public link',{exact:true});await expect(link).toBeVisible();
@@ -100,7 +100,7 @@ test('communal_pixel_editor: real device agents, exact admin budgets and signed-
     const freeze=new ExactBudget(page,hardware,'Freeze',2,0);
     await freeze.click(page.getByRole('button',{name:'Share',exact:true}),'Share');
     const frozen=page.waitForResponse(response=>response.request().method()==='POST'&&response.url().endsWith(`/links/${linkId}`));
-    await freeze.click(page.getByRole('button',{name:'Freeze',exact:true}),'Freeze');
+    await freeze.click(page.getByRole('button',{name:'Freeze (make view only)',exact:true}),'Freeze');
     expect((await frozen).status()).toBe(200);await expect(page.getByText('Frozen.',{exact:true})).toBeVisible();
     budgets.push(await freeze.check());
     for(const [index,guest] of guests.entries()) {

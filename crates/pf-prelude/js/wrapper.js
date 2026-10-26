@@ -40,19 +40,27 @@ window.pfShareChrome = function (part, WS) {
     var pub=links.length || summary && summary.audience==='public';
     audience.textContent = pub ? '◉ Public link' : summary && summary.audience==='shared' ? 'Shared with you' : 'Only me';
     audience.className = pub ? 'pf-audience pf-public' : 'pf-audience';
-    document.getElementById('pf-public-rung').hidden = !isAdmin;
+    rung.parentNode.hidden = !isAdmin;
+    // The checked option is always the part's current audience; choosing one shows what changes.
+    if (pub) rung.checked = true; else if (!rung.checked) onlyMe.checked = true;
+    options.hidden = !(isAdmin && rung.checked);
+    onlyMe.disabled = !!pub;
     if (!isAdmin) { options.hidden = true; el('p', 'Only the admin can make a public link.', list); return; }
-    el('p',guestEdits+' guest edits today',list);
-    button(writers==='editors'?'Data: view only':'Data: viewers can write',list,function(){api('/writers',{writers:writers==='editors'?'viewers':'editors'}).then(refresh).catch(report);});
-    button('Roll back data',list,function(){data('snapshot_list').then(function(j){status.replaceChildren();var select=el('select',null,status);select.setAttribute('aria-label','Snapshot');j.snapshots.forEach(function(s){var o=el('option',new Date(s.taken_at).toLocaleString()+' · '+s.reason,select);o.value=s.id;});button('Restore snapshot',status,function(){data('snapshot_restore',{snapshot_id:Number(select.value)}).then(function(){status.textContent='Data restored.';}).catch(report);}).disabled=!j.snapshots.length;}).catch(report);});
-    button('Reset data',list,function(){status.replaceChildren();el('p','Clear all shared data? An undo snapshot will be saved first.',status);button('Confirm reset',status,function(){data('reset',{confirm:true}).then(function(){status.textContent='Data reset. Roll back to undo.';}).catch(report);});});
+    if (links.length) el('h3', 'Active links', list);
     links.forEach(function (l) {
-      var row = el('section', null, list);
+      var row = el('section', null, list); row.className = 'pf-link-row';
       el('p', (l.mode === 'contribute' ? 'Can contribute' : 'Can view') + ' · opened ' + l.open_count + ' times · last ' + (l.last_opened_at ? new Date(l.last_opened_at).toLocaleString() : 'never'), row);
-      if (l.mode === 'contribute') button('Freeze', row, function () { change(l, 'freeze'); });
-      else el('p', 'Data: view only', row);
-      button('Revoke', row, function () { change(l, 'revoke'); }).className = 'pf-danger';
+      if (l.mode === 'contribute') button('Freeze (make view only)', row, function () { change(l, 'freeze'); });
+      button('Revoke link', row, function () { change(l, 'revoke'); }).className = 'pf-danger';
     });
+    var dataBox = el('fieldset', null, list); dataBox.className = 'pf-data'; el('legend', 'Shared data', dataBox);
+    var wl = el('label', 'Who can change it', dataBox), w = el('select', null, wl); w.setAttribute('aria-label', 'Who can change shared data');
+    [['viewers', 'Anyone who can open it'], ['editors', 'Only you and editors']].forEach(function (v) { var o = el('option', v[1], w); o.value = v[0]; });
+    w.value = writers === 'editors' ? 'editors' : 'viewers';
+    w.onchange = function () { api('/writers', { writers: w.value }).then(function () { status.textContent = 'Saved.'; return refresh(); }).catch(report); };
+    el('p', guestEdits + (guestEdits === 1 ? ' guest edit today' : ' guest edits today'), dataBox).className = 'pf-muted';
+    button('Roll back data',dataBox,function(){data('snapshot_list').then(function(j){status.replaceChildren();var select=el('select',null,status);select.setAttribute('aria-label','Snapshot');j.snapshots.forEach(function(s){var o=el('option',new Date(s.taken_at).toLocaleString()+' · '+s.reason,select);o.value=s.id;});button('Restore snapshot',status,function(){data('snapshot_restore',{snapshot_id:Number(select.value)}).then(function(){status.textContent='Data restored.';}).catch(report);}).disabled=!j.snapshots.length;}).catch(report);});
+    button('Reset data',dataBox,function(){status.replaceChildren();el('p','Clear all shared data? An undo snapshot will be saved first.',status);button('Confirm reset',status,function(){data('reset',{confirm:true}).then(function(){status.textContent='Data reset. Roll back to undo.';}).catch(report);});});
   }
   function data(action,extra){var body={name:part,action:action,scope:'shared'};if(action!=='snapshot_list')body.request_id=crypto.randomUUID();Object.assign(body,extra||{});return api('/data',body);}
   function change(l, action) {
@@ -93,10 +101,16 @@ window.pfShareChrome = function (part, WS) {
   updateSummary();
   sheet = el('dialog', null, document.body); sheet.id = 'pf-share'; sheet.setAttribute('aria-labelledby', 'pf-share-title');
   var head = el('header', null, sheet); el('h2', 'Share', head).id = 'pf-share-title'; button('Close', head, function () { sheet.close(); });
-  el('p', 'Choose who can open this part.', sheet);
-  button('Only me', sheet, function () {}).disabled = true;
-  button('People you add', sheet, function () {}).disabled = true;
-  var rung = button('Anyone with the link', sheet, function () { options.hidden = false; }); rung.id = 'pf-public-rung'; rung.hidden = true;
+  var who = el('fieldset', null, sheet); who.className = 'pf-choice'; el('legend', 'Who can open it', who);
+  function choice(value, text, hint) {
+    var l = el('label', null, who), r = el('input', null, l); r.type = 'radio'; r.name = 'pf-audience'; r.value = value;
+    el('span', text, l); if (hint) el('small', hint, l); return r;
+  }
+  var onlyMe = choice('me', 'Only me');
+  var people = choice('people', 'People you add', 'Coming soon'); people.disabled = true;
+  var rung = choice('public', 'Anyone with the link'); rung.id = 'pf-public-rung'; rung.parentNode.hidden = true;
+  onlyMe.onchange = function () { options.hidden = true; };
+  rung.onchange = function () { options.hidden = false; };
   var options = el('div', null, sheet); options.id = 'pf-public-options'; options.hidden = true;
   el('p', 'Anyone with the link can use it. Only you and people you add can change it.', options);
   var ml = el('label', 'Link access', options); mode = el('select', null, ml); mode.setAttribute('aria-label', 'Link access');
@@ -111,7 +125,7 @@ window.pfShareChrome = function (part, WS) {
       refresh();
     }).catch(report);
   });
-  list = el('div', null, sheet); status = el('div', null, sheet); status.id = 'pf-status'; status.setAttribute('role', 'status');
+  list = el('div', null, sheet); list.id = 'pf-share-list'; status = el('div', null, sheet); status.id = 'pf-status'; status.setAttribute('role', 'status');
   refresh().then(function () {
     if (/(?:^#|&)share=(public|contribute)(?:&|$)/.test(location.hash)) { mode.value = location.hash.indexOf('share=contribute') >= 0 ? 'contribute' : 'view'; options.hidden = !isAdmin; share(); }
   });

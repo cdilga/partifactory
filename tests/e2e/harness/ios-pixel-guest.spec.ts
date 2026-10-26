@@ -101,7 +101,7 @@ load().then(async()=>{window.partifactory.ready();await deviceWait("admin_ready"
   const board=page.frameLocator('#pf-frame');
   await expect(board.locator('#b')).toBeVisible();
   await page.getByRole('button',{name:'Share',exact:true}).click();
-  await page.getByRole('button',{name:'Anyone with the link',exact:true}).click();
+  await page.getByRole('radio',{name:'Anyone with the link',exact:true}).click();
   await page.getByLabel('Link access').selectOption('contribute');
   await page.getByRole('button',{name:'Copy link',exact:true}).click();
   const url=await page.getByLabel('Public link',{exact:true}).inputValue();
@@ -135,7 +135,7 @@ load().then(async()=>{window.partifactory.ready();await deviceWait("admin_ready"
   await expect(board.locator('[data-key="px:0:0"]')).toHaveCSS('background-color','rgb(228, 87, 46)');
   await report('admin_live_under_1s',{at:String(elapsed)});
   const frozenResponse=page.waitForResponse(response=>response.request().method()==='POST' && new URL(response.url()).pathname.startsWith(`/api/chrome/v1/${name}/links/`));
-  await page.getByRole('button',{name:'Freeze',exact:true}).click();
+  await page.getByRole('button',{name:'Freeze (make view only)',exact:true}).click();
   expect((await frozenResponse).status()).toBe(200);
   await expect(page.getByText('Frozen.',{exact:true})).toBeVisible();
   await report('admin_frozen');

@@ -48,7 +48,7 @@ test('shipping device matrix: standalone, part root, reload, guest and sign-in',
     const linkFile=path.join(directory,'guest-link.json');
     if(info.project.name==='chromium-mobile'){
       await page.getByRole('button',{name:'Share',exact:true}).click();
-      await page.getByRole('button',{name:'Anyone with the link',exact:true}).click();
+      await page.getByRole('radio',{name:'Anyone with the link',exact:true}).click();
       await page.getByRole('button',{name:'Copy link',exact:true}).click();
       const input=page.getByLabel('Public link',{exact:true});
       await expect(input).toBeVisible();

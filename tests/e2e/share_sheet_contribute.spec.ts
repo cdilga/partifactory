@@ -13,7 +13,7 @@ test('native admin share, mobile guest paint, freeze, undo and revoke', async ({
   await expect(page.frameLocator('#pf-frame').locator('#b')).toBeVisible();
   const budget = clickBudget(page, 4, 'Can contribute + Copy');
   await budget.click(page.getByRole('button', { name: 'Share', exact: true }));
-  await budget.click(page.getByRole('button', { name: 'Anyone with the link', exact: true }));
+  await budget.click(page.getByRole('radio', { name: 'Anyone with the link', exact: true }));
   budget.used++; await page.getByLabel('Link access').selectOption('contribute');
   const topNavigations: string[] = [];
   page.on('framenavigated', f => { if (f === page.mainFrame()) topNavigations.push(f.url()); });
@@ -80,7 +80,7 @@ test('native admin share, mobile guest paint, freeze, undo and revoke', async ({
     // A dispatched click does not finish the async mutation. Start the next guest write
     // only once Freeze has committed and the native UI acknowledges its completion.
     const frozen=linkMutation('freeze');
-    await page.getByRole('button', { name: 'Freeze', exact: true }).click();
+    await page.getByRole('button', { name: 'Freeze (make view only)', exact: true }).click();
     expect((await frozen).status()).toBe(200);
     await expect(page.getByText('Frozen.',{exact:true})).toBeVisible();
     const refused=guest.waitForResponse(response=>{
@@ -108,7 +108,7 @@ test('native admin share, mobile guest paint, freeze, undo and revoke', async ({
     await guestBoard.locator('[data-key="px:1:0"]').click();
     await expect(page.frameLocator('#pf-frame').locator('[data-key="px:1:0"]')).toHaveCSS('background-color', 'rgb(228, 87, 46)');
     const revoked=linkMutation('revoke');
-    await page.getByRole('button', { name: 'Revoke', exact: true }).click();
+    await page.getByRole('button', { name: 'Revoke link', exact: true }).click();
     expect((await revoked).status()).toBe(200);
     expect((await guestContext.request.get(url)).status()).toBe(404);
     await expect(page.locator('.pf-audience')).toHaveText('Only me');
