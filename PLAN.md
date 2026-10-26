@@ -103,6 +103,21 @@ Adding anything to it takes a decision from the admin. Work that straddled the l
 7. **`/skill.md` is `docs/agent-contract.md`**, and the test that regenerates its op reference from the registry passes.
 8. **Not in the gate: real devices.** The by-hand run on the example deployment (a real agent, the admin on their phone, a signed-out phone on mobile data) and the Telegram passkey test sit in the human checks, which never block Slice 1 (decision 52). A failure there becomes a bug for the swarm.
 
+## Slice 2: the household shares, comments and edits
+
+**Started 2026-10-26 by the admin** (decision 57), as the first cut of what remains in P1 and P2. Slice 1 proved one part reaching strangers; Slice 2 proves a part reaching the household. It cuts across P1's workspace extras and P2's comments and editor, and nothing else moves.
+
+| Area | What ships |
+| --- | --- |
+| Inward sharing | the share sheet's **People you add** rung: pick people and groups from the directory, give each View, Comment, Edit or Manage, Done; remove with undo; the live "who can see this" sentence; `everyone-signed-in` for the admin with its live count; `part_share` for agents with `share:household`, labelled and undoable; audit for every change |
+| The household space | the `family` space (created on first start from `[spaces] household_group`, the minimal part of `provision`), its `group:<household> → edit` grant, **Move to Family** in the sheet and as `part_edit {move}` |
+| Ask for access | `403 · NOT SHARED WITH YOU` with **Ask for access** (never the title), the access-asks list in the sheet with Add and Dismiss |
+| Comments | the comments rail in the wrapper for `comment` and above, threads, replies, resolve, live via `/_rt/events`, anchored to text quotes; `part_comments` for agents with `comments:write` |
+| Editing text | the source editor for `text`, `markdown` and `html` parts (drafts, preview, save as a version, conflict notice), then the formatted view for Markdown and `text` that saves block edits (decision 54) |
+| Examples | the example deployment's workshop page shared with the household as commenters, and a shared notes page made as a `markdown` part and edited in the formatted view |
+
+**Definition of done.** A member signed in on another device opens a part the admin shared with them as Comment, leaves a comment the admin sees within 1 s, and can't edit; the admin moves a part to Family and every household member can open it; a member with no access asks for it and the admin adds them in two taps; a member edits a Markdown part in the formatted view and an agent's next `part_get` sees the change. Each is an e2e test on the harness with two signed-in people, on the device matrix, and CI is green.
+
 ---
 
 ## 1. What shartifacts gets right, and what doesn't fit here
@@ -3156,6 +3171,7 @@ Every line runs against the example deployment's staging (Cloudflare + Authentik
     *Why:* a long-lived static token is the credential that leaks from env files and CI logs, and once authorization code shipped nothing needed one.
 56. **The admin chooses how admin actions are confirmed** (the admin, 2026-10-26). Security settings (`/admin/security`) offer: nothing extra (the signed-in session is enough), the partifactory passkey (the default for a new deployment, as before), or a fresh sign-in at the identity provider (OIDC `prompt=login` with `max_age=0`, checking `auth_time`; provider-neutral, and next to build). Changing the mode is itself an admin action, confirmed under the mode in force, and passkey mode can't be turned on without a registered passkey. Refines §4 "One admin, and only one".
     *Why:* the admin already signs in with a phishing-resistant method at the provider and prefers no second prompt for now; the passkey stays one click away.
+57. **Slice 2 is household sharing, comments and editing** (the admin, 2026-10-26). After Slice 1 shipped, the admin asked for the rest of the slices; the household loop (people you add, Family, ask for access, comments, the text editor) comes first because the example deployment can't show an internal, commentable page without it. See "Slice 2" at the top.
 
 ## 9. Non-goals (v1)
 
