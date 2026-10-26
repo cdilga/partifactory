@@ -30,7 +30,7 @@ test('MCP real PAT and device connections discover check image and isolate scree
   const rpc = (token: string | null, method: string, params: Record<string, unknown> = {}) => request.post('/mcp', { headers: { Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': method, ...(params.name ? { 'Mcp-Name': String(params.name) } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) }, data: { jsonrpc: '2.0', id: 1, method, params: { _meta: meta, ...params } } });
   const missing = await rpc(null, 'tools/list');
   expect(missing.status()).toBe(401); expect(missing.headers()['www-authenticate']).toContain('resource_metadata');
-  expect((await missing.json()).error.details.ways.map((w: any) => w.kind)).toEqual(['device_code', 'personal_token']);
+  expect((await missing.json()).error.details.ways.map((w: any) => w.kind)).toEqual(['oauth', 'device_code', 'personal_token']);
   const skill = await (await request.get('/skill.md')).text();
   const guide = skill.slice(skill.indexOf('\n---\n') + 6).trimStart();
   for (const endpoint of ['/', '/llms.txt', '/llms-full.txt', '/agents.md', '/.well-known/mcp/server.json']) {

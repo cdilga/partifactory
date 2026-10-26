@@ -55,8 +55,8 @@ test('real sign-in consents device and personal agent tokens, refresh reuse and 
   expect(revoked.status()).toBe(401);
   expect(revoked.headers()['www-authenticate']).toContain('resource_metadata=');
   const metadata = await (await request.get('/.well-known/oauth-authorization-server')).json();
-  expect(metadata.grant_types_supported).toEqual(['urn:ietf:params:oauth:grant-type:device_code', 'refresh_token']);
-  expect(metadata.authorization_endpoint).toBeUndefined(); expect(metadata.registration_endpoint).toBeUndefined();
+  expect(metadata.grant_types_supported).toEqual(['authorization_code', 'urn:ietf:params:oauth:grant-type:device_code', 'refresh_token']);
+  expect(metadata.code_challenge_methods_supported).toEqual(['S256']);
   await expect.poll(async () => (await waitForLog({ event: 'token.issue' })).length).toBeGreaterThan(0);
   expect((await waitForLog({ event: 'auth.reject' })).some(line => line.reason === 'revoked')).toBe(true);
   await page.screenshot({ path: info.outputPath('device-consent-completed.png') });

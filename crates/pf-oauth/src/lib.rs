@@ -9,6 +9,7 @@ use pf_db::{
 use pf_model::{PfError, Principal};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, future::Future, net::IpAddr, pin::Pin, sync::Arc};
+pub mod authorization;
 pub mod web;
 
 pub const SCOPES: &[&str] = &[
@@ -241,11 +242,20 @@ impl TokenService {
             tx.execute("INSERT OR IGNORE INTO oauth_clients(id,kind,client_name,metadata,created_at,consented_at) VALUES('part-cli','builtin','part CLI','{}',?1,?1)",[ids::now_ms()])?;Ok(())
         })
     }
+    /// The audience is the workspace origin. Clients may name it with or without the
+    /// trailing slash, or by the MCP endpoint URL; omitting it means the same audience.
+    pub fn resource_matches(given: Option<&str>, canonical: &str) -> bool {
+        let root = canonical.trim_end_matches('/');
+        given.is_none_or(|r| {
+            let r = r.trim_end_matches('/');
+            r == root || r == format!("{root}/mcp")
+        })
+    }
     fn check_resource(&self, resource: Option<&str>) -> Result<()> {
-        if resource.is_some_and(|r| r != self.resource()) {
+        if !Self::resource_matches(resource, &self.resource()) {
             return Err(OAuthError::new(
                 "invalid_target",
-                "The resource must be this workspace origin with its trailing slash.",
+                "The resource must be this workspace origin or its /mcp endpoint.",
             ));
         }
         Ok(())

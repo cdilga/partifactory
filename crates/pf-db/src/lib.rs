@@ -45,6 +45,11 @@ pub const MAIN: &[Migration] = &[
         name: "0003_retention",
         sql: include_str!("../migrations/0003_retention.sql"),
     },
+    Migration {
+        version: 4,
+        name: "0004_oauth_requests",
+        sql: include_str!("../migrations/0004_oauth_requests.sql"),
+    },
 ];
 
 /// The insights database's migrations (`/data/insights.db`, §5g).

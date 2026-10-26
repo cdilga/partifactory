@@ -294,7 +294,7 @@ async fn auth(State(service): State<Mcp>, mut request: Request, next: Next) -> R
                 request_id = pf_obs::request_id::current().unwrap_or_default(),
                 outcome = "unauthenticated"
             );
-            let error=error.with("ways",json!([{"kind":"device_code","url":format!("{}/oauth/device_authorization",service.origin)},{"kind":"personal_token","url":format!("{}/settings/agents",service.origin)}]));
+            let error=error.with("ways",json!([{"kind":"oauth","url":format!("{}/.well-known/oauth-protected-resource",service.origin)},{"kind":"device_code","url":format!("{}/oauth/device_authorization",service.origin)},{"kind":"personal_token","url":format!("{}/connected-agents",service.origin)}]));
             let mut response = (
                 http::StatusCode::UNAUTHORIZED,
                 axum::Json(error_body(&error, &service.origin)),

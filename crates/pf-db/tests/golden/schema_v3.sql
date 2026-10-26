@@ -73,6 +73,9 @@ CREATE UNIQUE INDEX names_one_active ON names(part_id) WHERE state = 'active';
 -- index oauth_clients_unconsented on oauth_clients
 CREATE INDEX oauth_clients_unconsented ON oauth_clients(created_at) WHERE consented_at IS NULL;
 
+-- index oauth_requests_expiry on oauth_requests
+CREATE INDEX oauth_requests_expiry ON oauth_requests(expires_at);
+
 -- index oauth_tokens_conn on oauth_tokens
 CREATE INDEX oauth_tokens_conn ON oauth_tokens(connection_id);
 
@@ -587,6 +590,14 @@ CREATE TABLE oauth_codes (
   lifetime_ms   INTEGER NOT NULL,
   expires_at    INTEGER NOT NULL,                    -- 60 s
   used_at       INTEGER
+, connection_id TEXT REFERENCES agent_connections(id)) STRICT, WITHOUT ROWID;
+
+-- table oauth_requests on oauth_requests
+CREATE TABLE oauth_requests (
+  hash BLOB PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  request TEXT NOT NULL CHECK (json_valid(request)),
+  expires_at INTEGER NOT NULL
 ) STRICT, WITHOUT ROWID;
 
 -- table oauth_tokens on oauth_tokens

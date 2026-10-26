@@ -20,8 +20,8 @@ Given only `https://parts.<domain>`, a fresh agent:
 | --- | --- |
 | `/openapi.json` | OpenAPI 3.1 for every op; `operationId` = op name |
 | `/llms-full.txt` | this page plus every op's schema and examples |
-| `/.well-known/oauth-protected-resource` | RFC 9728: the resource `https://parts.<domain>/` and its authorization server |
-| `/.well-known/oauth-authorization-server` | RFC 8414: `device_authorization_endpoint`, `token_endpoint`, `revocation_endpoint`, `scopes_supported` |
+| `/.well-known/oauth-protected-resource` (also `/.well-known/oauth-protected-resource/mcp`) | RFC 9728: the resource `https://parts.<domain>/` and its authorization server |
+| `/.well-known/oauth-authorization-server` | RFC 8414: `authorization_endpoint`, `registration_endpoint`, `device_authorization_endpoint`, `token_endpoint`, `revocation_endpoint`, `scopes_supported` |
 | `/.well-known/mcp/server.json` | the MCP server description (`remotes: [{type: "streamable-http", url}]`) |
 
 Discovery documents never list parts, spaces or people.
@@ -30,12 +30,12 @@ Discovery documents never list parts, spaces or people.
 
 Every surface takes the same token as `Authorization: Bearer <token>`. A token belongs to one **connection**: you, acting for one person, in the spaces and with the scopes they allowed. Everything you write is labelled "<agent> for <person>".
 
-**A person connects you once. You can't get a token on your own, by design.** The device code waits for a person to tap Allow, and a personal token is made by a person in the workspace. If you have neither, stop and ask your person: send them the device-code link (below), or ask them to make a personal token for you.
+**A person connects you once. You can't get a token on your own, by design.** Browser sign-in and the device code both wait for a person to tap Allow, and a personal token is made by a person in the workspace. If you can't open a browser for them, send them the device-code link (below), or ask them to make a personal token for you.
 
 | You are | Connect with |
 | --- | --- |
-| Claude Code | MCP with a personal token, or the `part` CLI (`part login` runs the device code and refreshes its own token) |
-| any other MCP client | a personal token as a static header (browser sign-in for MCP comes after Slice 1) |
+| Claude Code, Codex, or any MCP client that does OAuth | MCP with browser sign-in: add the server URL and nothing else |
+| an MCP client without OAuth | a personal token as a static header |
 | a chat agent, a CLI, anything with no browser of its own | the device code |
 | something unattended (cron, CI, a server) | a personal token its person made for it |
 
@@ -49,11 +49,12 @@ Every surface takes the same token as `Authorization: Bearer <token>`. A token b
 
 A scope never gives you more than your person has: writing a part needs their `edit` role on it, and writing its shared data needs their right to (see "Who can write shared data"). Any connection with `parts:read` may call `part_link_for`, whoever its person is; the links it returns are for the admin (`who: "admin"`).
 
-**MCP.** Streamable HTTP at `https://parts.<domain>/mcp`. In Slice 1, configure a personal token as a static header (a device-code access token would go stale within the hour):
+**MCP.** Streamable HTTP at `https://parts.<domain>/mcp`. Add just the URL; the client does the rest:
 ```
-claude mcp add --transport http partifactory https://parts.<domain>/mcp --header "Authorization: Bearer $PARTIFACTORY_TOKEN"
+claude mcp add --transport http partifactory https://parts.<domain>/mcp
 ```
-Tools are the ops below, `arguments` is the op's input, and `structuredContent` is its output. The browser OAuth flow (one passkey tap, no pasted token) comes after Slice 1.
+The first call gets the 401 above. A standard MCP client follows `resource_metadata` to the authorization server, registers itself (RFC 7591, public client, loopback or https redirect), opens the person's browser at `authorization_endpoint` with PKCE `S256`, and the person picks scopes, spaces and lifetime and taps Allow. The redirect carries `code`, `state` and `iss`; the client exchanges the code at `token_endpoint` (`grant_type=authorization_code`, `resource` optional) and refreshes from then on. Any loopback port matches a registered loopback redirect. A client without OAuth can send a personal token instead: `--header "Authorization: Bearer $PARTIFACTORY_TOKEN"`.
+Tools are the ops below, `arguments` is the op's input, and `structuredContent` is its output.
 
 **Device code** (RFC 8628). Use it when you have no browser: a chat agent, a CLI. `part login` does all of this for you. `client_id=part-cli` is the one client id for every device-code agent, whatever you are; you name yourself with `agent_name` (required, ≤ 40 characters) and `software`. Both `/oauth/*` endpoints take form-encoded bodies and answer JSON.
 ```
@@ -103,7 +104,7 @@ Reserve a name and get the part's link at once, optionally with its first versio
 | --- | --- | --- | --- | --- |
 | `title` | str | yes (or `name` with `check_only`) | — | shown to people |
 | `name` | str | no | derived from `title` | the host label: `[a-z0-9-]`, 1–58 chars, no leading, trailing or double hyphens |
-| `kind` | `html` \| `markdown` \| `text` \| `files` | no | detected from the entry file | required with `content`; `tsx` comes after Slice 1 |
+| `kind` | `html` \| `markdown` \| `text` \| `svg` \| `code` \| `files` | no | detected from the entry file | required with `content`; `tsx` comes after Slice 1 |
 | `content` | str | no | — | the text of a one-file part (see Kinds) |
 | `files` | `{path: str \| {blob: sha256}}` | no | — | several files; text inline, bytes uploaded first (see Kinds) |
 | `space` | str | no | your person's personal space | a space slug your connection may write |
@@ -272,11 +273,13 @@ Errors: `invalid_input`, `unknown_field`, `unauthenticated`, `forbidden`, `not_f
 | --- | --- | --- |
 | `text` | `content` (or `index.txt`) | shown as is, with line numbers |
 | `markdown` | `content` (or `*.md`) | rendered server-side |
+| `svg` | `content` (or `*.svg`) | an unchanged SVG document under the canonical sandbox CSP; HTML storage shims are not inserted |
+| `code` | source files, or `content` with `kind: "code"` | server-side syntax highlighting, light/dark colours and stable `#L1` line anchors; source text stays literal and read-only |
 | `html` | `content` (or `index.html` plus files) | one file is best; CDN `<script>`/`<link>` tags from cdnjs, jsDelivr `/npm/`, unpkg, esm.sh and Google Fonts are fetched once at build time, so they work. For React in Slice 1, use the UMD builds by tag (e.g. `https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js` and `react-dom`) and plain `React.createElement` or an in-page JSX transform |
 | `files` | `kind: "files"` and `files`, entry `index.html` | a prebuilt bundle (e.g. `vite build` with `base: './'`), served as uploaded |
 | `tsx` | after Slice 1 | until then, send `html` (above), or build locally and send `files` |
 
-With `content` you must give `kind`; the file is named `index.html`, `index.md` or `index.txt`. For bytes (images, fonts), `POST /api/v1/blobs` with the raw body returns `{hash, size}`, and `POST /api/v1/blobs/missing` with `{path: hash}` returns `{missing: [hash]}`; then send `{path: {blob: hash}}`. `part put ./dist` does both and uploads only what's missing.
+With `content` you must give `kind`; the file is named `index.html`, `index.md`, `index.svg` or `index.txt` (also used for `code`). For bytes (images, fonts), `POST /api/v1/blobs` with the raw body returns `{hash, size}`, and `POST /api/v1/blobs/missing` with `{path: hash}` returns `{missing: [hash]}`; then send `{path: {blob: hash}}`. `part put ./dist` does both and uploads only what's missing.
 
 ## What a page can do
 
@@ -449,6 +452,6 @@ Later, `part_data {"name":"pixel","action":"list","prefix":"px:"}` shows what gu
 
 ## After Slice 1
 
-Not available yet, so don't call them: `part_find` (search), `part_share` (inward sharing), `part_comments`, `part_watch` (the event feed), `design_system` (Jig), `part_inbox`; block edits and leases in `part_edit`; `notes`, `render: "text"` and `advisories` in `part_get`; `update` in `part_edit`; `part_data` collections other than `__storage`; `upload` URLs in `part_create`/`part_edit`; the browser OAuth flow for MCP; backends; `claude.use(...)`; kinds `tsx`, `svg`, `code` and `slides`; `part_link_for` actions other than `public_link` and `contribute`.
+Not available yet, so don't call them: `part_find` (search), `part_share` (inward sharing), `part_comments`, `part_watch` (the event feed), `design_system` (Jig), `part_inbox`; block edits and leases in `part_edit`; `notes`, `render: "text"` and `advisories` in `part_get`; `update` in `part_edit`; `part_data` collections other than `__storage`; `upload` URLs in `part_create`/`part_edit`; backends; `claude.use(...)`; kinds `tsx` and `slides`; `part_link_for` actions other than `public_link` and `contribute`.
 
 Coming right after Slice 1: **previews**. Every part gets an automatic screenshot poster, used as its gallery thumbnail and as the `og:image` of its public links. You may also give a part a short muted `og:video` clip with a `preview` field on `part_create`/`part_edit {meta}`, either your own MP4 or `"record"` with `actions` that show it working. Check the clip with `part_check {record: true}` before you share the link. A clip is optional, so consider one for anything animated or interactive. Until then, don't send `preview`.

@@ -121,7 +121,7 @@ async fn authenticate(
     let enrich = |e: PfError| {
         if e.code == "unauthenticated" {
             e.with("resource_metadata",format!("{origin}/.well-known/oauth-protected-resource"))
-                .with("ways",json!([{"kind":"device_code","url":format!("{origin}/oauth/device/code")},{"kind":"personal_token","url":format!("{origin}/settings/agents")}]))
+                .with("ways",json!([{"kind":"oauth","url":format!("{origin}/.well-known/oauth-protected-resource")},{"kind":"device_code","url":format!("{origin}/oauth/device_authorization")},{"kind":"personal_token","url":format!("{origin}/connected-agents")}]))
         } else {
             e
         }

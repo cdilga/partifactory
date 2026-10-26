@@ -31,7 +31,7 @@ pub fn agents(origin: &str) -> String {
 }
 pub fn markdown(origin: &str) -> String {
     format!(
-        "# partifactory\n\nA self-hosted home for household pages, tools, docs and small apps. Each part has its own sandboxed host.\n\nConnect through MCP, the HTTPS JSON API, the part CLI or the agent skill. A person connects each agent through device code or a personal token.\n\n- [Agent skill]({origin}/skill.md)\n- [OpenAPI]({origin}/openapi.json)\n- [MCP]({origin}/mcp)\n- [Complete guide]({origin}/llms-full.txt)\n- [Agent instructions]({origin}/agents.md)\n"
+        "# partifactory\n\nA self-hosted home for household pages, tools, docs and small apps. Each part has its own sandboxed host.\n\nAdd {origin}/mcp as a remote HTTP MCP server. OAuth discovery opens browser sign-in and scoped consent; a person connects each agent once. The agent can then create and edit directly within its connection. Headless clients use device code; personal tokens remain available for clients without OAuth.\n\n- [Connect an agent]({origin}/connect)\n- [Agent skill]({origin}/skill.md)\n- [OpenAPI]({origin}/openapi.json)\n- [MCP]({origin}/mcp)\n- [Complete guide]({origin}/llms-full.txt)\n- [Agent instructions]({origin}/agents.md)\n"
     )
 }
 fn origin(state: &AppState) -> String {

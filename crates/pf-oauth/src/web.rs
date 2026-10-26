@@ -1,4 +1,5 @@
 //! The browser consent surface and the mounted OAuth endpoints.
+use crate::authorization::{AuthorizationRequest, CodeConsent, CodeExchange, Registration};
 use crate::*;
 use axum::{
     Extension, Form, Json, Router,
@@ -78,10 +79,36 @@ struct Token {
     device_code: Option<String>,
     refresh_token: Option<String>,
     resource: Option<String>,
+    code: Option<String>,
+    redirect_uri: Option<String>,
+    code_verifier: Option<String>,
 }
 async fn token(State(state): State<AppState>, Form(body): Form<Token>) -> Response {
     let service = service(&state);
     let result = match body.grant_type.as_str() {
+        "authorization_code" => match (
+            body.client_id,
+            body.code,
+            body.redirect_uri,
+            body.code_verifier,
+            body.resource,
+        ) {
+            (Some(client_id), Some(code), Some(redirect_uri), Some(code_verifier), resource) => {
+                service
+                    .exchange_code(CodeExchange {
+                        client_id,
+                        code,
+                        redirect_uri,
+                        code_verifier,
+                        resource,
+                    })
+                    .await
+            }
+            _ => Err(OAuthError::new(
+                "invalid_request",
+                "Supply client_id, code, redirect_uri and code_verifier.",
+            )),
+        },
         "urn:ietf:params:oauth:grant-type:device_code" => {
             match (body.client_id, body.device_code) {
                 (Some(client), Some(device)) => {
@@ -96,17 +123,25 @@ async fn token(State(state): State<AppState>, Form(body): Form<Token>) -> Respon
             }
         }
         "refresh_token" => match body.refresh_token {
-            Some(refresh) => service.refresh(&refresh, body.resource.as_deref()).await,
+            Some(refresh) => {
+                service
+                    .refresh_client(
+                        &refresh,
+                        body.resource.as_deref(),
+                        body.client_id.as_deref(),
+                    )
+                    .await
+            }
             None => Err(OAuthError::new("invalid_request", "Supply refresh_token.")),
         },
         _ => Err(OAuthError::new(
             "unsupported_grant_type",
-            "Use device_code or refresh_token.",
+            "Use authorization_code, device_code or refresh_token.",
         )),
     };
     match result {
         Ok(v) => {
-            tracing::info!(event = "token.refresh", outcome = "ok");
+            tracing::info!(event = "oauth.token", grant_type=%body.grant_type, outcome = "ok");
             let mut r = Json(v).into_response();
             no_store(&mut r);
             r
@@ -131,7 +166,7 @@ async fn revoke(State(state): State<AppState>, Form(body): Form<Revoke>) -> Resp
 async fn metadata(State(state): State<AppState>) -> Json<Value> {
     let service = service(&state);
     Json(
-        json!({"issuer":service.origin,"token_endpoint":format!("{}/oauth/token",service.origin),"device_authorization_endpoint":format!("{}/oauth/device_authorization",service.origin),"revocation_endpoint":format!("{}/oauth/revoke",service.origin),"grant_types_supported":["urn:ietf:params:oauth:grant-type:device_code","refresh_token"],"token_endpoint_auth_methods_supported":["none"],"response_types_supported":[],"scopes_supported":SCOPES}),
+        json!({"issuer":service.origin,"authorization_endpoint":format!("{}/oauth/authorize",service.origin),"registration_endpoint":format!("{}/oauth/register",service.origin),"token_endpoint":format!("{}/oauth/token",service.origin),"device_authorization_endpoint":format!("{}/oauth/device_authorization",service.origin),"revocation_endpoint":format!("{}/oauth/revoke",service.origin),"grant_types_supported":["authorization_code","urn:ietf:params:oauth:grant-type:device_code","refresh_token"],"token_endpoint_auth_methods_supported":["none"],"response_types_supported":["code"],"code_challenge_methods_supported":["S256"],"authorization_response_iss_parameter_supported":true,"scopes_supported":SCOPES}),
     )
 }
 async fn resource(State(state): State<AppState>) -> Json<Value> {
@@ -139,6 +174,99 @@ async fn resource(State(state): State<AppState>) -> Json<Value> {
     Json(
         json!({"resource":service.resource(),"authorization_servers":[service.origin],"scopes_supported":SCOPES,"bearer_methods_supported":["header"]}),
     )
+}
+async fn register(State(state): State<AppState>, Json(body): Json<Registration>) -> Response {
+    match service(&state).register(body).await {
+        Ok(value) => {
+            let mut r = (StatusCode::CREATED, Json(value)).into_response();
+            no_store(&mut r);
+            r
+        }
+        Err(error) => failure(error),
+    }
+}
+async fn authorize(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(request): Query<AuthorizationRequest>,
+) -> Response {
+    let service = service(&state);
+    if let Err(error) = service.validate_authorization(&request).await {
+        return failure(error);
+    }
+    let actor = match service.auth.require_session(&headers).await {
+        Ok(actor) => actor,
+        Err(_) => {
+            let query = match serde_urlencoded::to_string(&request) {
+                Ok(query) => query,
+                Err(_) => {
+                    return failure(OAuthError::new(
+                        "invalid_request",
+                        "Invalid authorization request.",
+                    ));
+                }
+            };
+            let mut url = url::Url::parse(&format!("{}/signin", service.origin)).unwrap();
+            url.query_pairs_mut()
+                .append_pair("return", &format!("/oauth/authorize?{query}"));
+            return Redirect::to(url.as_str()).into_response();
+        }
+    };
+    match service.begin_authorization(&actor, request).await {
+        Ok(request) => {
+            let mut r = Html(include_str!("authorization.html").replace("{{REQUEST}}", &request))
+                .into_response();
+            no_store(&mut r);
+            r.headers_mut().insert(header::CONTENT_SECURITY_POLICY,HeaderValue::from_static("default-src 'none'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"));
+            r
+        }
+        Err(error) => failure(error),
+    }
+}
+#[derive(Deserialize)]
+struct PendingRequest {
+    request: String,
+}
+async fn authorization_info(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<PendingRequest>,
+) -> Response {
+    let service = service(&state);
+    let result = async {
+        let actor = service.auth.require_session(&headers).await?;
+        service.authorization_info(&actor, &query.request).await
+    }
+    .await;
+    match result {
+        Ok(value) => {
+            let mut r = Json(value).into_response();
+            no_store(&mut r);
+            r
+        }
+        Err(error) => failure(error),
+    }
+}
+async fn authorization_consent(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(consent): Json<CodeConsent>,
+) -> Response {
+    let service = service(&state);
+    let result = async {
+        service.auth.check_origin(&headers)?;
+        let actor = service.auth.require_session(&headers).await?;
+        service.authorize_code(&actor, consent).await
+    }
+    .await;
+    match result {
+        Ok(redirect) => {
+            let mut r = Json(json!({"redirect":redirect})).into_response();
+            no_store(&mut r);
+            r
+        }
+        Err(error) => failure(error),
+    }
 }
 #[derive(Deserialize)]
 struct Code {
@@ -281,13 +409,13 @@ async fn device_page(
     }
     let mut r = Html(DEVICE_HTML).into_response();
     no_store(&mut r);
-    r.headers_mut().insert(header::CONTENT_SECURITY_POLICY,HeaderValue::from_static("default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'"));
+    r.headers_mut().insert(header::CONTENT_SECURITY_POLICY,HeaderValue::from_static("default-src 'none'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'"));
     r
 }
 async fn connected_page() -> Response {
     let mut response = Html(CONNECTED_HTML).into_response();
     no_store(&mut response);
-    response.headers_mut().insert(header::CONTENT_SECURITY_POLICY,HeaderValue::from_static("default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'"));
+    response.headers_mut().insert(header::CONTENT_SECURITY_POLICY,HeaderValue::from_static("default-src 'none'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'"));
     response
 }
 
@@ -305,11 +433,28 @@ pub fn install(builder: &mut ServerBuilder, service: &TokenService) {
         5,
         Duration::from_secs(60),
     ));
+    builder.rate_rule(pf_serve::RateRule::per_ip(
+        "oauth-register",
+        "oauth-register",
+        10,
+        Duration::from_secs(60),
+    ));
+    builder.workspace(
+        Router::new()
+            .route("/oauth/register", post(register))
+            .layer(axum::extract::DefaultBodyLimit::max(8192))
+            .route_layer(pf_serve::ratelimit::layer("oauth-register")),
+    );
     builder.workspace(
         Router::new()
             .route("/oauth/device_authorization", post(device))
             .route("/oauth/token", post(token))
             .route("/oauth/revoke", post(revoke))
+            .route("/oauth/authorize", get(authorize))
+            .route(
+                "/oauth/consent",
+                get(authorization_info).post(authorization_consent),
+            )
             .route_layer(pf_serve::ratelimit::layer("oauth")),
     );
     builder.workspace(
@@ -317,6 +462,7 @@ pub fn install(builder: &mut ServerBuilder, service: &TokenService) {
             .route("/.well-known/oauth-authorization-server", get(metadata))
             .route("/.well-known/openid-configuration", get(metadata))
             .route("/.well-known/oauth-protected-resource", get(resource))
+            .route("/.well-known/oauth-protected-resource/mcp", get(resource))
             .route("/device", get(device_page))
             .route("/api/agents/consent", get(consent_info).post(approve))
             .route("/api/agents/personal", post(personal))
@@ -326,7 +472,7 @@ pub fn install(builder: &mut ServerBuilder, service: &TokenService) {
     );
 }
 
-const DEVICE_HTML: &str = r#"<!doctype html><meta name="viewport" content="width=device-width"><title>Connect an agent · partifactory</title><style>body{font:17px system-ui;max-width:36rem;margin:2rem auto;padding:1rem}input,button,select{font:inherit;padding:.7rem}label{display:block;margin:1rem 0}button{min-height:48px}fieldset{border:0;padding:0}</style><h1>Connect an agent</h1><form id="lookup"><label>Device code <input id="code" required maxlength="9" placeholder="XXXX-XXXX" autocomplete="off"></label><button>Continue</button></form><section id="consent" hidden><h2 id="agent"></h2><p>Agent names are unverified.</p><p id="origin"></p><p id="network-warning" hidden>This request came from a different network. Only approve a device you recognize.</p><p id="warning" hidden>Only approve if you just asked an agent to connect.</p><fieldset id="scopes"></fieldset><label>Space <select id="space"></select></label><label>Connection lifetime <select id="days"><option value="30">30 days</option><option value="90" selected>90 days</option><option value="365">1 year</option></select></label><button id="allow">Allow</button> <button id="deny">Deny</button></section><p role="status" id="status"></p><script>
+const DEVICE_HTML: &str = r#"<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Connect an agent · partifactory</title><link rel="stylesheet" href="/_pf/tokens.css"><link rel="stylesheet" href="/_pf/workspace.css"><link rel="icon" href="/_pf/icon.svg"><style>.oauth{max-width:720px}.oauth label{display:block;padding:0;margin:16px 0}.oauth fieldset{border:0;padding:0;margin:16px 0}.oauth fieldset label{margin:8px 0}.oauth legend{font-weight:600}.oauth input:not([type=checkbox]){display:block;width:100%;box-sizing:border-box;margin-top:6px;padding:10px 12px;border:1px solid var(--pf-rule-strong);border-radius:var(--pf-r-2);background:var(--pf-raised);color:var(--pf-ink)}.oauth select{display:block;margin-top:6px}.oauth button{min-height:44px}.oauth #allow{background:var(--pf-signal);border-color:var(--pf-signal);color:var(--pf-on-signal)}.oauth pre{white-space:pre-wrap;overflow-wrap:anywhere}.oauth #redirect-host{font-weight:600;overflow-wrap:anywhere}.oauth .brand{color:inherit;font-family:var(--pf-font-mono)}</style><main class="page setup-page oauth"><a class="brand" href="/">partifactory</a><section class="workspace-panel"><h1>Connect an agent</h1><form id="lookup"><label>Device code <input id="code" required maxlength="9" placeholder="XXXX-XXXX" autocomplete="off"></label><button>Continue</button></form><section id="consent" hidden><h2 id="agent"></h2><p>Agent names are unverified.</p><p id="origin"></p><p id="network-warning" hidden>This request came from a different network. Only approve a device you recognize.</p><p id="warning" hidden>Only approve if you just asked an agent to connect.</p><fieldset id="scopes"></fieldset><label>Space <select id="space"></select></label><label>Connection lifetime <select id="days"><option value="30">30 days</option><option value="90" selected>90 days</option><option value="365">1 year</option></select></label><button id="allow">Allow</button> <button id="deny">Deny</button></section><p role="status" id="status"></p></section></main><script>
 const $=s=>document.querySelector(s),status=$('#status');$('#code').value=new URLSearchParams(location.search).get('code')||'';
 async function api(path,body){const r=await fetch(path,body?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}:{}),v=await r.json();if(!r.ok)throw Error(v.error_description||v.error?.message||'Please try again.');return v}
 const decode=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));const encode=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
@@ -335,7 +481,7 @@ let info;$('#lookup').onsubmit=async e=>{e.preventDefault();try{info=await api('
 async function decide(allow){try{const body={code:$('#code').value,scopes:[...document.querySelectorAll('#scopes input:checked')].map(i=>i.value),spaces:[$('#space').value],lifetime_days:Number($('#days').value),allow};try{await api('/api/agents/consent',body)}catch(e){if(!allow||!e.message.includes('passkey'))throw e;await stepup();await api('/api/agents/consent',body)}status.textContent=allow?'Agent connected. You can return to your terminal.':'Request denied.';$('#consent').hidden=true}catch(e){status.textContent=e.message}}
 $('#allow').onclick=()=>decide(true);$('#deny').onclick=()=>decide(false);
 </script>"#;
-const CONNECTED_HTML: &str = r#"<!doctype html><meta name="viewport" content="width=device-width"><title>Connected agents · partifactory</title><style>body{font:17px system-ui;max-width:40rem;margin:2rem auto;padding:1rem}button,input,select{font:inherit;padding:.6rem}label{display:block;margin:1rem 0}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style><h1>Connected agents</h1><div id="agents"></div><h2>New personal token</h2><form id="new"><label>Agent name <input id="name" maxlength="40" required></label><label>Scopes <input id="scopes" value="parts:read parts:write data:read data:write" required></label><label>Spaces (IDs or slugs, separated by spaces) <input id="spaces" placeholder="~your-name" required></label><label>Days <input id="days" type="number" min="1" max="365" value="30"></label><button>Create personal token</button></form><pre id="token"></pre><p role="status" id="status"></p><script>
+const CONNECTED_HTML: &str = r#"<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Connected agents · partifactory</title><link rel="stylesheet" href="/_pf/tokens.css"><link rel="stylesheet" href="/_pf/workspace.css"><link rel="icon" href="/_pf/icon.svg"><style>.oauth{max-width:720px}.oauth label{display:block;padding:0;margin:16px 0}.oauth fieldset{border:0;padding:0;margin:16px 0}.oauth fieldset label{margin:8px 0}.oauth legend{font-weight:600}.oauth input:not([type=checkbox]){display:block;width:100%;box-sizing:border-box;margin-top:6px;padding:10px 12px;border:1px solid var(--pf-rule-strong);border-radius:var(--pf-r-2);background:var(--pf-raised);color:var(--pf-ink)}.oauth select{display:block;margin-top:6px}.oauth button{min-height:44px}.oauth #allow{background:var(--pf-signal);border-color:var(--pf-signal);color:var(--pf-on-signal)}.oauth pre{white-space:pre-wrap;overflow-wrap:anywhere}.oauth #redirect-host{font-weight:600;overflow-wrap:anywhere}.oauth .brand{color:inherit;font-family:var(--pf-font-mono)}</style><main class="page setup-page oauth"><a class="brand" href="/">partifactory</a><section class="workspace-panel"><h1>Connected agents</h1><div id="agents"></div><h2>New personal token</h2><form id="new"><label>Agent name <input id="name" maxlength="40" required></label><label>Scopes <input id="scopes" value="parts:read parts:write data:read data:write" required></label><label>Spaces (IDs or slugs, separated by spaces) <input id="spaces" placeholder="~your-name" required></label><label>Days <input id="days" type="number" min="1" max="365" value="30"></label><button>Create personal token</button></form><pre id="token"></pre><p role="status" id="status"></p></section></main><script>
 const $=s=>document.querySelector(s);async function api(path,body){let r=await fetch(path,body?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}:{}),v=await r.json();if(!r.ok)throw Error(v.error_description||'Please sign in and try again.');return v}
 const decode=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));const encode=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 async function load(){let list=await api('/api/agents');$('#agents').replaceChildren();for(let a of list){let row=document.createElement('p'),button=document.createElement('button');row.append(document.createTextNode(a.agent_name+' · '+a.kind+' · '+JSON.parse(a.scopes).join(', ')+' '));button.textContent=a.revoked_at?'Revoked':'Revoke';button.disabled=!!a.revoked_at;button.onclick=async()=>{await api('/api/agents/'+a.id+'/revoke',{});button.textContent='Undo';button.onclick=async()=>{await api('/api/agents/'+a.id+'/revoke',{undo:true});load()};setTimeout(load,10000)};row.append(button);$('#agents').append(row)}}

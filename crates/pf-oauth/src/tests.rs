@@ -455,3 +455,218 @@ async fn consent_cannot_widen_scopes_or_cross_personal_spaces() {
         second.user_id
     );
 }
+mod authorization_code {
+    use super::*;
+    use crate::authorization::{AuthorizationRequest, CodeConsent, CodeExchange, Registration};
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+
+    const VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    fn challenge(verifier: &str) -> String {
+        URL_SAFE_NO_PAD.encode(pf_auth::secret_hash(verifier))
+    }
+    async fn client(service: &TokenService, redirect: &str) -> String {
+        let out = service
+            .register(Registration {
+                client_name: "Generic MCP client".into(),
+                redirect_uris: vec![redirect.into()],
+                application_type: None,
+                // Requested secrets and extra grants are replaced, not refused (RFC 7591 §3.2.1).
+                token_endpoint_auth_method: Some("client_secret_post".into()),
+                grant_types: Some(vec!["authorization_code".into(), "refresh_token".into()]),
+                response_types: Some(vec!["code".into()]),
+            })
+            .await
+            .unwrap();
+        assert_eq!(out["token_endpoint_auth_method"], "none");
+        out["client_id"].as_str().unwrap().to_owned()
+    }
+    fn request(client_id: &str, redirect: &str, resource: Option<&str>) -> AuthorizationRequest {
+        AuthorizationRequest {
+            response_type: "code".into(),
+            client_id: client_id.into(),
+            redirect_uri: redirect.into(),
+            code_challenge: challenge(VERIFIER),
+            code_challenge_method: "S256".into(),
+            resource: resource.map(str::to_owned),
+            // Unpublished names such as offline_access are ignored, not fatal.
+            scope: "parts:read parts:write offline_access".into(),
+            state: Some("xyz".into()),
+        }
+    }
+    /// Consent through the browser path and return the redirect's query pairs.
+    async fn consent(
+        service: &TokenService,
+        actor: &SessionActor,
+        req: AuthorizationRequest,
+        allow: bool,
+    ) -> std::collections::BTreeMap<String, String> {
+        let pending = service.begin_authorization(actor, req).await.unwrap();
+        let info = service.authorization_info(actor, &pending).await.unwrap();
+        assert_eq!(info["agent_name"], "Generic MCP client");
+        let redirect = service
+            .authorize_code(
+                actor,
+                CodeConsent {
+                    request: pending,
+                    scopes: scopes("parts:read parts:write").unwrap(),
+                    spaces: ownspace(actor),
+                    lifetime_days: 30,
+                    allow,
+                },
+            )
+            .await
+            .unwrap();
+        url::Url::parse(&redirect)
+            .unwrap()
+            .query_pairs()
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect()
+    }
+    fn exchange(client_id: &str, code: &str, redirect: &str, verifier: &str) -> CodeExchange {
+        CodeExchange {
+            client_id: client_id.into(),
+            code: code.into(),
+            redirect_uri: redirect.into(),
+            code_verifier: verifier.into(),
+            resource: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn loopback_client_connects_with_s256_and_any_port() {
+        let (_db, service) = setup();
+        let person = actor(&service, "first").await;
+        let id = client(&service, "http://127.0.0.1:3118/callback").await;
+        // Native clients pick their port at run time.
+        let redirect = "http://127.0.0.1:52011/callback";
+        let mcp = format!("{}mcp", service.resource());
+        let q = consent(&service, &person, request(&id, redirect, Some(&mcp)), true).await;
+        assert_eq!(q["iss"], service.origin);
+        assert_eq!(q["state"], "xyz");
+        let token = service
+            .exchange_code(exchange(&id, &q["code"], redirect, VERIFIER))
+            .await
+            .unwrap();
+        let resolved = service.resolve(&token.access_token).await.unwrap();
+        assert_eq!(resolved.principal.user_id, person.user_id);
+        assert_eq!(token.scope, "parts:read parts:write");
+        // Refresh is bound to the registered public client.
+        let refresh = token.refresh_token.unwrap();
+        assert!(
+            service
+                .refresh_client(&refresh, None, Some("someone-else"))
+                .await
+                .is_err()
+        );
+        service
+            .refresh_client(&refresh, None, Some(&id))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn codes_reject_wrong_verifier_client_redirect_resource_and_replay() {
+        let (_db, service) = setup();
+        let person = actor(&service, "first").await;
+        let redirect = "https://agent.example.com/callback";
+        let id = client(&service, redirect).await;
+        let other = client(&service, redirect).await;
+        let q = consent(&service, &person, request(&id, redirect, None), true).await;
+        let code = q["code"].clone();
+        let wrong_verifier = "x".repeat(43);
+        for bad in [
+            exchange(&id, &code, redirect, &wrong_verifier),
+            exchange(&other, &code, redirect, VERIFIER),
+            exchange(&id, &code, "https://agent.example.com/other", VERIFIER),
+            CodeExchange {
+                resource: Some("https://evil.example.com/".into()),
+                ..exchange(&id, &code, redirect, VERIFIER)
+            },
+        ] {
+            assert!(service.exchange_code(bad).await.is_err());
+        }
+        let token = service
+            .exchange_code(exchange(&id, &code, redirect, VERIFIER))
+            .await
+            .unwrap();
+        // Replay fails and revokes the connection the code created.
+        assert_eq!(
+            service
+                .exchange_code(exchange(&id, &code, redirect, VERIFIER))
+                .await
+                .unwrap_err()
+                .error,
+            "invalid_grant"
+        );
+        assert!(service.resolve(&token.access_token).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn authorization_requests_are_validated_before_sign_in() {
+        let (_db, service) = setup();
+        let redirect = "https://agent.example.com/callback";
+        let id = client(&service, redirect).await;
+        let good = request(&id, redirect, None);
+        service.validate_authorization(&good).await.unwrap();
+        let plain = AuthorizationRequest {
+            code_challenge_method: "plain".into(),
+            code_challenge: VERIFIER.into(),
+            ..good.clone()
+        };
+        let unregistered = AuthorizationRequest {
+            redirect_uri: "https://evil.example.com/callback".into(),
+            ..good.clone()
+        };
+        let foreign = AuthorizationRequest {
+            resource: Some("https://other.example.com/".into()),
+            ..good.clone()
+        };
+        let token = AuthorizationRequest {
+            response_type: "token".into(),
+            ..good.clone()
+        };
+        let unknown = AuthorizationRequest {
+            client_id: "pf_client_UNKNOWN".into(),
+            ..good.clone()
+        };
+        for bad in [plain, unregistered, foreign, token, unknown] {
+            assert!(service.validate_authorization(&bad).await.is_err());
+        }
+        for unsafe_uri in [
+            "http://agent.example.com/cb",
+            "https://a.example.com/cb#frag",
+            "https://u:p@a.example.com/cb",
+            "https://*.example.com/cb",
+            "javascript:alert(1)",
+        ] {
+            let r = service
+                .register(Registration {
+                    client_name: "x".into(),
+                    redirect_uris: vec![unsafe_uri.into()],
+                    application_type: None,
+                    token_endpoint_auth_method: None,
+                    grant_types: None,
+                    response_types: None,
+                })
+                .await;
+            assert!(r.is_err(), "{unsafe_uri} registered");
+        }
+    }
+
+    #[tokio::test]
+    async fn consent_belongs_to_one_session_and_denial_issues_no_code() {
+        let (_db, service) = setup();
+        let first = actor(&service, "first").await;
+        let second = actor(&service, "second").await;
+        let redirect = "https://agent.example.com/callback";
+        let id = client(&service, redirect).await;
+        let pending = service
+            .begin_authorization(&first, request(&id, redirect, None))
+            .await
+            .unwrap();
+        assert!(service.authorization_info(&second, &pending).await.is_err());
+        let q = consent(&service, &first, request(&id, redirect, None), false).await;
+        assert_eq!(q["error"], "access_denied");
+        assert!(!q.contains_key("code"));
+    }
+}
