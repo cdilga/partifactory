@@ -551,7 +551,7 @@ The link handed out is always **partifactory's own** `parts.<domain>/i/<id>`. Op
 
 **One invite, three ways to hand it over** (the admin, 2026-10-26, decision 61). The invite sheet offers **Copy link**, **QR code** (rendered in the sheet, for someone standing next to you) and **Email**, and the invite picks the account it makes:
 - **partifactory only**: a local passkey account (below). Link and QR enrol through the native flow; Email is sent by partifactory's optional `EmailSender` adapter (`[email]`, SMTP, credentials from `_FILE`).
-- **IdP account** (needs a provisioner): link and QR open the IdP's enrolment flow, which creates an **external** user in the IdP's `partifactory` group; Email has partifactory create that user by API and the IdP send its own set-up email (or, if the IdP can't by API, `[email]` sends the IdP's recovery link).
+- **IdP account** (needs a provisioner): link and QR open an IdP invitation whose enrolment flow creates an **external** user in the IdP's `partifactory` group; Email sends that same link through `[email]` (recommended after the spike, pending the admin: the alternative, where the IdP sends the mail itself, needs a runtime account that could mint a recovery link for any user).
 - Either way the person lands on the part with the invite's grants applied. With neither a provider that sends email nor `[email]`, Email is hidden and the sheet says why.
 
 **Native invites with local passkey accounts (no provisioner needed). In scope for v1, P2b.**
@@ -576,8 +576,8 @@ The link handed out is always **partifactory's own** `parts.<domain>/i/<id>`. Op
 - the provisioner gate audits every application for a binding, `provision` proposes missing ones for the admin to apply, and `doctor` and Health go red if an unbound application appears.
 
 **Adapter: the provisioner** (`[idp.provisioner] kind = "authentik" | "none"`), with capability flags `create_user_in_group`, `send_setup_email`, `deactivate_owned` and `audit_app_bindings`; each missing capability hides its UI and falls back to native. Authentik is the first implementation, with a public contract test suite for others.
-- partifactory records which IdP users it created. Removing one also deactivates them in the IdP; partifactory never writes to IdP users it didn't create. Resend set-up email and "new sign-in link" (IdP recovery, `POST /api/v3/core/users/{id}/recovery/`) work for those.
-- Authentik facts (docs read 2026-10-26, confirmed in the spike on the installed version, with the answers kept in site config): unbound applications are open to all; SCIM syncs only users who can access its application; the User Write stage sets user type (external) and one group; a recovery link can be made by API, and whether a recovery *email* can be triggered by API is unconfirmed.
+- partifactory records which IdP users enrolled through its invitations. Removing one removes them from the IdP's `partifactory` group (SCIM then deprovisions them); partifactory never writes to other IdP users. Lost credentials go through the IdP's own self-service recovery flow.
+- Authentik facts (spike on Authentik 2026.8, 2026-10-26; the deployment's answers are in site config): an unbound application, or one bound only to a policy that doesn't check membership, is open to all; SCIM syncs only users who can access its application and sends no `externalId` by default (a custom mapping adds the user UUID to match `sub_mode = user_uuid`); the User Write stage sets user type and one group; `recovery/` and `recovery_email/` exist but share `reset_user_password`, which is effectively global, so the runtime account never holds it.
 - The chosen group names, the application list and binding audit, the gate report and the IdP's flow names are deployment facts and live in `partifactory-site`, never here.
 
 Either way: pending invites show their status (sent, opened, enrolled, expired) and have one-click revoke, and invitees who never enrolled, and people inactive for 180 days, are listed for one-click cleanup.
@@ -2472,7 +2472,7 @@ CREATE TABLE comments (
   author_conn TEXT,
   author_link TEXT REFERENCES public_links(id),
   to_agent    INTEGER NOT NULL DEFAULT 0,
-  agent_state TEXT CHECK (agent_state IN ('open','claimed','answered')),  -- unused since decision 58 (no inbox); resolved = resolved_at
+  agent_state TEXT CHECK (agent_state IN ('open','claimed','answered')),  -- inbox (P3); resolved = resolved_at
   resolved_at INTEGER,
   resolved_by TEXT,
   created_at  INTEGER NOT NULL,
@@ -2495,7 +2495,7 @@ CREATE TABLE data_docs (                             -- window.storage + claude.
   PRIMARY KEY (part_id, scope, owner, collection, doc_id)
 ) STRICT, WITHOUT ROWID;
 
-CREATE TABLE data_leases (                           -- unused since decision 58; the table shipped in 0001 and stays
+CREATE TABLE data_leases (
   part_id    TEXT NOT NULL,
   collection TEXT NOT NULL,
   doc_id     TEXT NOT NULL,
