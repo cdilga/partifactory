@@ -103,6 +103,14 @@ pub fn for_op(op: &str) -> &'static [&'static str] {
             "storage_full",
             "internal",
         ],
+        "part_find" => &[
+            "invalid_input",
+            "unknown_field",
+            "unauthenticated",
+            "forbidden",
+            "rate_limited",
+            "internal",
+        ],
         "part_link_for" => &[
             "invalid_input",
             "unknown_field",

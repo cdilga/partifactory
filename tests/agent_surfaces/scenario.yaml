@@ -20,6 +20,13 @@
       }
     },
     {
+      "id": "find",
+      "op": "part_find",
+      "input": {
+        "query": "$name"
+      }
+    },
+    {
       "id": "edit-first",
       "op": "part_edit",
       "input": {

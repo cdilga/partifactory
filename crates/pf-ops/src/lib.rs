@@ -78,6 +78,13 @@ impl Registry {
             _ => def.scope,
         };
         ctx.require(scope)?;
+        if name == "part_find" {
+            // part_find narrows to the connection's spaces itself; it names no single part.
+            return self
+                .parts
+                .find(&ctx.caller.principal, parse(input)?, ctx.spaces.clone())
+                .await;
+        }
         if let Some(allowed) = &ctx.spaces {
             let allowed = allowed.clone();
             let input = input.clone();
@@ -105,6 +112,11 @@ impl Registry {
                             .ok_or_else(|| PfError::not_found("part not found"))?;
                         if policy.role(c, &p, &row.id, now)?.is_none() {
                             return Err(PfError::not_found("part not found"));
+                        }
+                        // A part shared with the person from someone else's personal space
+                        // is reachable at their role: no space to choose could include it.
+                        if pf_model::find::shared_with(c, &row.space_id, &p.user_id)? {
+                            return Ok(());
                         }
                         row.space_slug
                     };
@@ -335,7 +347,10 @@ pub struct ToolHints {
 impl ToolHints {
     fn for_op(name: &str) -> Self {
         Self {
-            read_only: matches!(name, "part_get" | "part_check" | "part_link_for"),
+            read_only: matches!(
+                name,
+                "part_get" | "part_find" | "part_check" | "part_link_for"
+            ),
             destructive: matches!(name, "part_edit" | "part_data"),
             idempotent: true,
             open_world: false,
@@ -362,7 +377,7 @@ macro_rules! operations {
 fn input_schema<T: schemars::JsonSchema>(name: &str) -> Value {
     let mut schema = serde_json::to_value(schemars::schema_for!(T)).expect("schema serializes");
     schema["required"] = match name {
-        "part_create" => json!([]),
+        "part_create" | "part_find" => json!([]),
         "part_data" | "part_link_for" => json!(["name", "action"]),
         "part_edit" => json!(["name", "request_id"]),
         _ => json!(["name"]),
@@ -469,8 +484,9 @@ pub struct LinkRequest {
     pub action: String,
 }
 operations! {
-    Create,"part_create","parts:write",pf_model::CreateRequest,"Reserve a name and create a new part. To change a part that already exists, use part_edit instead.","Create only when your person asks for something new; to change a part you made before, part_get it and part_edit it. Use live: after_check for pages.",json!({"name":"packing","title":"Packing","kind":"text","content":"Pack passports","request_id":"example-create"});
+    Create,"part_create","parts:write",pf_model::CreateRequest,"Reserve a name and create a new part. To change a part that already exists, use part_edit instead.","Create only when your person asks for something new; to change a part you made before, find it with part_find, then part_get and part_edit it. Use live: after_check for pages.",json!({"name":"packing","title":"Packing","kind":"text","content":"Pack passports","request_id":"example-create"});
     Edit,"part_edit","parts:write",pf_model::edit::EditRequest,"Change an existing part: ordered edits applied atomically, or one lifecycle mode.","Read the part with part_get first. For a small change, replace a short old_str copied byte-exact from content; for a large one, write the whole file with if_match set to files[path].hash. Retry with the same request_id.",json!({"name":"packing","request_id":"example-edit","edits":[{"op":"replace","old_str":"passports","new_str":"passports and chargers"}]});
+    Find,"part_find","parts:read",pf_model::FindRequest,"Find the parts your person can open: their own, shared with them, and public ones. With no query, the most recently changed.","Use it to find a part you or your person made earlier, then part_get and part_edit it by name. Match on words from its title, name, description or tags.",json!({"query":"packing list"});
     Get,"part_get","parts:read",pf_model::GetRequest,"Read source, history, builds and runtime errors.","A part's name is the first label of its link: https://<name>-part.<domain>/. Use file and range for large parts.",json!({"name":"packing"});
     Data,"part_data","data:read",pf_model::data::PartDataRequest,"Read or change shared or personal documents and snapshots.","Use if_rev for compare-and-set; mutations need request_id.",json!({"name":"packing","action":"list"});
     Check,"part_check","parts:read",CheckRequest,"Render a part and report browser errors.","Use the mobile viewport unless checking a desktop layout.",json!({"name":"packing"});
@@ -496,6 +512,9 @@ mod tests {
                     }
                     "part_get" => {
                         parse::<pf_model::GetRequest>(v).unwrap();
+                    }
+                    "part_find" => {
+                        parse::<pf_model::FindRequest>(v).unwrap();
                     }
                     "part_data" => {
                         parse::<pf_model::data::PartDataRequest>(v).unwrap();

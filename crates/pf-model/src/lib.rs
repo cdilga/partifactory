@@ -13,6 +13,7 @@ pub mod data;
 pub mod edit;
 pub mod error;
 pub mod events;
+pub mod find;
 pub mod idem;
 pub mod jcs;
 pub mod lifecycle;
@@ -28,6 +29,7 @@ pub mod version;
 pub use comments::CommentsRequest;
 pub use create::{CreateRequest, FileInput, FileMap, PutRequest};
 pub use error::PfError;
+pub use find::FindRequest;
 pub use read::GetRequest;
 pub use share::ShareRequest;
 

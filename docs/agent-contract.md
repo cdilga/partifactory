@@ -28,7 +28,7 @@ Discovery documents never list parts, spaces or people.
 
 ## Connecting
 
-Every surface takes the same token as `Authorization: Bearer <token>`. A token belongs to one **connection**: you, acting for one person, in the spaces and with the scopes they allowed. Everything you write is labelled "<agent> for <person>".
+Every surface takes the same token as `Authorization: Bearer <token>`. A token belongs to one **connection**: you, acting for one person, in the spaces and with the scopes they allowed. Parts other people shared with your person are always in reach, at your person's role on each. Everything you write is labelled "<agent> for <person>".
 
 **A person connects you once. You can't get a token on your own, by design.** Browser sign-in and the device code both wait for a person to tap Allow. If you can't open a browser for them, send them the device-code link (below). There are no long-lived tokens: every connection uses one-hour access tokens and rotating refresh tokens.
 
@@ -40,7 +40,7 @@ Every surface takes the same token as `Authorization: Bearer <token>`. A token b
 
 | Scope | Allows |
 | --- | --- |
-| `parts:read` | `part_get`, `part_check`, `part_link_for` |
+| `parts:read` | `part_find`, `part_get`, `part_check`, `part_link_for` |
 | `parts:write` | `part_create`, `part_edit` (except delete and undelete), and `part_data` `snapshot_list`, `snapshot_restore` and `reset` |
 | `parts:delete` | `part_edit {delete: true}` and `{undelete: true}` |
 | `data:read`, `data:write` | `part_data` `get`/`list` and `set`/`delete`; with `data:read`, `part_check` renders against the real shared data |
@@ -156,6 +156,24 @@ A build failure is not an error: the call succeeds with `build.status: "failed"`
 → {"name":"packing-list","url":"https://packing-list-part.<domain>/","head":2,"live":2,"build":{"id":42,"status":"ok","warnings":[],"errors":[]},
    "check":{"version":2,"passed":true,"blank":false,"height":180,"errors":[],"console":[],"failed_requests":[],"actions":[],"timing":{"ready_ms":null,"total_ms":910},
             "screenshot":{"url":"https://parts.<domain>/api/v1/screenshots/913","expires_at":"2026-10-23T14:20:00Z","width":390,"height":844}}}
+```
+
+<!-- pf:op part_find -->
+### `part_find`
+Find the parts your person can open: their own, the ones shared with them (including the household's `family` space), and any with an active public link. With no `query`, it lists the most recently changed. It never lists parts outside your connection's spaces unless they're public.
+
+| Field | Type | Req | Default | Meaning |
+| --- | --- | --- | --- | --- |
+| `kind` | string | no | — | Only parts of this kind: `html`, `markdown`, `text`, `svg`, `code` or `files`. |
+| `limit` | integer | no | — | How many to return, 1–100 (default 20). |
+| `query` | string | no | — | Words to match in the name, title, description or tags. Leave it out for the most recently changed parts. |
+| `scope` | string | no | — | `all` (the default), `mine` (your person's own parts) or `shared` (shared with them, or public). |
+
+Output: `{parts: [{name, url, title, kind, space, owner, role, public, live, updated_at}], more}`, newest first. `role` is your person's role on the part (`view`, `comment`, `edit` or `manage`), or `null` for a public part they can only open by its link; `part_get` and `part_edit` need a role. `more` is `true` when there are more matches than `limit`: narrow the query. Every word of `query` must appear in the part's name, title, description or tags (case doesn't matter).
+Errors: `invalid_input`, `unknown_field`, `unauthenticated`, `forbidden`, `rate_limited`, `internal`.
+```json
+{"query":"packing"}
+→ {"parts":[{"name":"packing-list","url":"https://packing-list-part.<domain>/","title":"Packing list","kind":"markdown","space":"~alex","owner":"alex","role":"manage","public":false,"live":2,"updated_at":"2026-10-23T09:12:44Z"}],"more":false}
 ```
 
 <!-- pf:op part_get -->
@@ -368,7 +386,7 @@ A contribute link is the only way guests write, and only the admin can make one 
 
 ## Rules
 
-**Change the part you already made.** When your person asks for changes to something you (or anyone) made, edit that part: `part_get` it, then `part_edit` it, so the link they already have shows the new version and its history stays in one place. Make a new part only when they ask for a new one, or ask for a copy (`part_create {from}`). In a new conversation, get the name from the link they give you: `https://<name>-part.<domain>/` is the part `<name>`. If you can't tell which part they mean, ask for its link rather than starting over.
+**Change the part you already made.** When your person asks for changes to something you (or anyone) made, edit that part: `part_get` it, then `part_edit` it, so the link they already have shows the new version and its history stays in one place. Make a new part only when they ask for a new one, or ask for a copy (`part_create {from}`). In a new conversation, get the name from the link they give you (`https://<name>-part.<domain>/` is the part `<name>`), or find it with `part_find` by words from its title. If several match and you can't tell which they mean, show them the titles and ask rather than starting over.
 
 1. **Send a `request_id` on every write**, unique per intended change. On a timeout or network error, retry with the **same** `request_id` and the same arguments: you get the stored result with `replayed: true`. Only a committed write uses up its id: a write rejected before commit (any 4xx, such as `anchor_not_found` or `name_taken`) stored nothing, so you may resend the fixed call under the same id. Different arguments under an id that already committed get `request_id_reused`. The server keeps an id for 24 hours, so retry within that window; after it, the same id is a new write.
 2. **Edit with anchors.** Read with `part_get`, copy `old_str` exactly from `content`, keep it short but unique, and send `base_version` = the `head` you read. For a change that touches most of a file, send one `{op: "write", file, content, if_match}` with `if_match` = `files[file].hash` from `part_get` instead of many replaces. On `anchor_not_found` or `anchor_ambiguous`, nothing was saved: `details.context` and `details.lines` show the current text, so fix that edit (extend `old_str` until it's unique, or re-read with `part_get {file, range: lines}`) and resend the whole batch.
@@ -490,6 +508,6 @@ Later, `part_data {"name":"pixel","action":"list","prefix":"px:"}` shows what gu
 
 ## After Slice 1
 
-Not available yet, so don't call them: `part_find` (search), `part_watch` (the event feed), `design_system` (Jig); `append_to_section` block edits; `notes`, `render: "text"` and `advisories` in `part_get`; `update` in `part_edit`; `part_data` collections other than `__storage`; backends; the `tsx` kind; `part_link_for` actions other than `public_link` and `contribute`.
+Not available yet, so don't call them: `part_watch` (the event feed), `design_system` (Jig); `append_to_section` block edits; `notes`, `render: "text"` and `advisories` in `part_get`; `update` in `part_edit`; `part_data` collections other than `__storage`; backends; the `tsx` kind; `part_link_for` actions other than `public_link` and `contribute`.
 
 Coming right after Slice 1: **previews**. Every part gets an automatic screenshot poster, used as its gallery thumbnail and as the `og:image` of its public links. You may also give a part a short muted `og:video` clip with a `preview` field on `part_create`/`part_edit {meta}`, either your own MP4 or `"record"` with `actions` that show it working. Check the clip with `part_check {record: true}` before you share the link. A clip is optional, so consider one for anything animated or interactive. Until then, don't send `preview`.

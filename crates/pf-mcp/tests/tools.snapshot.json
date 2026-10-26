@@ -1,7 +1,7 @@
 [
   {
     "name": "part_create",
-    "description": "Reserve a name and create a new part. To change a part that already exists, use part_edit instead. Create only when your person asks for something new; to change a part you made before, part_get it and part_edit it. Use live: after_check for pages.",
+    "description": "Reserve a name and create a new part. To change a part that already exists, use part_edit instead. Create only when your person asks for something new; to change a part you made before, find it with part_find, then part_get and part_edit it. Use live: after_check for pages.",
     "inputSchema": {
       "$defs": {
         "FileInput": {
@@ -563,6 +563,59 @@
     "annotations": {
       "readOnlyHint": false,
       "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "part_find",
+    "description": "Find the parts your person can open: their own, shared with them, and public ones. With no query, the most recently changed. Use it to find a part you or your person made earlier, then part_get and part_edit it by name. Match on words from its title, name, description or tags.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "The `part_find` arguments.",
+      "properties": {
+        "kind": {
+          "description": "Only parts of this kind: `html`, `markdown`, `text`, `svg`, `code` or `files`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "description": "How many to return, 1–100 (default 20).",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "query": {
+          "description": "Words to match in the name, title, description or tags. Leave it out for the most recently changed parts.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scope": {
+          "description": "`all` (the default), `mine` (your person's own parts) or `shared` (shared with them, or public).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [],
+      "title": "FindRequest",
+      "type": "object"
+    },
+    "outputSchema": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
     }
