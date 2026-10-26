@@ -21,7 +21,7 @@ Given only `https://parts.<domain>`, a fresh agent:
 | `/openapi.json` | OpenAPI 3.1 for every op; `operationId` = op name |
 | `/llms-full.txt` | this page plus every op's schema and examples |
 | `/.well-known/oauth-protected-resource` (also `/.well-known/oauth-protected-resource/mcp`) | RFC 9728: the resource `https://parts.<domain>/` and its authorization server |
-| `/.well-known/oauth-authorization-server` | RFC 8414: `authorization_endpoint`, `registration_endpoint`, `device_authorization_endpoint`, `token_endpoint`, `revocation_endpoint`, `scopes_supported` |
+| `/.well-known/oauth-authorization-server` | RFC 8414: `authorization_endpoint`, `registration_endpoint`, `device_authorization_endpoint`, `token_endpoint`, `revocation_endpoint`, `scopes_supported`, `client_id_metadata_document_supported` |
 | `/.well-known/mcp/server.json` | the MCP server description (`remotes: [{type: "streamable-http", url}]`) |
 
 Discovery documents never list parts, spaces or people.
@@ -54,7 +54,7 @@ A scope never gives you more than your person has: writing a part needs their `e
 ```
 claude mcp add --transport http partifactory https://parts.<domain>/mcp
 ```
-The first call gets the 401 above. A standard MCP client follows `resource_metadata` to the authorization server, registers itself (RFC 7591, public client, loopback or https redirect), opens the person's browser at `authorization_endpoint` with PKCE `S256`, and the person picks scopes and spaces and taps Allow. The redirect carries `code`, `state` and `iss`; the client exchanges the code at `token_endpoint` (`grant_type=authorization_code`, `resource` optional) and refreshes from then on. Any loopback port matches a registered loopback redirect.
+The first call gets the 401 above. A standard MCP client follows `resource_metadata` to the authorization server, identifies itself by a Client ID Metadata Document URL (CIMD, `client_id_metadata_document_supported`) or registers itself (RFC 7591, public client, loopback or https redirect), opens the person's browser at `authorization_endpoint` with PKCE `S256`, and the person picks scopes and spaces and taps Allow. The redirect carries `code`, `state` and `iss`; the client exchanges the code at `token_endpoint` (`grant_type=authorization_code`, `resource` optional) and refreshes from then on. Any loopback port matches a registered loopback redirect.
 Tools are the ops below, `arguments` is the op's input, and `structuredContent` is its output.
 
 **Device code** (RFC 8628). Use it when you have no browser: a chat agent, a CLI. `part login` does all of this for you. `client_id=part-cli` is the one client id for every device-code agent, whatever you are; you name yourself with `agent_name` (required, ≤ 40 characters) and `software`. Both `/oauth/*` endpoints take form-encoded bodies and answer JSON.
@@ -271,6 +271,7 @@ The comments beside a part, where people discuss it. Writing needs your person's
 | Field | Type | Req | Default | Meaning |
 | --- | --- | --- | --- | --- |
 | `action` | string | no | — | `list` (the default), `add` (a new thread), `reply`, `resolve`, `reopen` or `delete`. |
+| `block` | string | no | — | For `add` on a Markdown part: the block id (`part_get` `blocks`) the quote is in. |
 | `body` | string | no | — | The comment text, plain (for `add` and `reply`), up to 4000 characters. |
 | `id` | string | no | — | The thread (for `reply`, `resolve`, `reopen`) or comment (for `delete`) id. |
 | `name` | string | yes | — |  |

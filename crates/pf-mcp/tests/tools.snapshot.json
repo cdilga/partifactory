@@ -974,6 +974,13 @@
             "null"
           ]
         },
+        "block": {
+          "description": "For `add` on a Markdown part: the block id (`part_get` `blocks`) the quote is in.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "body": {
           "description": "The comment text, plain (for `add` and `reply`), up to 4000 characters.",
           "type": [

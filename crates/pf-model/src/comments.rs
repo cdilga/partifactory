@@ -28,6 +28,9 @@ pub struct CommentsRequest {
     /// For `add`: the exact text in the part the comment is about.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quote: Option<String>,
+    /// For `add` on a Markdown part: the block id (`part_get` `blocks`) the quote is in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block: Option<String>,
 }
 
 impl PartService {
@@ -118,12 +121,18 @@ fn change(
                 let (_, thread, _, _) = target()?;
                 (thread.clone(), Some(thread), None)
             } else {
-                let anchor = req
+                let quote = req
                     .quote
                     .as_deref()
                     .map(str::trim)
                     .filter(|q| !q.is_empty())
-                    .map(|q| json!({"quote": q.chars().take(500).collect::<String>()}).to_string());
+                    .map(|q| q.chars().take(500).collect::<String>());
+                let block = req
+                    .block
+                    .as_deref()
+                    .filter(|b| b.len() <= 16 && b.chars().all(|c| c.is_ascii_alphanumeric()));
+                let anchor = (quote.is_some() || block.is_some())
+                    .then(|| json!({"quote": quote, "block": block}).to_string());
                 (id.clone(), None, anchor)
             };
             let version: Option<String> = tx.query_row(
@@ -200,10 +209,10 @@ fn list(tx: &Connection, part_id: &str, p: &Principal, role: u8) -> Result<Value
         let mine = author.as_deref() == Some(p.user_id.as_str()) && conn == p.conn_id;
         let comment = json!({"id": id, "author": by, "body": body, "at": at, "mine": mine, "by_agent": conn.is_some()});
         if id == thread {
-            let quote = anchor
+            let anchor = anchor
                 .and_then(|a| serde_json::from_str::<Value>(&a).ok())
-                .and_then(|a| a["quote"].as_str().map(str::to_owned));
-            threads.push(json!({"id": id, "comment": comment, "quote": quote, "resolved": resolved.is_some(), "replies": []}));
+                .unwrap_or(Value::Null);
+            threads.push(json!({"id": id, "comment": comment, "quote": anchor["quote"], "block": anchor["block"], "resolved": resolved.is_some(), "replies": []}));
         } else if let Some(t) = threads.iter_mut().find(|t| t["id"] == thread.as_str()) {
             t["replies"].as_array_mut().expect("replies").push(comment);
         }
@@ -234,6 +243,7 @@ mod tests {
             body: body.map(Into::into),
             id: id.map(Into::into),
             quote: None,
+            block: None,
         }
     }
 

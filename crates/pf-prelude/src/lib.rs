@@ -13,6 +13,13 @@ pub const PRELUDE_JS: &str = include_str!("../js/prelude.js");
 pub const WRAPPER_JS: &str = include_str!("../js/wrapper.js");
 pub const WRAPPER_BR: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/wrapper.js.br"));
 
+/// The formatted-view editor (ProseMirror, decision 54), bundled from `editor/` by `editor/build.mjs`
+/// and loaded by the wrapper on the first Edit of a Markdown part.
+pub const EDITOR_JS: &str = include_str!("../js/editor.js");
+pub const EDITOR_BR: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/editor.js.br"));
+/// The `shared_blobs.label` of the editor.
+pub const EDITOR_LABEL: &str = "pf-editor.js";
+
 /// The `shared_blobs.label` of the prelude.
 pub const PRELUDE_LABEL: &str = "pf-prelude.js";
 /// The `shared_blobs.label` of the wrapper script.

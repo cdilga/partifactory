@@ -22,6 +22,11 @@ pub async fn seed(s: &PartHost) -> Result<(), PfError> {
             "text/javascript; charset=utf-8",
         ),
         ("pf-wrapper.css", css.as_bytes(), "text/css; charset=utf-8"),
+        (
+            pf_prelude::EDITOR_LABEL,
+            pf_prelude::EDITOR_JS.as_bytes(),
+            "text/javascript; charset=utf-8",
+        ),
         ("pf-wrapper-mono.woff2", pf_ui::MONO_FONT, "font/woff2"),
     ] {
         let put = s.deps().blobs.put(src)?;
@@ -85,6 +90,8 @@ pub async fn blob(s: PartHost, req: Request) -> Response {
         Some(pf_prelude::WRAPPER_BR)
     } else if hash == pf_blobs::sha256_hex(pf_ui::wrapper_css().as_bytes()) {
         Some(pf_ui::WRAPPER_CSS_BR)
+    } else if hash == pf_blobs::sha256_hex(pf_prelude::EDITOR_JS.as_bytes()) {
+        Some(pf_prelude::EDITOR_BR)
     } else {
         None
     };
@@ -234,6 +241,11 @@ pub async fn page(s: PartHost, req: Request) -> Response {
         ""
     };
     let script = format!("{}/b/{}", s.config().blob_origin(), s.wrapper_hash());
+    let editor = format!(
+        "{}/b/{}",
+        s.config().blob_origin(),
+        pf_blobs::sha256_hex(pf_prelude::EDITOR_JS.as_bytes())
+    );
     let css = format!(
         "{}/b/{}",
         s.config().blob_origin(),
@@ -252,7 +264,7 @@ pub async fn page(s: PartHost, req: Request) -> Response {
     }
     .tags(&s.config().workspace_origin());
     let body = format!(
-        "<!doctype html><html data-pf-part=\"{}\" data-pf-ws=\"{}\"{link_attr}{unsandboxed_attr}><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex,nofollow\">{og}<link rel=\"stylesheet\" href=\"{css}\"><link rel=\"manifest\" href=\"/_pf/manifest.webmanifest\"><link rel=\"icon\" href=\"/_pf/icon.svg\"><title>partifactory</title><script src=\"{script}\" defer></script></head><body><div id=\"pf-card\">{card}</div><noscript>Sign in to open</noscript></body></html>",
+        "<!doctype html><html data-pf-part=\"{}\" data-pf-ws=\"{}\" data-pf-editor=\"{editor}\"{link_attr}{unsandboxed_attr}><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex,nofollow\">{og}<link rel=\"stylesheet\" href=\"{css}\"><link rel=\"manifest\" href=\"/_pf/manifest.webmanifest\"><link rel=\"icon\" href=\"/_pf/icon.svg\"><title>partifactory</title><script src=\"{script}\" defer></script></head><body><div id=\"pf-card\">{card}</div><noscript>Sign in to open</noscript></body></html>",
         name,
         s.config().workspace_origin()
     );

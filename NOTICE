@@ -19,3 +19,13 @@ Vendored Leptos ecosystem crates (Leptos, either_of, reactive_graph,
 reactive_stores and tachys): Copyright (c) 2022 Greg Johnston.
 Licensed under the MIT License; full upstream license is at vendor/LICENSE.
 The temporary dependency-only patches are described in vendor/README.md.
+
+The formatted-view editor bundle (crates/pf-prelude/js/editor.js, built from
+crates/pf-prelude/editor) includes ProseMirror (prosemirror-model, -state,
+-view, -transform, -commands, -keymap, -history, -inputrules, -schema-list,
+-tables, -markdown, -dropcursor, -gapcursor): Copyright (C) 2015-2026 by Marijn
+Haverbeke and others, and markdown-it: Copyright (c) 2014 Vitaly Puzrin,
+Alex Kocharin, with their dependencies (entities, linkify-it, mdurl, punycode.js,
+uc.micro, orderedmap, rope-sequence, w3c-keyname). They are under the MIT or
+BSD-2-Clause licenses; each package's license is reproduced verbatim in
+crates/pf-prelude/editor/THIRD-PARTY-LICENSES.txt, which the build writes.

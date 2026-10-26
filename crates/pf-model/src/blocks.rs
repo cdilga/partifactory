@@ -332,17 +332,17 @@ pub fn reblock(
     pinned: Option<(usize, String)>,
 ) -> Vec<BlockRec> {
     let mut out = carry(old, old_text, new_text);
-    if let Some((start, id)) = pinned {
-        if let Some(slot) = out.iter().position(|b| b.start == start) {
-            // The replaced block keeps its id, wherever carry put it.
-            if let Some(other) = out.iter().position(|b| b.id == id) {
-                if other != slot {
-                    let fresh_id = out[slot].id.clone();
-                    out[other].id = fresh_id;
-                }
-            }
-            out[slot].id = id;
+    if let Some((start, id)) = pinned
+        && let Some(slot) = out.iter().position(|b| b.start == start)
+    {
+        // The replaced block keeps its id, wherever carry put it.
+        if let Some(other) = out.iter().position(|b| b.id == id)
+            && other != slot
+        {
+            let fresh_id = out[slot].id.clone();
+            out[other].id = fresh_id;
         }
+        out[slot].id = id;
     }
     out
 }

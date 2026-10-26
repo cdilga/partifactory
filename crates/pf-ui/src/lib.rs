@@ -364,6 +364,8 @@ struct CommentChange {
     action: String,
     body: Option<String>,
     id: Option<String>,
+    quote: Option<String>,
+    block: Option<String>,
 }
 async fn comments_change(
     State(s): State<AppState>,
@@ -374,7 +376,7 @@ async fn comments_change(
     match comments_run(
         &s,
         &headers,
-        json!({"name":name,"action":b.action,"body":b.body,"id":b.id}),
+        json!({"name":name,"action":b.action,"body":b.body,"id":b.id,"quote":b.quote,"block":b.block}),
     )
     .await
     {
@@ -500,7 +502,7 @@ async fn source_get(
                 .map_err(PfError::from)
             })
             .await?;
-        Ok::<_, PfError>(json!({"head":got["head"],"kind":got["kind"],"files":got["files"],"content":got["content"],"draft":draft.map(|(files,base)| json!({"files":files,"base":base}))}))
+        Ok::<_, PfError>(json!({"head":got["head"],"kind":got["kind"],"files":got["files"],"content":got["content"],"blocks":got["blocks"],"draft":draft.map(|(files,base)| json!({"files":files,"base":base}))}))
     }
     .await;
     match result {
@@ -511,8 +513,11 @@ async fn source_get(
 #[derive(Deserialize)]
 struct SourceSave {
     file: String,
-    content: String,
-    if_match: String,
+    /// A whole-file write, checked against `if_match` ...
+    content: Option<String>,
+    if_match: Option<String>,
+    /// ... or the formatted view's block ops, which rebase by block id.
+    ops: Option<Vec<Value>>,
 }
 async fn source_save(
     State(s): State<AppState>,
@@ -524,14 +529,42 @@ async fn source_save(
         let actor = auth(&s)?.require_session(&headers).await?;
         let part_id = editor_role(&s, &actor, &name).await?;
         let rid = format!("web-{}", pf_db::ids::new_id("r"));
+        let edits = match (b.ops, b.content) {
+            (Some(ops), None) if !ops.is_empty() && ops.len() <= 64 => ops
+                .into_iter()
+                .map(|mut op| {
+                    op["file"] = json!(b.file);
+                    op
+                })
+                .collect::<Vec<_>>(),
+            (None, Some(content)) => {
+                vec![json!({"op":"write","file":b.file,"content":content,"if_match":b.if_match})]
+            }
+            _ => return Err(PfError::invalid("ops", "send content or 1–64 block ops")),
+        };
+        let message = if edits[0]["op"] == "write" {
+            "Edited in the browser"
+        } else {
+            "Edited in the page"
+        };
         let out = pf_ops::Registry::new(parts(&s)?.clone())
-            .run(&editor_ctx(&actor, true), "part_edit", json!({"name":name,"edits":[{"op":"write","file":b.file,"content":b.content,"if_match":b.if_match}],"request_id":rid,"message":"Edited in the browser","wait":false}))
+            .run(
+                &editor_ctx(&actor, true),
+                "part_edit",
+                json!({"name":name,"edits":edits,"request_id":rid,"message":message,"wait":false}),
+            )
             .await?;
         let uid = actor.user_id.clone();
-        parts(&s)?.db.write(move |tx| {
-            tx.execute("DELETE FROM drafts WHERE user_id=?1 AND part_id=?2", pf_db::rusqlite::params![uid, part_id])?;
-            Ok::<_, PfError>(())
-        }).await?;
+        parts(&s)?
+            .db
+            .write(move |tx| {
+                tx.execute(
+                    "DELETE FROM drafts WHERE user_id=?1 AND part_id=?2",
+                    pf_db::rusqlite::params![uid, part_id],
+                )?;
+                Ok::<_, PfError>(())
+            })
+            .await?;
         tracing::info!(event = "part.edit", surface = "web", outcome = "ok");
         Ok::<_, PfError>(out)
     }
